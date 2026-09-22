@@ -482,8 +482,10 @@
       deleteLabel.append(deleteCheck, document.createTextNode(" 删除空夹")); deleteTd.appendChild(deleteLabel);
 
       const refTd = document.createElement("td"); refTd.className = "merge-reference";
-      refTd.textContent = g.reason || "手动添加";
+      const levelName = g.level === "high" ? "高置信" : (g.level === "medium" ? "待人工判断" : "");
+      refTd.textContent = (levelName ? `[ ${levelName} ] ` : "") + (g.reason || "手动添加");
       if (g.confidence) refTd.textContent += ` · ${Math.round(g.confidence * 100)}%`;
+      if (g.risk) refTd.textContent += ` · 风险：${g.risk}`;
       if (g.status && g.status !== "pending") refTd.textContent += ` · ${g.status}`;
       const actTd = document.createElement("td");
       const del = document.createElement("button"); del.className = "mini"; del.textContent = "删除行";
