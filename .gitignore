@@ -1,0 +1,16 @@
+# 凭据与个人数据 —— 请勿提交/分享
+secrets.json
+config.json
+data/
+server.log
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 备份 / 临时
+*.tmp
+*.bak
+bili_ck_profile/

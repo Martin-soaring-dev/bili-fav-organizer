@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>B站收藏夹整理</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">▶ B站收藏夹智能整理</div>
+    <div class="topbar-actions">
+      <button id="data-import-btn" class="btn mini-btn">📥 读取项目数据</button>
+      <button id="data-export-btn" class="btn mini-btn">📤 导出项目数据</button>
+      <button id="data-clear-btn" class="btn mini-btn danger">🗑 清除当前数据</button>
+      <select id="theme-mode" class="theme-mode" title="界面模式">
+        <option value="system">跟随系统</option>
+        <option value="dark">深色</option>
+        <option value="light">浅色</option>
+      </select>
+      <input id="data-file" type="file" accept=".json,application/json" style="display:none">
+    </div>
+    <div class="status-strip">
+      <span class="dot" id="conn-dot"></span>
+      <span id="conn-text">未连接</span>
+      <span class="sep">|</span>
+      <span>收藏夹 <b id="st-folders">-</b></span>
+      <span>视频 <b id="st-videos">-</b></span>
+      <span>已分析 <b id="st-analyzed">-</b></span>
+      <span>已定案 <b id="st-planned">-</b></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 左：日志区 -->
+    <aside class="logs" id="log-area">
+      <div class="panel-title">运行日志 <button id="clear-log" class="mini">清空</button></div>
+      <div class="log-body" id="log-body"></div>
+    </aside>
+
+    <!-- 右：操作面板 -->
+    <main class="panels">
+      <!-- 步骤 0：配置 -->
+      <section class="card">
+        <h2>⓿ 连接配置</h2>
+        <div class="grid2">
+          <label>浏览器
+            <select id="cfg-browser">
+              <option value="chrome">Chrome</option>
+              <option value="edge">Edge</option>
+              <option value="firefox">Firefox</option>
+            </select>
+          </label>
+          <label>模型接口 base_url
+            <input id="cfg-base-url" placeholder="https://api.deepseek.com/v1">
+          </label>
+          <label>模型名
+            <input id="cfg-model" placeholder="qwen3-8b">
+          </label>
+          <label>API Key
+            <input id="cfg-key" type="password" placeholder="(可留空若本地模型)">
+          </label>
+        </div>
+        <div class="hint">cookie 会自动从所选浏览器读取，需该浏览器已登录 bilibili.com。保存配置后即可开始。</div>
+        <div class="cookierow">
+          <label>Cookie 字符串（新版 Chrome 无法自动读取时，请在此粘贴）
+            <textarea id="cfg-cookie" rows="3" placeholder="SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx; ..."></textarea>
+          </label>
+          <div class="hint">
+            获取方法：Chrome 打开 bilibili.com 并登录 → 按 F12 → <b>Application/应用</b> → 左侧 <b>Cookies</b> →
+            选中 <b>https://www.bilibili.com</b> → 复制右侧所有 cookie 的「名称=值」，或用控制台执行
+            <code>document.cookie</code>（可只取 SESSDATA / bili_jct / DedeUserID 三项）。
+          </div>
+          <button id="save-cookie" class="btn">保存 Cookie</button>
+        </div>
+        <div class="row">
+          <button id="save-config" class="btn">保存配置</button>
+          <button id="test-cookie" class="btn ghost">测试 Cookie 读取</button>
+          <button id="test-llm" class="btn ghost">测试模型连接</button>
+          <button id="load-stats" class="btn ghost">刷新统计</button>
+        </div>
+      </section>
+
+      <!-- 扫码登录 -->
+      <section class="card">
+        <h2>🔑 获取 Cookie（扫码登录）</h2>
+        <p class="desc">用手机 B站 App 扫码登录，工具自动保存 Cookie。不涉及浏览器加密，无需手动复制。</p>
+        <div class="row">
+          <button id="qr-btn" class="btn primary">显示登录二维码</button>
+          <span class="muted" id="qr-status"></span>
+        </div>
+        <div id="qr-box" class="qr-box" style="display:none">
+          <img id="qr-img" alt="登录二维码">
+          <div class="qr-tip">请用 <b>手机 B站 App</b> 扫描二维码并确认登录</div>
+        </div>
+      </section>
+
+      <!-- 步骤 1：扫描 -->
+      <section class="card">
+        <h2>❶ 获取收藏明细</h2>
+        <p class="desc">读取全部收藏夹与视频（标题/简介/UP主）。<b>每页 20 条（B站接口上限，不可调）</b>。请求间隔可在右侧调整以避免风控；按收藏夹断点续扫，中途停止不会丢进度。</p>
+        <div class="row">
+          <button id="scan-btn" class="btn primary">开始扫描</button>
+          <button id="scan-stop" class="btn danger">停止</button>
+          <button id="folder-refresh" class="btn ghost">刷新收藏夹目录</button>
+          <button id="scan-tree-btn" class="btn ghost">选择扫描范围</button>
+          <span class="muted" id="scan-selection-summary">未加载目录</span>
+          <label class="inline-label">请求间隔
+            <select id="scan-interval">
+              <option value="2">2 秒</option>
+              <option value="3">3 秒</option>
+              <option value="4">4 秒</option>
+              <option value="5">5 秒</option>
+              <option value="6">6 秒</option>
+              <option value="7">7 秒</option>
+              <option value="8">8 秒</option>
+              <option value="9">9 秒</option>
+              <option value="10">10 秒</option>
+              <option value="20">20 秒</option>
+              <option value="30">30 秒</option>
+              <option value="60">60 秒</option>
+            </select>
+          </label>
+        </div>
+        <div class="progress" id="scan-progress" style="display:none">
+          <div class="bar"><div class="fill" id="scan-fill"></div></div>
+          <span class="prog-text" id="scan-text"></span>
+        </div>
+      </section>
+
+      <div class="route-tabs">
+        <button class="route-tab active" data-route="content-route">内容整理</button>
+        <button class="route-tab" data-route="folder-route">收藏夹整理</button>
+      </div>
+
+      <div id="folder-route" class="route-panel" style="display:none">
+      <!-- 收藏夹整理 -->
+      <section class="card">
+        <h2>🗂 合并组草稿</h2>
+        <p class="desc">可由 AI 根据收藏夹目录和代表内容生成候选合并组，然后在表格中编辑确认。</p>
+        <div class="row">
+          <button id="merge-ai" class="btn primary">生成 AI 合并建议</button>
+          <button id="merge-add" class="btn ghost">添加空白合并组</button>
+          <button id="merge-submit" class="btn danger">提交合并任务</button>
+          <span id="merge-ai-status" class="muted"></span>
+        </div>
+        <div id="merge-plan" class="merge-plan"></div>
+      </section>
+
+      <section class="card">
+        <h2>📋 已提交合并任务</h2>
+        <p class="desc">预览已提交的任务。如需调整，请修改上方草稿后重新提交。</p>
+        <div id="merge-task-summary" class="merge-task-summary"></div>
+        <div class="row">
+          <button id="merge-start" class="btn primary">执行已提交任务</button>
+          <button id="merge-stop" class="btn danger">停止</button>
+          <label class="inline-label">操作间隔
+            <select id="merge-interval">
+              <option value="1">1 秒</option><option value="2">2 秒</option>
+              <option value="3">3 秒</option><option value="5">5 秒</option>
+              <option value="10">10 秒</option>
+            </select>
+          </label>
+          <span id="merge-status" class="muted"></span>
+        </div>
+      </section>
+      </div>
+
+      <div id="content-route" class="route-panel">
+      <!-- 步骤 2：LLM 分析 -->
+      <section class="card">
+        <h2>❷ LLM 归类分析</h2>
+        <p class="desc">批量调用已配置模型（<b>一次请求带多条视频</b>），为每个视频推断应归属收藏夹。支持断点续跑、可随时停止。<b>批大小 / 并发</b>只影响模型请求，不涉及 B站接口。</p>
+        <div class="row">
+          <button id="analyze-start" class="btn primary">开始分析</button>
+          <button id="analyze-stop" class="btn danger">停止</button>
+          <label class="inline-label"><input id="analyze-continuous" type="checkbox"> 连续 LLM 归类分析</label>
+          <label class="inline-label">批大小
+            <select id="analyze-batch">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="5">5</option>
+              <option value="8">8</option>
+              <option value="10">10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <label class="inline-label">并发
+            <select id="analyze-concurrency">
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+            </select>
+          </label>
+          <label class="inline-label">最大输出(tokens)
+            <input id="analyze-max-tokens" type="number" min="256" max="131072"
+                   step="1024" value="32768" class="num-input">
+          </label>
+        </div>
+        <div class="progress" id="analyze-progress" style="display:none">
+          <div class="bar analyze-bar">
+            <div class="fill sent-fill" id="analyze-sent-fill"></div>
+            <div class="fill" id="analyze-fill"></div>
+          </div>
+          <span class="prog-text" id="analyze-text"></span>
+        </div>
+      </section>
+
+      <!-- 步骤 3：预归类方案 -->
+      <section class="card">
+        <h2>❸ 预归类方案</h2>
+        <p class="desc">默认显示归类统计；点「查看详情」逐条修改目标收藏夹，确认后进入执行。</p>
+        <div class="row">
+          <button id="plan-load" class="btn primary">加载分析结果</button>
+          <button id="plan-detail" class="btn ghost" disabled>查看详情</button>
+          <span class="muted" id="plan-meta"></span>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <span class="muted" id="invalid-info">已失效视频：—</span>
+          <button id="mark-invalid" class="btn ghost danger" disabled>🗑 标记为删除</button>
+        </div>
+        <div id="plan-summary" class="plan-summary"></div>
+      </section>
+
+      <!-- 步骤 4：执行 -->
+      <section class="card">
+        <h2>❹ 确认执行</h2>
+        <p class="desc">按已确认方案使用 B站批量接口移动视频；失效视频单独批量删除。明确失败会记录后继续，风控或结果不确定时停止。</p>
+        <div class="row">
+          <button id="apply-start" class="btn primary">开始执行</button>
+          <button id="apply-stop" class="btn danger">停止</button>
+          <button id="plan-view-apply" class="btn ghost">查看 / 修改方案</button>
+          <span class="muted" id="apply-meta"></span>
+          <label class="inline-label">写操作间隔
+            <select id="write-interval">
+              <option value="1">1 秒</option>
+              <option value="2">2 秒</option>
+              <option value="3">3 秒</option>
+              <option value="5">5 秒</option>
+            </select>
+          </label>
+          <label class="inline-label">单批条数
+            <select id="apply-batch">
+              <option value="100">100</option>
+              <option value="500">500</option>
+              <option value="1000">1000（上限）</option>
+            </select>
+          </label>
+        </div>
+        <div class="progress" id="apply-progress" style="display:none">
+          <div class="bar"><div class="fill" id="apply-fill"></div></div>
+          <span class="prog-text" id="apply-text"></span>
+        </div>
+      </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- 清除数据弹窗 -->
+<div id="clear-modal" class="modal" style="display:none">
+  <div class="modal-box compact-modal">
+    <div class="modal-head"><span>选择要清除的数据</span><button id="clear-close" class="mini">关闭</button></div>
+    <div class="modal-body clear-options">
+      <label><input type="checkbox" value="scan"> 收藏夹目录、扫描内容与进度</label>
+      <label><input type="checkbox" value="analysis"> LLM 内容分析结果</label>
+      <label><input type="checkbox" value="plan"> 内容整理方案与执行进度</label>
+      <label><input type="checkbox" value="folder_merge"> 收藏夹合并草稿、任务与执行进度</label>
+    </div>
+    <div class="modal-foot"><button id="clear-all" class="btn ghost">全选</button><button id="clear-none" class="btn ghost">全不选</button><button id="clear-confirm" class="btn danger">确认清除</button></div>
+  </div>
+</div>
+
+<!-- 来源收藏夹复选弹窗 -->
+<div id="source-modal" class="modal" style="display:none">
+  <div class="modal-box compact-modal">
+    <div class="modal-head"><span>修改来源收藏夹</span><button id="source-close" class="mini">关闭</button></div>
+    <div class="modal-body source-modal-list" id="source-modal-list"></div>
+    <div class="modal-foot"><button id="source-none" class="btn ghost">全不选</button><button id="source-confirm" class="btn primary">确认</button></div>
+  </div>
+</div>
+
+<!-- 扫描状态弹窗 -->
+<div id="tree-modal" class="modal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span>📂 选择要扫描的收藏夹</span>
+      <button id="tree-close" class="mini">关闭</button>
+    </div>
+    <div class="modal-meta" id="tree-meta"></div>
+    <div class="modal-body" id="tree-body"></div>
+    <div class="modal-foot">
+      <button id="tree-all" class="btn ghost">全选</button>
+      <button id="tree-none" class="btn ghost">全不选</button>
+      <button id="tree-undone" class="btn ghost">仅选未完成</button>
+      <button id="tree-default" class="btn ghost">仅默认收藏夹</button>
+      <button id="tree-except-default" class="btn ghost">除默认收藏夹</button>
+      <button id="tree-save" class="btn primary">保存选择</button>
+    </div>
+  </div>
+</div>
+
+<!-- 归类方案详情弹窗 -->
+<div id="plan-modal" class="modal" style="display:none">
+  <div class="modal-box">
+    <div class="modal-head">
+      <span>🗂 归类方案详情（可逐条修改）</span>
+      <button id="plan-close" class="mini">关闭</button>
+    </div>
+    <div class="modal-meta" id="plan-modal-meta"></div>
+    <div class="plan-toolbar" id="plan-toolbar"></div>
+    <div class="modal-body" id="plan-list"></div>
+    <div class="modal-foot">
+      <button id="plan-save" class="btn primary">确认方案（进入执行）</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
