@@ -4,6 +4,7 @@ config.json
 data/
 server.log
 *.log
+/.private
 
 # 环境变量 / 凭据 / Cookie
 .env
