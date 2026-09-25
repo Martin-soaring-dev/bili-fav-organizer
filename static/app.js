@@ -35,22 +35,32 @@
   $("clear-log").addEventListener("click", () => { logBody.innerHTML = ""; });
 
   // ---------- HTTP ----------
-  async function api(method, url, body) {
+  async function api(method, url, body, options = {}) {
     const opt = { method, headers: {} };
+    let timeoutId = null;
+    if (options.timeoutMs) {
+      const controller = new AbortController();
+      opt.signal = controller.signal;
+      timeoutId = setTimeout(() => controller.abort(), options.timeoutMs);
+    }
     if (body !== undefined) {
       opt.headers["Content-Type"] = "application/json";
       opt.body = JSON.stringify(body);
     }
-    const res = await fetch(url, opt);
-    const txt = await res.text();
-    let data = null;
-    try { data = txt ? JSON.parse(txt) : null; } catch (_) { /* 非 JSON */ }
-    if (!res.ok) {
-      const err = new Error((data && data.error) || ("HTTP " + res.status));
-      err.error = data && data.error;
-      throw err;
+    try {
+      const res = await fetch(url, opt);
+      const txt = await res.text();
+      let data = null;
+      try { data = txt ? JSON.parse(txt) : null; } catch (_) { /* 非 JSON */ }
+      if (!res.ok) {
+        const err = new Error((data && data.error) || ("HTTP " + res.status));
+        err.error = data && data.error;
+        throw err;
+      }
+      return data;
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
     }
-    return data;
   }
 
   // ---------- 连接状态 ----------
@@ -458,15 +468,23 @@
     $("qr-status").textContent = "生成中 ...";
     $("qr-btn").disabled = true;
     try {
-      const r = await api("POST", "/api/login/qr/generate");
-      if (!r.ok) { $("qr-status").textContent = "失败：" + r.error; return; }
+      const r = await api("POST", "/api/login/qr/generate", undefined, { timeoutMs: 20000 });
+      if (!r.ok) {
+        $("qr-status").textContent = "失败：" + r.error;
+        log("二维码生成失败：" + r.error, "err");
+        return;
+      }
       $("qr-img").src = r.image;
       $("qr-box").style.display = "flex";
       $("qr-status").textContent = "请用手机 B站 App 扫码";
       log("二维码已生成，请用手机 B站 App 扫码");
       qrTimer = setInterval(pollQr, 2000);
     } catch (e) {
-      $("qr-status").textContent = "失败：" + e.message;
+      const message = e.name === "AbortError"
+        ? "二维码请求超时：请检查此电脑能否访问 B站登录服务，或改用手动输入 Cookie"
+        : e.message;
+      $("qr-status").textContent = "失败：" + message;
+      log("二维码生成失败：" + message, "err");
     } finally {
       $("qr-btn").disabled = false;
     }
