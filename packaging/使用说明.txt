@@ -24,4 +24,4 @@
 
 注意
 GitHub 页面自动生成的“Source code”压缩包是源代码，不是便携程序。
-请下载本次 Release 附件：BiliFavOrganizer-Windows-x64.zip。
+请下载本次 Release 中带当前版本标签的附件，例如：BiliFavOrganizer-Windows-x64-v0.106.zip。
