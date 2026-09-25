@@ -17,6 +17,14 @@
 
 ## 如何启动
 
+### Windows 便携版（推荐）
+
+在 GitHub 的 **Releases** 下载 `BiliFavOrganizer-Windows-x64.zip`，解压后双击 `启动.bat`（或 `BiliFavOrganizer.exe`）。便携包自带运行环境，不需要安装 Python 或手动安装依赖。服务运行期间保留控制台窗口，关闭窗口即可停止服务；浏览器会自动打开本地页面。
+
+请下载 Release 附件 `BiliFavOrganizer-Windows-x64.zip`，不要下载 GitHub 自动生成的 `Source code.zip`；后者只包含源码。
+
+### 从源码运行（开发）
+
 确保已安装依赖（一次性）：
 
 ```bash
@@ -106,7 +114,7 @@ python server.py
 
 ## 数据存储
 
-SQLite 主库默认保存在当前 Windows 用户的 `%LOCALAPPDATA%\BiliFavOrganizer\data\library.sqlite3`，不随项目目录移动或更新；可通过环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 指定其他持久路径。旧版项目 `data/library.sqlite3` 首次启动时会用 SQLite 在线备份方式复制过去，校验成功后保留项目内原库作为回滚副本。若没有旧 SQLite，则从项目内旧 JSON 导入。
+应用配置、Cookie、日志和 SQLite 主库默认保存在当前 Windows 用户的 `%LOCALAPPDATA%\BiliFavOrganizer\`（主库位于 `data/library.sqlite3`），不随程序目录移动或更新。首次启动会把程序目录中已有的 `config.json` 和 `secrets.json` 复制到用户数据目录，不覆盖已存在的用户设置；旧版项目 `data/library.sqlite3` 首次启动时会用 SQLite 在线备份方式复制过去，校验成功后保留原库作为回滚副本。若没有旧 SQLite，则从项目内旧 JSON 导入。可通过环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 指定数据库路径。
 
 数据库将收藏夹记录标记为 `active` 或 `archived`。目录同步按 ID 更新名称/数量；消失的收藏夹转为 archived 并清除它的 `folder_items` 关系，但保留视频元数据索引。完整重扫时会替换该夹的成员关系，因此取消收藏的内容关系直接删除。视频索引采用按资源 ID 增量 upsert，多个收藏夹共享一份视频元数据。
 

@@ -2,6 +2,12 @@
 chcp 65001 >nul
 cd /d "%~dp0"
 
+REM Published Windows package contains a self-contained executable.
+if exist "%~dp0BiliFavOrganizer.exe" (
+  "%~dp0BiliFavOrganizer.exe" %*
+  exit /b
+)
+
 echo ================================================
 echo   B站收藏夹智能整理 - 一键启动
 echo ================================================
@@ -48,7 +54,7 @@ echo   若页面暂时打不开，等服务窗口出现 "Uvicorn running" 后按
 echo.
 
 REM 服务输出：直接显示在本窗口；日志由 Python 自己同时写入 server.log
-python server.py --port 8080
+python server.py --port 8080 --no-browser
 
 echo.
 echo 服务已退出。
