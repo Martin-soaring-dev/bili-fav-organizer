@@ -1,0 +1,3209 @@
+# -*- coding: utf-8 -*-
+"""B 站收藏夹智能整理 — 本地 Web 应用主程序。
+
+启动:  python server.py [--port 8080]
+打开:  http://127.0.0.1:8080/
+
+四个阶段（前端分区操作，可分别独立运行）：
+  1) 获取收藏明细    POST /api/scan
+  2) LLM 分析        POST /api/analyze/start   + GET /api/analyze/status
+  3) 预归类方案      GET  /api/plan  +  POST /api/plan/apply
+  4) 确认执行        POST /api/apply/start     + GET /api/apply/status
+
+LLM 配置写入 config.json（也可在前端 /api/config 修改）：
+  { "base_url": "https://api.deepseek.com/v1", "api_key": "...", "model": "qwen3-8b" }
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import logging
+import threading
+import time
+import traceback
+import uuid
+from pathlib import Path
+from typing import Optional
+
+import requests
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+import bili_api
+import llm_analyzer
+import store
+
+HERE = Path(__file__).resolve().parent
+CONFIG_FILE = HERE / "config.json"
+SECRETS_FILE = HERE / "secrets.json"      # 凭据单独存放（api_key / cookie_string）
+SECRET_KEYS = ("api_key", "cookie_string")
+STATIC_DIR = HERE / "static"
+
+LOG_FORMAT = "%(asctime)s [%(name)s] %(message)s"
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+log = logging.getLogger("server")
+
+app = FastAPI(title="B站收藏夹整理")
+
+# ---------- 运行状态（跨请求的全局状态） ----------
+APP = {
+    "session": None,          # bili_api.BiliSession
+    "folders": [],            # 现有收藏夹清单
+    "scan_run": None,
+    "analyze_run": None,      # {running, done, total, failed, stop}
+    "apply_run": None,
+    "folder_merge_run": None,
+    "folder_merge_ai_run": None,
+    "folder_profile_run": None,
+    "events": [],             # 事件缓冲(带自增 id)，供 SSE 推送
+}
+ANALYZE_WAKE = threading.Event()
+_evt_lock = threading.Lock()
+_evt_seq = [0]
+
+
+def emit(level: str, text: str, **extra):
+    """追加一条事件到缓冲（供 SSE 推送）。level: info/ok/warn/err。"""
+    with _evt_lock:
+        _evt_seq[0] += 1
+        APP["events"].append({"id": _evt_seq[0], "t": time.strftime("%H:%M:%S"),
+                              "level": level, "text": text, **extra})
+        # 控制缓冲长度
+        if len(APP["events"]) > 2000:
+            del APP["events"][:500]
+
+
+# 把事件钩子注入 bili_api，让长等待(412 退避等)提示也能推到前端
+bili_api.EVENT_HOOK = lambda level, text: emit(level, text)
+bili_api.WRITE_LOG_PATH = HERE / "data" / "write_operations.jsonl"
+
+
+DEFAULT_CONFIG = {
+    "base_url": "https://api.deepseek.com/v1",
+    "api_key": "",
+    "model": "qwen3-8b",
+    "active_model_id": "",
+    "scan_interval": 10,        # 收藏夹请求最小间隔(秒)
+    "analyze_concurrency": 1,   # LLM 分析并发数(仅影响模型请求)，1~4
+    "analyze_batch": 20,        # 逻辑批大小上限，1~1000；发送前按上下文预算拆分
+    "analyze_max_tokens": 32768,  # 单次输出上限；部分模型将思考计入此限制
+    "model_context_tokens": 32768, # 模型上下文总长度，用于估算画像可容纳样本
+    "model_tpm_limit": 20000, # 模型每分钟 token 上限；用于画像分页和本地限流
+    "profile_request_interval": 2.0, # 画像分批请求的最小间隔，减少模型接口限流
+    "scan_scope": "all",        # 扫描范围: all=全部收藏夹 / default=仅默认收藏夹
+    "write_interval": 2,        # 执行阶段的写操作基准间隔(秒)，实际再加 0~1.5s 随机抖动
+    "folder_merge_interval": 2,
+    "apply_batch": 1000,        # 批量 move / batch-del 的单批条数，硬上限 1000
+}
+
+DEFAULT_FAVORITE_NAME = "默认收藏夹"
+
+
+def _default_folder_destination_error(items: list[dict]) -> str:
+    """拒绝把内容移入或新建为默认收藏夹。"""
+    for item in items:
+        action = str(item.get("action", "skip"))
+        target = str(item.get("target_folder", "")).strip()
+        new_name = str(item.get("create_new_name") or target).strip()
+        if action == "move_to_existing" and target == DEFAULT_FAVORITE_NAME:
+            return "默认收藏夹只能移出，不能作为内容整理的移入目标；请修改该条方案"
+        if action == "create_new" and new_name == DEFAULT_FAVORITE_NAME:
+            return "默认收藏夹只能移出，不能作为新建或移入目标；请修改该条方案"
+    return ""
+
+# 常用 OpenAI 兼容供应商预设（URL 可在管理界面修改）
+PROVIDER_PRESETS = [
+    {"key": "siliconflow", "name": "SiliconFlow", "base_url": "https://api.siliconflow.cn/v1"},
+    {"key": "qwen_token", "name": "千问 Token Plan", "base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"},
+    {"key": "qwen_payg", "name": "千问按量付费", "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+    {"key": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1"},
+    {"key": "mimo_token", "name": "MiMo Token Plan", "base_url": "https://token-plan-cn.xiaomimimo.com/v1"},
+    {"key": "mimo_payg", "name": "MiMo 按量付费", "base_url": "https://api.xiaomimimo.com/v1"},
+    {"key": "digitalocean", "name": "Digital Ocean", "base_url": "https://inference.do-ai.run/v1"},
+    {"key": "amd_token_factory", "name": "AMD Token Factory", "base_url": "https://developer.amd.com.cn/radeon/api/v1"},
+    {"key": "custom", "name": "其他", "base_url": ""},
+]
+
+
+def _pick_default_folder(folders: list) -> dict | None:
+    """找出"默认收藏夹"：优先按标题，找不到则取列表第一个（B站把默认夹排在最前）。"""
+    for f in folders:
+        if (f.get("title") or "").strip() == "默认收藏夹":
+            return f
+    return folders[0] if folders else None
+
+
+# ============ 配置 ============
+def _atomic_write(path: Path, obj):
+    """原子写：先写 .tmp 再替换，避免读到半截 JSON。"""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _read_json_file(path: Path):
+    """返回 (数据, 错误信息)；文件不存在返回 ({}, None)。"""
+    if not path.exists():
+        return {}, None
+    try:
+        return json.loads(path.read_text(encoding="utf-8")), None
+    except Exception as e:
+        return {}, str(e)
+
+
+def _mask(v: str) -> str:
+    """凭据脱敏：只保留尾 4 位。"""
+    v = v or ""
+    return ("****" + v[-4:]) if len(v) > 4 else ("****" if v else "")
+
+
+def load_config() -> dict:
+    """读取配置（非凭据来自 config.json，凭据来自 secrets.json）。
+
+    解析失败不再静默回退默认值，而是打日志并置 _config_broken 标记。
+    """
+    cfg = dict(DEFAULT_CONFIG)
+    cdata, cerr = _read_json_file(CONFIG_FILE)
+    sdata, serr = _read_json_file(SECRETS_FILE)
+
+    # 迁移：老版本把凭据写在 config.json 里
+    if not sdata:
+        legacy = {k: cdata.get(k) for k in SECRET_KEYS if cdata.get(k)}
+        if legacy:
+            try:
+                _atomic_write(SECRETS_FILE, legacy)
+                for k in SECRET_KEYS:
+                    cdata.pop(k, None)
+                _atomic_write(CONFIG_FILE, cdata)
+                sdata = legacy
+                log.info("已把凭据从 config.json 迁移到 secrets.json")
+            except Exception as e:
+                log.warning("凭据迁移失败：%s", e)
+
+    cfg.update({k: v for k, v in cdata.items() if k not in SECRET_KEYS})
+    cfg.update({k: v for k, v in sdata.items() if k in SECRET_KEYS})
+    if cerr or serr:
+        log.error("配置解析失败：config=%s secrets=%s", cerr, serr)
+        cfg["_config_broken"] = True
+    return cfg
+
+
+def save_config(cur: dict):
+    """拆分保存：非凭据 → config.json；凭据 → secrets.json。均原子写。"""
+    pub = {k: v for k, v in cur.items()
+           if k not in SECRET_KEYS and not k.startswith("_")}
+    # API Key 归 SQLite providers 表管理；secrets.json 只保留 B 站 Cookie。
+    sec = {"cookie_string": cur["cookie_string"]} if cur.get("cookie_string") else {}
+    _atomic_write(CONFIG_FILE, pub)
+    prev, _ = _read_json_file(SECRETS_FILE)
+    if store.list_providers():
+        prev.pop("api_key", None)
+    prev.update(sec)
+    _atomic_write(SECRETS_FILE, prev)
+
+
+def _thinking_params(effort: str) -> dict:
+    effort = (effort or "").strip().lower()
+    if not effort or effort in ("default", "auto"):
+        return {}
+    if effort in ("off", "none", "disable", "disabled"):
+        return {"enable_thinking": False}
+    params: dict = {"enable_thinking": True}
+    if effort in ("low", "medium", "high", "max"):
+        params["reasoning_effort"] = effort
+    elif effort == "xhigh":
+        params["reasoning_effort"] = "max"
+    return params
+
+
+def resolved_llm_settings(cfg: dict | None = None) -> dict:
+    """合并激活模型（SQLite）与全局配置，返回实际用于调用 LLM 的设置。"""
+    out = dict(cfg if cfg is not None else load_config())
+    model_id = str(out.get("active_model_id") or "").strip()
+    if not model_id:
+        return out
+    model = store.get_model(model_id)
+    if not model:
+        return out
+    provider = store.get_provider(model.get("provider_id") or "")
+    if provider:
+        out["base_url"] = provider.get("base_url") or out.get("base_url") or ""
+        out["api_key"] = provider.get("api_key") or ""
+        out["model"] = model.get("name") or out.get("model") or ""
+        out["_provider_id"] = provider.get("id")
+        out["_provider_name"] = provider.get("name")
+        if model.get("context_tokens") and model.get("context_source") not in ("unknown", "legacy_unknown"):
+            out["model_context_tokens"] = int(model["context_tokens"])
+        if model.get("max_output_tokens") and model.get("output_source") not in ("unknown", "legacy_unknown"):
+            out["analyze_max_tokens"] = llm_analyzer.cap_completion_tokens(
+                provider.get("base_url") or "", model.get("name") or "",
+                int(model["max_output_tokens"]))
+        out["thinking_effort"] = model.get("thinking_effort") or ""
+        out["llm_params"] = _thinking_params(out.get("thinking_effort", ""))
+    return out
+
+
+def make_llm_config(cfg: dict | None = None) -> llm_analyzer.LLMConfig:
+    resolved = resolved_llm_settings(cfg)
+    return llm_analyzer.LLMConfig(
+        base_url=resolved.get("base_url", ""),
+        api_key=resolved.get("api_key", ""),
+        model=resolved.get("model", "qwen3-8b"),
+        params=dict(resolved.get("llm_params") or {}),
+        max_tokens=int(resolved.get("analyze_max_tokens", 32768) or 32768),
+        context_window_tokens=int(resolved.get("model_context_tokens", 32768) or 32768))
+
+
+def _bootstrap_providers_from_legacy_config() -> None:
+    """首次启动：把 config.json 里的 base_url/api_key/model 迁入 SQLite 供应商与模型。"""
+    try:
+        cfg = load_config()
+        providers = store.list_providers()
+        active_model = store.get_model(str(cfg.get("active_model_id") or ""))
+        migrated_key = not bool(cfg.get("api_key"))
+
+        # Migrate a legacy credential to the provider that matches its old URL.
+        # If a provider already has another key, preserve the legacy key as its own
+        # provider instead of silently discarding or overwriting either credential.
+        legacy_key = str(cfg.get("api_key") or "")
+        base_url = (cfg.get("base_url") or "").strip().rstrip("/")
+        if legacy_key:
+            matching = next((p for p in providers
+                             if (p.get("base_url") or "").strip().rstrip("/") == base_url), None)
+            if matching and (not matching.get("api_key") or matching.get("api_key") == legacy_key):
+                if not matching.get("api_key"):
+                    store.update_provider(matching["id"], api_key=legacy_key)
+                migrated_key = True
+            else:
+                legacy_provider = store.create_provider(
+                    "默认（旧配置迁移）", base_url or (matching or {}).get("base_url", ""), legacy_key)
+                legacy_model = store.create_model(
+                    legacy_provider["id"], (cfg.get("model") or "qwen3-8b").strip(),
+                    context_tokens=int(cfg.get("model_context_tokens") or 32768),
+                    max_output_tokens=int(cfg.get("analyze_max_tokens") or 8192),
+                    context_source="legacy_config", output_source="legacy_config",
+                    thinking_effort=str(cfg.get("thinking_effort") or ""))
+                if not active_model:
+                    cfg["active_model_id"] = legacy_model["id"]
+                    active_model = legacy_model
+                migrated_key = True
+
+        if not providers and not active_model:
+            # No legacy provider exists. Register the existing config URL/model even
+            # when no key was set so the connection screen can edit it in place.
+            base_url = base_url or "https://api.deepseek.com/v1"
+            provider = store.create_provider("默认（配置迁移）", base_url, "")
+            model = store.create_model(
+                provider["id"], (cfg.get("model") or "qwen3-8b").strip(),
+                context_tokens=int(cfg.get("model_context_tokens") or 32768),
+                max_output_tokens=int(cfg.get("analyze_max_tokens") or 8192),
+                context_source="legacy_config", output_source="legacy_config",
+                thinking_effort=str(cfg.get("thinking_effort") or ""))
+            cfg["active_model_id"] = model["id"]
+            active_model = model
+
+        if not cfg.get("active_model_id"):
+            models = store.list_models()
+            if models:
+                cfg["active_model_id"] = models[0]["id"]
+
+        if cfg.get("active_model_id") and not cfg.get("_config_broken"):
+            save_config(cfg)
+
+        # Do this only after the key is safely present in SQLite. This is idempotent
+        # and also cleans up duplicate API keys left by earlier startup migrations.
+        if migrated_key:
+            sdata, serr = _read_json_file(SECRETS_FILE)
+            if not serr and "api_key" in sdata:
+                sdata.pop("api_key", None)
+                _atomic_write(SECRETS_FILE, sdata)
+
+        if providers:
+            return
+        if active_model:
+            log.info("已初始化供应商与激活模型：model=%s", active_model["id"])
+    except Exception as exc:
+        log.warning("供应商/模型初始化失败：%s", exc)
+
+
+_bootstrap_providers_from_legacy_config()
+
+
+def get_session_cookie() -> bili_api.CookieInfo:
+    """获取通过二维码或手动输入保存的 Cookie。"""
+    cfg = load_config()
+    cookie = str(cfg.get("cookie_string", "") or "").strip()
+    if not cookie:
+        raise bili_api.BiliApiError("尚未配置 Cookie；请在连接配置中扫码登录或手动输入 Cookie。")
+    return bili_api.load_cookie_from_string(cookie)
+
+
+@app.get("/api/cookie")
+def get_cookie():
+    """返回当前是否已配置 cookie（不回显原值，只给尾 4 位与长度）。"""
+    cfg = load_config()
+    ck = cfg.get("cookie_string", "") or ""
+    return {"configured": bool(ck.strip()), "length": len(ck), "masked": _mask(ck)}
+
+
+class CookieIn(BaseModel):
+    cookie_string: str = ""
+
+
+@app.post("/api/cookie")
+def set_cookie(body: CookieIn):
+    """保存手动粘贴的 cookie（留空 / 脱敏值 → 不覆盖）。"""
+    v = (body.cookie_string or "").strip()
+    cur = load_config()
+    if v and "****" not in v:
+        cur["cookie_string"] = v
+    save_config(cur)
+    return {"ok": True}
+
+
+@app.get("/api/config")
+def get_config():
+    """返回配置，但凭据只回**尾 4 位**（P0-1）。附带供应商/模型索引（密钥脱敏）。"""
+    raw = load_config()
+    cfg = resolved_llm_settings(raw)
+    out = dict(raw)
+    out["api_key"] = ""
+    out["api_key_masked"] = _mask(cfg.get("api_key", ""))
+    out["api_key_set"] = bool(cfg.get("api_key"))
+    ck = raw.get("cookie_string", "") or ""
+    out["cookie_string"] = ""
+    out["cookie_masked"] = _mask(ck)
+    out["cookie_set"] = bool(ck)
+    # 激活模型解析后的展示字段（不覆盖 raw 中的全局默认，仅补充）
+    out["active_base_url"] = cfg.get("base_url", "")
+    out["active_model"] = cfg.get("model", "")
+    out["active_context_tokens"] = cfg.get("model_context_tokens")
+    out["active_max_output_tokens"] = cfg.get("analyze_max_tokens")
+    out["thinking_effort"] = cfg.get("thinking_effort", "")
+    out["providers"] = [
+        {**{k: p[k] for k in ("id", "name", "base_url", "created_at", "updated_at")},
+         "api_key": "", "api_key_masked": _mask(p.get("api_key") or ""),
+         "api_key_set": bool(p.get("api_key"))}
+        for p in store.list_providers()
+    ]
+    out["models"] = _effective_model_rows(store.list_models())
+    out["provider_presets"] = PROVIDER_PRESETS
+    return out
+
+
+class ConfigIn(BaseModel):
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    active_model_id: Optional[str] = None
+    scan_interval: Optional[int] = None
+    analyze_concurrency: Optional[int] = None
+    analyze_batch: Optional[int] = None
+    analyze_max_tokens: Optional[int] = None
+    model_context_tokens: Optional[int] = None
+    model_tpm_limit: Optional[int] = None
+    profile_request_interval: Optional[float] = None
+    scan_scope: Optional[str] = None
+    write_interval: Optional[int] = None
+    folder_merge_interval: Optional[int] = None
+    apply_batch: Optional[int] = None
+
+
+@app.post("/api/config")
+def set_config(cfg: ConfigIn):
+    cur = load_config()
+    if cfg.base_url is not None:
+        cur["base_url"] = cfg.base_url
+    if cfg.api_key is not None:
+        v = (cfg.api_key or "").strip()
+        # 留空 / 传回脱敏值 → 不覆盖原 key（P0-1 配套）
+        if v and "****" not in v:
+            cur["api_key"] = v
+    if cfg.model is not None:
+        cur["model"] = cfg.model
+    if cfg.active_model_id is not None:
+        mid = (cfg.active_model_id or "").strip()
+        if mid and not store.get_model(mid):
+            return JSONResponse({"ok": False, "error": "激活模型不存在"}, status_code=400)
+        cur["active_model_id"] = mid
+        if mid:
+            resolved = resolved_llm_settings({**cur, "active_model_id": mid})
+            if resolved.get("base_url"):
+                cur["base_url"] = resolved["base_url"]
+            if resolved.get("model"):
+                cur["model"] = resolved["model"]
+            if resolved.get("model_context_tokens"):
+                cur["model_context_tokens"] = int(resolved["model_context_tokens"])
+            if resolved.get("analyze_max_tokens"):
+                cur["analyze_max_tokens"] = int(resolved["analyze_max_tokens"])
+    if cfg.scan_interval is not None:
+        cur["scan_interval"] = max(2, int(cfg.scan_interval))
+        if APP.get("session"):
+            APP["session"].read_interval = max(2, int(cfg.scan_interval))
+    if cfg.analyze_concurrency is not None:
+        cur["analyze_concurrency"] = max(1, min(4, int(cfg.analyze_concurrency)))
+    if cfg.analyze_batch is not None:
+        cur["analyze_batch"] = max(1, min(1000, int(cfg.analyze_batch)))
+    if cfg.analyze_max_tokens is not None:
+        cur["analyze_max_tokens"] = max(256, min(131072, int(cfg.analyze_max_tokens)))
+    if cfg.model_context_tokens is not None:
+        cur["model_context_tokens"] = max(4096, min(1000000, int(cfg.model_context_tokens)))
+    if cfg.model_tpm_limit is not None:
+        cur["model_tpm_limit"] = max(1000, min(10000000, int(cfg.model_tpm_limit)))
+    if cfg.profile_request_interval is not None:
+        cur["profile_request_interval"] = max(0.5, min(60.0, float(cfg.profile_request_interval)))
+    if cfg.scan_scope is not None:
+        cur["scan_scope"] = cfg.scan_scope if cfg.scan_scope in ("all", "default") else "all"
+    if cfg.write_interval is not None:
+        cur["write_interval"] = max(1, min(60, int(cfg.write_interval)))
+        if APP.get("session"):
+            APP["session"].write_interval = float(cur["write_interval"])
+    if cfg.folder_merge_interval is not None:
+        cur["folder_merge_interval"] = max(1, min(60, int(cfg.folder_merge_interval)))
+    if cfg.apply_batch is not None:
+        cur["apply_batch"] = max(1, min(1000, int(cfg.apply_batch)))
+    save_config(cur)
+    return {"ok": True, "config": get_config()}
+
+
+# ============ 供应商 / 模型管理 ============
+class ProviderIn(BaseModel):
+    name: str = ""
+    base_url: str = ""
+    api_key: str = ""
+
+
+class ProviderUpdateIn(BaseModel):
+    name: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+
+
+class ModelIn(BaseModel):
+    provider_id: str
+    name: str
+    context_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    thinking_effort: str = ""
+
+
+class ModelUpdateIn(BaseModel):
+    name: Optional[str] = None
+    context_tokens: Optional[int] = None
+    max_output_tokens: Optional[int] = None
+    context_source: Optional[str] = None
+    output_source: Optional[str] = None
+    thinking_effort: Optional[str] = None
+    provider_id: Optional[str] = None
+
+
+class ModelSyncIn(BaseModel):
+    provider_id: str
+    mode: str = "add_new"  # overwrite | remove_stale | add_new | remove_selected | add_selected
+    names: list[str] = Field(default_factory=list)
+    remote_models: list[dict] = Field(default_factory=list)
+    selected_names: list[str] = Field(default_factory=list)
+
+
+class ModelTestIn(BaseModel):
+    model_id: Optional[str] = None
+
+
+def _public_provider(p: dict) -> dict:
+    return {**{k: p[k] for k in ("id", "name", "base_url", "created_at", "updated_at")},
+            "api_key": "", "api_key_masked": _mask(p.get("api_key") or ""),
+            "api_key_set": bool(p.get("api_key"))}
+
+
+def _effective_model_rows(models: list[dict]) -> list[dict]:
+    """Expose model output limits after applying documented provider hard caps."""
+    providers = {p["id"]: p for p in store.list_providers()}
+    result = []
+    for model in models:
+        row = dict(model)
+        provider = providers.get(str(row.get("provider_id") or ""))
+        if provider and row.get("max_output_tokens"):
+            stored_limit = int(row["max_output_tokens"])
+            effective_limit = llm_analyzer.cap_completion_tokens(
+                provider.get("base_url") or "", row.get("name") or "", stored_limit)
+            row["max_output_tokens"] = effective_limit
+            if effective_limit < stored_limit:
+                row["output_source"] = "documented_cap"
+        result.append(row)
+    return result
+
+
+@app.get("/api/providers/presets")
+def provider_presets():
+    return {"presets": PROVIDER_PRESETS}
+
+
+@app.get("/api/providers")
+def providers_list():
+    return {"providers": [_public_provider(p) for p in store.list_providers()],
+            "models": _effective_model_rows(store.list_models())}
+
+
+@app.post("/api/providers")
+def providers_create(body: ProviderIn):
+    name = (body.name or "").strip()
+    base_url = (body.base_url or "").strip()
+    if not name or not base_url:
+        return JSONResponse({"ok": False, "error": "需要名称和 base_url"}, status_code=400)
+    api_key = (body.api_key or "").strip()
+    # 脱敏回传不写入
+    if "****" in api_key:
+        api_key = ""
+    provider = store.create_provider(name, base_url, api_key)
+    return {"ok": True, "provider": _public_provider(provider), "models": []}
+
+
+@app.put("/api/providers/{provider_id}")
+def providers_update(provider_id: str, body: ProviderUpdateIn):
+    api_key = body.api_key
+    if api_key is not None and "****" in (api_key or ""):
+        api_key = None  # 不覆盖
+    provider = store.update_provider(provider_id, name=body.name, base_url=body.base_url,
+                                     api_key=api_key)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
+    return {"ok": True, "provider": _public_provider(provider)}
+
+
+@app.delete("/api/providers/{provider_id}")
+def providers_delete(provider_id: str):
+    cfg = load_config()
+    models = store.list_models(provider_id)
+    active = str(cfg.get("active_model_id") or "")
+    if any(m["id"] == active for m in models):
+        cur = dict(cfg)
+        cur["active_model_id"] = ""
+        save_config(cur)
+    if not store.delete_provider(provider_id):
+        return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
+    return {"ok": True}
+
+
+@app.get("/api/models")
+def models_list(provider_id: Optional[str] = None):
+    return {"models": _effective_model_rows(store.list_models(provider_id))}
+
+
+@app.delete("/api/providers/{provider_id}/models")
+def provider_models_delete_all(provider_id: str):
+    if not store.get_provider(provider_id):
+        return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
+    cfg = load_config()
+    active_model_id = str(cfg.get("active_model_id") or "")
+    removed_ids = store.delete_provider_models(provider_id)
+    if active_model_id and active_model_id in removed_ids:
+        cfg["active_model_id"] = ""
+        save_config(cfg)
+    return {"ok": True, "removed": len(removed_ids)}
+
+
+@app.post("/api/models")
+def models_create(body: ModelIn):
+    if not store.get_provider(body.provider_id):
+        return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
+    name = (body.name or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "模型名称不能为空"}, status_code=400)
+    model = store.create_model(
+        body.provider_id, name,
+        context_tokens=body.context_tokens,
+        max_output_tokens=body.max_output_tokens,
+        thinking_effort=body.thinking_effort or "")
+    return {"ok": True, "model": _effective_model_rows([model])[0]}
+
+
+@app.put("/api/models/{model_id}")
+def models_update(model_id: str, body: ModelUpdateIn):
+    if body.provider_id and not store.get_provider(body.provider_id):
+        return JSONResponse({"ok": False, "error": "目标供应商不存在"}, status_code=404)
+    model = store.update_model(
+        model_id, name=body.name, context_tokens=body.context_tokens,
+        max_output_tokens=body.max_output_tokens,
+        context_source=body.context_source, output_source=body.output_source,
+        thinking_effort=body.thinking_effort,
+        provider_id=body.provider_id)
+    if not model:
+        return JSONResponse({"ok": False, "error": "模型不存在"}, status_code=404)
+    return {"ok": True, "model": _effective_model_rows([model])[0]}
+
+
+@app.delete("/api/models/{model_id}")
+def models_delete(model_id: str):
+    cfg = load_config()
+    if str(cfg.get("active_model_id") or "") == str(model_id):
+        cur = dict(cfg)
+        cur["active_model_id"] = ""
+        save_config(cur)
+    if not store.delete_model(model_id):
+        return JSONResponse({"ok": False, "error": "模型不存在"}, status_code=404)
+    return {"ok": True}
+
+
+def _remote_model_record(item) -> dict:
+    """Keep the common capability fields exposed by OpenAI-compatible model APIs."""
+    if isinstance(item, dict):
+        name = str(item.get("model_id") or item.get("id") or
+                   item.get("model") or item.get("name") or "").strip()
+        source = item
+    else:
+        name = str(item or "").strip()
+        source = {}
+    if not name:
+        return {}
+    record = {"name": name}
+    metadata_sources = [source]
+    for key in ("model_info", "metadata", "limits", "top_provider"):
+        nested = source.get(key)
+        if isinstance(nested, dict):
+            metadata_sources.append(nested)
+    aliases = {
+        "context_tokens": ("context_tokens", "context_length", "context_window",
+                           "max_context_length", "max_model_len"),
+        "max_output_tokens": ("max_output_tokens", "max_completion_tokens", "max_tokens", "output_limit"),
+    }
+    for target, keys in aliases.items():
+        for metadata in metadata_sources:
+            for key in keys:
+                value = metadata.get(key)
+                try:
+                    parsed = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if parsed > 0:
+                    record[target] = parsed
+                    record["context_source" if target == "context_tokens" else "output_source"] = "api"
+                    break
+            if target in record:
+                break
+    for metadata in metadata_sources:
+        for key in ("thinking_effort", "reasoning_effort"):
+            if metadata.get(key) is not None:
+                record["thinking_effort"] = str(metadata[key] or "")
+                break
+        if "thinking_effort" in record:
+            break
+    return record
+
+
+def _fetch_remote_models(provider: dict) -> list[dict]:
+    """Fetch visible model IDs plus documented capability metadata when available."""
+    base = (provider.get("base_url") or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("供应商缺少 base_url")
+    headers = {"Accept": "application/json"}
+    if provider.get("api_key"):
+        headers["Authorization"] = "Bearer " + provider["api_key"]
+    def get_json(url, params=None):
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        if not response.ok:
+            raise ValueError(f"HTTP {response.status_code}")
+        return response.json()
+
+    data = get_json(base + "/models")
+    items = data.get("data") if isinstance(data, dict) else data
+    if not isinstance(items, list) and isinstance(data, dict):
+        output = data.get("output")
+        items = output.get("models") if isinstance(output, dict) else None
+    if not isinstance(items, list):
+        raise ValueError("模型列表格式无法识别")
+    models: list[dict] = []
+    seen: set[str] = set()
+    for item in items:
+        model = _remote_model_record(item)
+        if model and model["name"] not in seen:
+            models.append(model)
+            seen.add(model["name"])
+
+    # DigitalOcean exposes model limits on its GenAI catalog, separate from the
+    # OpenAI-compatible inference /v1/models endpoint.
+    if "inference.do-ai.run" in base.lower():
+        try:
+            catalog_by_name = {}
+            def model_name_keys(*names):
+                keys = set()
+                for value in names:
+                    clean = str(value or "").strip().casefold()
+                    if clean:
+                        keys.add(clean)
+                        keys.add(clean.rsplit("/", 1)[-1])
+                return keys
+
+            for page in range(1, 51):
+                catalog = get_json("https://api.digitalocean.com/v2/gen-ai/models/catalog",
+                                   {"page": page, "limit": 200})
+                rows = catalog.get("data") if isinstance(catalog, dict) else None
+                if not isinstance(rows, list) or not rows:
+                    break
+                for item in rows:
+                    record = _remote_model_record(item)
+                    if record:
+                        for key in model_name_keys(record["name"], item.get("model_id"),
+                                                  item.get("hugging_face_id"), item.get("name")):
+                            catalog_by_name[key] = record
+                meta = catalog.get("meta") or {}
+                pages = int(meta.get("pages") or 0)
+                if pages and page >= pages:
+                    break
+                if not pages and len(rows) < 200:
+                    break
+            for model in models:
+                catalog_record = next((catalog_by_name[key]
+                                       for key in model_name_keys(model["name"])
+                                       if key in catalog_by_name), None)
+                if catalog_record:
+                    model.update({key: value for key, value in catalog_record.items()
+                                  if key != "name"})
+                else:
+                    model["metadata_warning"] = "DigitalOcean 目录未返回此模型的规格"
+        except Exception:
+            for model in models:
+                model["metadata_warning"] = "无法读取 DigitalOcean 规格目录；当前只拿到模型列表"
+
+    # Model Studio's detailed catalog is workspace/region scoped. Its response
+    # includes model_info.context_window and model_info.max_output_tokens.
+    from urllib.parse import urlsplit, urlunsplit
+    parsed_base = urlsplit(base)
+    hostname = (parsed_base.hostname or "").lower()
+    if ((hostname.endswith(".maas.aliyuncs.com") and not hostname.startswith("token-plan.")) or hostname in (
+            "dashscope-intl.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com")):
+        catalog_origin = urlunsplit((parsed_base.scheme, parsed_base.netloc, "", "", ""))
+        try:
+            catalog_by_name = {}
+            for page in range(1, 101):
+                catalog = get_json(catalog_origin + "/api/v1/models",
+                                   {"page_no": page, "page_size": 100})
+                output = catalog.get("output") if isinstance(catalog, dict) else None
+                rows = output.get("models") if isinstance(output, dict) else None
+                if not isinstance(rows, list) or not rows:
+                    break
+                for item in rows:
+                    record = _remote_model_record(item)
+                    if record:
+                        catalog_by_name[record["name"]] = record
+                total = int(output.get("total") or 0)
+                if total and page * 100 >= total:
+                    break
+            for model in models:
+                catalog_record = catalog_by_name.get(model["name"])
+                if catalog_record:
+                    model.update({key: value for key, value in catalog_record.items()
+                                  if key != "name"})
+                else:
+                    model["metadata_warning"] = "百炼目录未返回此模型的规格"
+        except Exception:
+            for model in models:
+                model["metadata_warning"] = "无法读取百炼详细目录；当前只拿到模型列表"
+    return models
+
+
+@app.post("/api/providers/{provider_id}/remote-models")
+def provider_remote_models(provider_id: str):
+    provider = store.get_provider(provider_id)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
+    try:
+        remote_models = _fetch_remote_models(provider)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    names = [m["name"] for m in remote_models]
+    metadata_warnings = {str(m["metadata_warning"]) for m in remote_models
+                         if m.get("metadata_warning")}
+    missing_context = sum(1 for model in remote_models if not model.get("context_tokens"))
+    missing_output = sum(1 for model in remote_models if not model.get("max_output_tokens"))
+    if missing_context:
+        metadata_warnings.add(f"API 未提供 {missing_context}/{len(remote_models)} 个模型的上下文窗口")
+    if missing_output:
+        metadata_warnings.add(f"API 未提供 {missing_output}/{len(remote_models)} 个模型的最大输出")
+    metadata_warnings = sorted(metadata_warnings)
+    local = {m["name"] for m in store.list_models(provider_id)}
+    remote = set(names)
+    return {
+        "ok": True,
+        "remote": sorted(remote),
+        "remote_models": remote_models,
+        "metadata_warnings": metadata_warnings,
+        "local": sorted(local),
+        "added": sorted(remote - local),      # 远程有、本地无 → 新增
+        "removed": sorted(local - remote),    # 本地有、远程无 → 失效
+        "common": sorted(local & remote),
+    }
+
+
+@app.post("/api/models/sync")
+def models_sync(body: ModelSyncIn):
+    provider = store.get_provider(body.provider_id)
+    if not provider:
+        return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
+    mode = body.mode
+    if mode not in ("overwrite", "remove_stale", "add_new", "remove_selected", "add_selected"):
+        return JSONResponse({"ok": False, "error": "未知同步模式"}, status_code=400)
+    records_by_name = {}
+    for item in body.remote_models:
+        record = _remote_model_record(item)
+        if record:
+            records_by_name[record["name"]] = record
+    remote_names = list(dict.fromkeys(
+        [str(x).strip() for x in body.names if str(x).strip()] + list(records_by_name)))
+    records = [records_by_name.get(name, {"name": name}) for name in remote_names]
+    selected_names = {str(name).strip() for name in body.selected_names if str(name).strip()}
+    if mode in ("remove_selected", "add_selected") and not selected_names:
+        return JSONResponse({"ok": False, "error": "请选择要处理的模型"}, status_code=400)
+    if not remote_names and mode != "remove_selected":
+        return JSONResponse({"ok": False, "error": "远程模型列表为空"}, status_code=400)
+    cfg = load_config()
+    active = str(cfg.get("active_model_id") or "")
+    local = store.list_models(body.provider_id)
+    local_by_name = {m["name"]: m for m in local}
+
+    if mode == "overwrite":
+        store.replace_provider_models(body.provider_id, records)
+        if active and not store.get_model(active):
+            cfg["active_model_id"] = ""
+            save_config(cfg)
+    elif mode in ("remove_stale", "remove_selected"):
+        remote_set = set(remote_names)
+        for m in local:
+            selected_match = mode == "remove_stale" or m["name"] in selected_names
+            if selected_match and m["name"] not in remote_set:
+                if m["id"] == active:
+                    cfg["active_model_id"] = ""
+                    save_config(cfg)
+                    cfg = load_config()
+                    active = ""
+                store.delete_model(m["id"])
+    else:  # add_new / add_selected
+        for record in records:
+            name = record["name"]
+            selected_match = mode == "add_new" or name in selected_names
+            if selected_match and name not in local_by_name:
+                store.create_model(
+                    body.provider_id, name,
+                    context_tokens=record.get("context_tokens"),
+                    max_output_tokens=record.get("max_output_tokens"),
+                    context_source=record.get("context_source", "unknown"),
+                    output_source=record.get("output_source", "unknown"),
+                    thinking_effort=record.get("thinking_effort", ""))
+    return {"ok": True, "models": _effective_model_rows(store.list_models(body.provider_id))}
+
+
+@app.post("/api/models/{model_id}/test")
+def models_test(model_id: str):
+    model = store.get_model(model_id)
+    if not model:
+        return JSONResponse({"ok": False, "error": "模型不存在"}, status_code=404)
+    provider = store.get_provider(model["provider_id"])
+    if not provider:
+        return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
+    store.update_model(model_id, test_status="testing", test_message="测试中…")
+    try:
+        url = (provider.get("base_url") or "").rstrip("/") + "/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if provider.get("api_key"):
+            headers["Authorization"] = "Bearer " + provider["api_key"]
+        test_config = llm_analyzer.LLMConfig(
+            base_url=provider.get("base_url") or "",
+            api_key=provider.get("api_key") or "",
+            model=model["name"],
+            params=_thinking_params(model.get("thinking_effort") or ""),
+            max_tokens=16,
+        )
+        payload = llm_analyzer.build_chat_completion_payload(
+            test_config,
+            messages=[{"role": "user", "content": "Reply OK only."}],
+            max_tokens=16,
+        )
+        r = requests.post(url, json=payload, headers=headers, timeout=45)
+        if not r.ok:
+            msg = f"HTTP {r.status_code}: {r.text[:180]}"
+            store.update_model(model_id, test_status="fail", test_message=msg,
+                               test_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+            return {"ok": False, "error": msg, "model": store.get_model(model_id)}
+        store.update_model(model_id, test_status="ok", test_message="连接正常",
+                           test_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+        return {"ok": True, "message": "连接正常", "model": store.get_model(model_id)}
+    except Exception as exc:
+        store.update_model(model_id, test_status="fail", test_message=str(exc)[:200],
+                           test_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+        return {"ok": False, "error": str(exc), "model": store.get_model(model_id)}
+
+
+# ============ 项目数据：导出 / 导入 / 清除 ============
+INVALID_TITLE = "已失效视频"
+
+
+def _is_invalid(video: dict) -> bool:
+    """防火墙：只有标题**恰好**是「已失效视频」才算失效视频。"""
+    return (video.get("title") or "").strip() == INVALID_TITLE
+
+
+def _autobackup_data(tag: str = "autobackup") -> str:
+    """备份 data/ 下的 SQLite 数据库、JSON 和 JSONL 到带时间戳的目录。
+
+    两条策略：
+    1. 只保留最近 1 份，更旧的备份自动删除；
+    2. 数据几乎为空时不新建备份、也不动已有备份 —— 否则连续点两次「清除数据」
+       会把唯一一份好备份换成空壳（历史上因此产生过 15 个空目录）。
+    """
+    import shutil
+    try:
+        files = [*store.DATA_DIR.glob("*.json"), *store.DATA_DIR.glob("*.jsonl")]
+        total = sum(p.stat().st_size for p in files)
+        if store.DB_FILE.exists():
+            total += store.DB_FILE.stat().st_size
+        backup_dir = store.DATA_DIR / "backups"
+        existing = sorted(backup_dir.glob("bili-data-*")) if backup_dir.exists() else []
+        if (not files and not store.DB_FILE.exists()) or total < 10 * 1024:
+            log.info("数据几乎为空（%d 字节），跳过备份（已有 %d 份备份保持不变）",
+                     total, len(existing))
+            return str(existing[-1]) if existing else ""
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        dst = backup_dir / f"bili-data-{tag}-{time.strftime('%Y%m%d_%H%M%S')}"
+        dst.mkdir(parents=True, exist_ok=True)
+        for p in files:
+            shutil.copy2(p, dst / p.name)
+        if store.DB_FILE.exists():
+            store.backup_database(dst / store.DB_FILE.name)
+        for old in sorted(backup_dir.glob("bili-data-*")):
+            if old != dst:
+                shutil.rmtree(old, ignore_errors=True)
+        return str(dst)
+    except Exception as e:
+        log.warning("自动备份失败: %s", e)
+        return ""
+
+
+class DataIn(BaseModel):
+    bundle: dict = {}
+    scope: str = "all"
+    scopes: list[str] = []
+
+
+@app.get("/api/data/export")
+def data_export():
+    """导出全部项目数据为一个 JSON 文件下载（不含 cookie / api_key）。"""
+    bundle = store.export_all()
+    fn = "bili_fav_data_" + time.strftime("%Y%m%d_%H%M%S") + ".json"
+    return JSONResponse(content=bundle,
+                        headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@app.post("/api/data/import")
+def data_import(body: DataIn):
+    """导入项目数据（覆盖当前数据）。导入前自动备份当前数据。"""
+    if not body.bundle:
+        return JSONResponse({"ok": False, "error": "未收到数据"}, status_code=400)
+    bk = _autobackup_data("before-import")
+    try:
+        st = store.import_all(body.bundle)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"导入失败：{e}"}, status_code=400)
+    emit("warn", f"已导入项目数据（覆盖原有）：{st}；原数据已备份到 {bk}")
+    return {"ok": True, "stats": st, "backup": bk}
+
+
+@app.post("/api/data/clear")
+def data_clear(body: DataIn):
+    """清除指定范围的数据。scope: scan / analysis / plan / all。清除前**自动备份**。"""
+    valid = {"scan", "analysis", "plan", "folder_merge", "folder_profile", "all"}
+    scopes = [x for x in body.scopes if x in valid]
+    if not scopes:
+        scopes = [body.scope if body.scope in valid else "all"]
+    if "all" in scopes:
+        scopes = ["all"]
+    bk = _autobackup_data("before-clear")
+    cleared = []
+    for scope in scopes:
+        cleared.extend(store.clear_scope(scope))
+    cleared = list(dict.fromkeys(cleared))
+    emit("warn", f"已清除数据（{', '.join(scopes)}）：{', '.join(cleared)}；清除前已自动备份到 {bk}")
+    return {"ok": True, "scopes": scopes, "cleared": cleared,
+            "backup": bk, "stats": store.stats()}
+
+
+# ============ 事件流（SSE） ============
+@app.get("/api/events/stream")
+async def events_stream(since: int = 0):
+    """服务器推送事件流；空闲时不发送任何数据（事件驱动，非轮询）。"""
+    from fastapi.responses import StreamingResponse
+
+    async def gen():
+        last = int(since)
+        # 建立连接时先把历史事件(最近 200 条)补发，避免刷新丢日志
+        with _evt_lock:
+            backlog = [e for e in APP["events"]][-200:]
+        for e in backlog:
+            if e["id"] > last:
+                last = e["id"]
+                yield f"data: {json.dumps(e, ensure_ascii=False)}\n\n"
+        while True:
+            await asyncio.sleep(0.4)
+            with _evt_lock:
+                new = [e for e in APP["events"] if e["id"] > last]
+            for e in new:
+                last = e["id"]
+                yield f"data: {json.dumps(e, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache",
+                                      "X-Accel-Buffering": "no"})
+
+
+# ============ 阶段1: 收藏夹目录与扫描 ============
+class ScanIn(BaseModel):
+    folder_ids: Optional[list[str]] = None
+    mode: str = "resume"       # resume / rebuild
+
+
+class ScanSelectionIn(BaseModel):
+    folder_ids: list[str]
+
+
+def _folder_view(folders: list) -> dict:
+    done = {str(x) for x in store.load_scan_done()}
+    states = store.load_folder_scan_states()
+    selected = set(store.load_scan_selection())
+    rows = [{**f, "media_id": str(f["media_id"]),
+             "done": (states.get(str(f["media_id"]), {}).get("status") == "complete" and
+                     states.get(str(f["media_id"]), {}).get("expected_count") == int(f.get("count", 0) or 0))
+                     or (str(f["media_id"]) in done and not states.get(str(f["media_id"]))),
+             "scan_state": states.get(str(f["media_id"]), {}).get("status", "never"),
+             "scan_strategy": states.get(str(f["media_id"]), {}).get("strategy"),
+             "scanned_count": states.get(str(f["media_id"]), {}).get("fetched_count", 0),
+             "scanned_at": states.get(str(f["media_id"]), {}).get("snapshot_completed_at"),
+             "selected": str(f["media_id"]) in selected} for f in folders]
+    return {"folders": rows, "selected_ids": list(selected)}
+
+
+@app.get("/api/folders")
+def folders_get():
+    return _folder_view(store.load_folders())
+
+
+@app.post("/api/folders/refresh")
+def folders_refresh():
+    if APP["scan_run"] and APP["scan_run"].get("running"):
+        return JSONResponse({"ok": False, "error": "扫描运行中，暂不刷新目录"}, status_code=409)
+    try:
+        session = bili_api.BiliSession(get_session_cookie())
+        folders = session.list_folders()
+        store.save_folders(folders)
+        APP["folders"] = folders
+        emit("ok", f"已刷新收藏夹目录：{len(folders)} 个")
+        return {"ok": True, **_folder_view(folders)}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.put("/api/scan/selection")
+def scan_selection(body: ScanSelectionIn):
+    valid = {str(f["media_id"]) for f in store.load_folders()}
+    ids = list(dict.fromkeys(str(x) for x in body.folder_ids))
+    unknown = [x for x in ids if x not in valid]
+    if unknown:
+        return JSONResponse({"ok": False, "error": f"包含不存在的收藏夹：{unknown[:3]}"}, status_code=400)
+    store.save_scan_selection(ids)
+    return {"ok": True, "folder_ids": ids}
+
+
+@app.post("/api/scan")
+def scan(body: Optional[ScanIn] = None):
+    """按文件夹选择批量元数据或分页读取，校验后更新该夹快照。"""
+    if APP["scan_run"] and APP["scan_run"].get("running"):
+        return JSONResponse({"ok": False, "error": "扫描已在运行中"}, status_code=400)
+
+    def run():
+        run_id = uuid.uuid4().hex
+        app_state = APP["scan_run"] = {"id": run_id, "running": True, "step": "init", "done": 0,
+                                       "total": 0, "error": None, "strategy": "",
+                                       "folder_done": 0, "folder_total": 0, "current": ""}
+        try:
+            cfg = load_config()
+            session = bili_api.BiliSession(get_session_cookie())
+            session.read_interval = max(2, int(cfg.get("scan_interval", 10) or 10))
+            APP["session"] = session
+            emit("info", f"开始扫描（请求间隔 ≥{session.read_interval} 秒）", kind="scan_start")
+
+            app_state["step"] = "folders"
+            folders = session.list_folders()
+            store.save_folders(folders)
+            APP["folders"] = folders
+            requested = body.folder_ids if body and body.folder_ids is not None else store.load_scan_selection()
+            requested = {str(x) for x in requested}
+            picked = [f for f in folders if not requested or str(f["media_id"]) in requested]
+            if not picked:
+                raise ValueError("未选择任何收藏夹")
+            store.save_scan_selection([str(f["media_id"]) for f in picked])
+            app_state["selected_ids"] = [str(f["media_id"]) for f in picked]
+            app_state["mode"] = body.mode if body else "resume"
+            app_state["step"] = "videos"
+            app_state["total"] = sum(int(f.get("count", 0) or 0) for f in picked)
+            app_state["folder_total"] = len(picked)
+            states = store.load_folder_scan_states()
+            rebuild = bool(body and body.mode == "rebuild")
+            eligible = [f for f in picked if rebuild or
+                        states.get(str(f["media_id"]), {}).get("status") != "complete" or
+                        states.get(str(f["media_id"]), {}).get("expected_count") != int(f.get("count", 0) or 0)]
+            app_state["folder_done"] = len(picked) - len(eligible)
+            done = sum(int(states.get(str(f["media_id"]), {}).get("fetched_count", 0) or 0)
+                       for f in picked if f not in eligible)
+            app_state["done"] = done
+            emit("info", f"扫描范围 {len(picked)} 个夹，{len(eligible)} 个需扫描，目录计数 {app_state['total']} 条")
+            should_stop = lambda: bool(app_state.get("stop"))
+
+            for folder in sorted(eligible, key=lambda x: int(x.get("count", 0) or 0)):
+                if should_stop():
+                    app_state["error"] = "已手动停止（进度已保存）"
+                    break
+                mid = str(folder["media_id"])
+                expected = int(folder.get("count", 0) or 0)
+                strategy = ("indexed_ids" if 0 <= expected <= bili_api.FAV_BULK_CANDIDATE_LIMIT
+                            else "paged")
+                app_state["current"] = folder["title"]
+                app_state["strategy"] = strategy
+                store.begin_folder_scan(run_id, mid, expected, strategy)
+                emit("info", f"开始扫描「{folder['title']}」：" +
+                     ("ID 清单 + 本地索引" if strategy == "indexed_ids" else "分页明细"),
+                     kind="scan_progress", done=done, total=app_state["total"],
+                     fdone=app_state["folder_done"], ftotal=app_state["folder_total"],
+                     current=folder["title"], strategy=strategy)
+
+                staged: dict[str, dict] = {}
+                fetched = 0
+
+                def add_item(item, old=None):
+                    nonlocal fetched
+                    key = str(item.get("bvid") or item.get("resource_key") or
+                              f"{item.get('type', 2)}:{item.get('id') or item.get('aid') or ''}")
+                    old = old or {}
+                    rec = {**old, **item}
+                    memberships = {str(x) for x in old.get("folder_ids", [])}
+                    if old.get("source_folder_id"):
+                        memberships.add(str(old["source_folder_id"]))
+                    memberships.add(mid)
+                    rec["folder_ids"] = sorted(memberships)
+                    rec["source_folder_id"] = old.get("source_folder_id") or mid
+                    staged[key] = rec
+                    fetched += 1
+
+                if strategy == "indexed_ids":
+                    try:
+                        resource_ids = session.get_folder_resource_ids(mid, expected,
+                                                                       should_stop=should_stop)
+                        if should_stop():
+                            break
+                        cached = store.load_video_index_for_resources(resource_ids)
+                        missing_ids = [resource for resource in resource_ids
+                                       if f"{resource['type']}:{resource['id']}" not in cached]
+                        fresh_records = session.get_resource_infos_bulk(
+                            mid, missing_ids, should_stop=should_stop)
+                        fresh_by_id = {
+                            f"{int(item.get('type', 2) or 2)}:{item.get('id') or item.get('aid') or ''}": item
+                            for item in fresh_records
+                        }
+                        for resource in resource_ids:
+                            cache_key = f"{resource['type']}:{resource['id']}"
+                            item = cached.get(cache_key)
+                            if item is not None:
+                                item = dict(item)
+                                item["id"] = str(resource["id"])
+                                item["type"] = int(resource["type"])
+                                add_item(item, old=cached[cache_key])
+                            else:
+                                item = fresh_by_id.get(cache_key)
+                                if item is None:
+                                    raise bili_api.BiliApiError(f"缺少资源元数据：{cache_key}")
+                                add_item(item)
+                        fetched = len(resource_ids)
+                        cache_hits = len(resource_ids) - len(missing_ids)
+                        emit("info", f"「{folder['title']}」索引命中 {cache_hits}/{len(resource_ids)} 条，新增获取 {len(missing_ids)} 条元数据",
+                             kind="scan_progress", current=folder["title"], strategy=strategy)
+                    except bili_api.RateLimitedError:
+                        raise
+                    except bili_api.BiliApiError as exc:
+                        if "登录态失效" in str(exc):
+                            raise
+                        emit("warn", f"ID/元数据索引路径未通过完整性检查（{exc}），改用分页明细",
+                             kind="scan_progress", current=folder["title"])
+                        strategy = "paged_index_fallback"
+                        app_state["strategy"] = strategy
+                        store.begin_folder_scan(run_id, mid, expected, strategy)
+                    else:
+                        if staged:
+                            store.save_scan_stage(run_id, mid, staged)
+                        store.update_folder_scan_progress(mid, len(staged))
+                        done += fetched
+                        app_state["done"] = done
+                        ANALYZE_WAKE.set()
+                        emit("progress", "", kind="scan_progress", done=done,
+                             total=app_state["total"], fdone=app_state["folder_done"],
+                             ftotal=app_state["folder_total"], current=folder["title"],
+                             unique=len(staged), strategy=strategy)
+
+                if strategy.startswith("paged"):
+                    batch = {}
+                    page_index = 1
+                    def on_page_event(ev):
+                        if ev.get("type") == "req":
+                            emit("info", f"「{folder['title']}」分页读取中，预计 {ev['total_pages']} 页",
+                                 kind="scan_progress", current=folder["title"], strategy=strategy)
+                    for item in session.iter_folder_videos(mid, expected,
+                                                          should_stop=should_stop,
+                                                          on_event=on_page_event):
+                        add_item(item)
+                        key = str(item.get("bvid") or item.get("resource_key") or
+                                  f"{item.get('type', 2)}:{item.get('id') or item.get('aid') or ''}")
+                        batch[key] = staged[key]
+                        if len(batch) >= bili_api.PAGE_SIZE:
+                            store.save_scan_stage(run_id, mid, batch)
+                            batch = {}
+                            store.update_folder_scan_progress(mid, len(staged), page_index + 1)
+                            page_index += 1
+                            done += bili_api.PAGE_SIZE
+                            app_state["done"] = done
+                            ANALYZE_WAKE.set()
+                            emit("progress", "", kind="scan_progress", done=done,
+                                 total=app_state["total"], fdone=app_state["folder_done"],
+                                 ftotal=app_state["folder_total"], current=folder["title"],
+                                 unique=len(staged), strategy=strategy)
+                    if batch:
+                        store.save_scan_stage(run_id, mid, batch)
+                    if should_stop():
+                        store.update_folder_scan_progress(mid, len(staged), page_index,
+                                                          "用户停止；该夹快照尚未完成")
+                        app_state["error"] = "已手动停止（进度已保存）"
+                        emit("warn", f"已停止；「{folder['title']}」暂存了 {len(staged)} 条，下次重扫该夹",
+                             kind="scan_end")
+                        break
+                    fetched = len(staged)
+                    remainder = fetched - max(0, page_index - 1) * bili_api.PAGE_SIZE
+                    done += max(0, remainder)
+                    app_state["done"] = done
+
+                if should_stop():
+                    store.update_folder_scan_progress(mid, len(staged), None,
+                                                      "用户停止；该夹快照尚未完成")
+                    app_state["error"] = "已手动停止（进度已保存）"
+                    emit("warn", f"已停止；「{folder['title']}」暂存了 {len(staged)} 条，下次重扫该夹",
+                         kind="scan_end")
+                    break
+                unique_count = len(staged)
+                if fetched != expected or unique_count != expected:
+                    error = f"目录计数 {expected}，接口条数 {fetched}，唯一资源 {unique_count}；保留旧完整快照"
+                    store.update_folder_scan_progress(mid, unique_count, None, error)
+                    store.mark_folder_scan(mid, "inconsistent", error)
+                    app_state["error"] = app_state.get("error") or "收藏夹快照计数不一致，请刷新目录后重扫"
+                    emit("warn", f"「{folder['title']}」{error}", kind="scan_progress", current="")
+                    continue
+
+                store.finish_folder_scan(run_id, mid, expected, unique_count)
+                app_state["current"] = ""
+                app_state["folder_done"] += 1
+                ANALYZE_WAKE.set()
+                emit("ok", f"「{folder['title']}」完成：{unique_count} 条（{strategy}）",
+                     kind="scan_progress", done=done, total=app_state["total"],
+                     fdone=app_state["folder_done"], ftotal=app_state["folder_total"],
+                     current="", unique=unique_count, strategy=strategy)
+
+            app_state["step"] = "done"
+            app_state["done"] = done
+            if not app_state.get("error"):
+                picked_ids = {str(f["media_id"]) for f in picked}
+                scoped_unique = len([v for v in store.load_videos()
+                                     if picked_ids.intersection(str(x) for x in v.get("folder_ids", []))])
+                emit("ok", f"扫描完成：当前范围共 {scoped_unique} 条去重内容（目录计数 {done} 条）",
+                     kind="scan_end", unique=scoped_unique, done=done)
+            else:
+                emit("warn", f"扫描结束但有未完整收藏夹：{app_state['error']}", kind="scan_end")
+        except bili_api.RateLimitedError as exc:
+            app_state["error"] = f"风控：{exc}"
+            emit("err", f"风控：{exc}", kind="scan_end")
+        except bili_api.BiliApiError as exc:
+            app_state["error"] = str(exc)
+            emit("err", f"扫描出错：{exc}", kind="scan_end")
+        except Exception as exc:
+            app_state["error"] = f"{exc}\n{traceback.format_exc()}"
+            emit("err", f"扫描异常：{exc}", kind="scan_end")
+        finally:
+            app_state["running"] = False
+            app_state["current"] = ""
+            ANALYZE_WAKE.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True, "started": True}
+
+@app.get("/api/scan/status")
+def scan_status():
+    return APP["scan_run"] or {"running": False, "error": None}
+
+
+@app.post("/api/scan/stop")
+def scan_stop():
+    if APP["scan_run"]:
+        APP["scan_run"]["stop"] = True
+        return {"ok": True}
+    return {"ok": False, "error": "没有运行中的扫描"}
+
+
+@app.get("/api/scan/tree")
+def scan_tree():
+    """返回收藏夹树：每个夹的名称/应有条数/已扫条数/是否完成，供前端弹窗展示。"""
+    folders = store.load_folders()
+    states = store.load_folder_scan_states()
+    videos = store.load_videos_raw()
+    counts: dict = {}
+    for v in videos.values():
+        memberships = v.get("folder_ids") or [v.get("source_folder_id", "")]
+        for sid in {str(x) for x in memberships}:
+            counts[sid] = counts.get(sid, 0) + 1
+    tree = []
+    for f in sorted(folders, key=lambda x: int(x.get("count", 0))):
+        mid = f["media_id"]
+        tree.append({
+            "media_id": mid,
+            "title": f["title"],
+            "expected": int(f["count"]),
+            "scanned": max(counts.get(str(mid), 0),
+                            int(states.get(str(mid), {}).get("fetched_count", 0) or 0)),
+            "done": (states.get(str(mid), {}).get("status") == "complete" and
+                     states.get(str(mid), {}).get("expected_count") == int(f.get("count", 0) or 0)),
+            "status": states.get(str(mid), {}).get("status", "never"),
+            "strategy": states.get(str(mid), {}).get("strategy", ""),
+            "scanned_at": states.get(str(mid), {}).get("snapshot_completed_at"),
+        })
+    return {
+        "folders": tree,
+        "done_count": len([f for f in tree if f["done"]]),
+        "total_count": len(folders),
+    }
+
+
+@app.get("/api/library/folders/{media_id}/items")
+def library_folder_items(media_id: str, q: str = "", offset: int = 0, limit: int = 100):
+    """浏览本地 SQLite 中已扫描的收藏夹内容，不触发 B 站网络请求。"""
+    if not any(str(folder.get("media_id")) == str(media_id) for folder in store.load_folders()):
+        return JSONResponse({"error": "收藏夹不存在"}, status_code=404)
+    items, total = store.load_folder_items(media_id, query=q, offset=offset, limit=limit)
+    safe_offset = max(0, int(offset))
+    safe_limit = max(1, min(100, int(limit)))
+    return {
+        "media_id": str(media_id),
+        "offset": safe_offset,
+        "limit": safe_limit,
+        "total": total,
+        "items": items,
+    }
+
+
+# ============ 收藏夹整理：合并方案与执行 ============
+class FolderMergeGroupIn(BaseModel):
+    target_id: str
+    source_ids: list[str]
+    final_name: str
+    delete_sources: bool = True
+    reason: str = ""
+    confidence: float = 0.0
+    level: str = ""
+    merge_type: str = ""
+    risk: str = ""
+    profile_evidence: str = ""
+    profile_context_ids: list[str] = Field(default_factory=list)
+    profile_context_versions: dict[str, str] = Field(default_factory=dict)
+    profile_basis_versions: dict[str, str] = Field(default_factory=dict)
+
+
+class FolderMergePlanIn(BaseModel):
+    groups: list[FolderMergeGroupIn]
+
+
+@app.get("/api/folder-organize")
+def folder_organize_get():
+    saved_run = store.load_folder_merge_state()
+    if not APP.get("folder_merge_run") and saved_run.get("running"):
+        saved_run.update(running=False, status="interrupted")
+    current_profiles = {row["id"]: row for row in _current_folder_profile_contexts()}
+    current_profile_versions = {mid: row["revision"] for mid, row in current_profiles.items()}
+    def decorate(groups):
+        decorated = []
+        for group in groups:
+            row = dict(group)
+            context_ids = {str(x) for x in row.get("profile_context_ids", [])}
+            context_versions = {str(k): str(v) for k, v in
+                                (row.get("profile_context_versions") or {}).items()}
+            basis_versions = {str(k): str(v) for k, v in
+                              (row.get("profile_basis_versions") or {}).items()}
+            basis_match = bool(basis_versions) and basis_versions == current_profile_versions
+            versions_match = bool(context_ids) and all(
+                current_profiles.get(mid, {}).get("revision") and
+                context_versions.get(mid) == current_profiles[mid]["revision"]
+                for mid in context_ids)
+            row["profile_basis_state"] = (
+                "current" if basis_match else
+                ("stale" if basis_versions else "none"))
+            row["profile_context_state"] = (
+                "current" if basis_match or versions_match
+                else ("stale" if context_ids or basis_versions else "none"))
+            decorated.append(row)
+        return decorated
+    return {"folders": store.load_folders(), "draft": decorate(store.load_folder_merge_draft()),
+            "plan": decorate(store.load_folder_merge_plan()),
+            "run": APP.get("folder_merge_run") or saved_run,
+            "ai_run": APP.get("folder_merge_ai_run") or {"running": False}}
+
+
+@app.post("/api/folder-organize/suggest")
+def folder_organize_suggest():
+    if APP.get("folder_merge_ai_run") and APP["folder_merge_ai_run"].get("running"):
+        return JSONResponse({"ok": False, "error": "AI 合并分析已在运行"}, status_code=409)
+    readiness = _organization_profile_readiness()
+    if not readiness["ready"]:
+        names = "、".join(row["name"] for row in readiness["missing"][:8])
+        extra = f"；尚未就绪：{names}" if names else ""
+        return JSONResponse({"ok": False,
+                             "error": readiness["message"] + extra,
+                             "readiness": readiness}, status_code=409)
+    folders = [f for f in store.load_folders() if int(f.get("count", 0) or 0) > 0]
+    videos = store.load_videos()
+    current_profiles = {row["id"]: row for row in _current_folder_profile_contexts()}
+    all_profile_ids = sorted(current_profiles)
+    all_profile_versions = {mid: current_profiles[mid]["revision"] for mid in all_profile_ids}
+    if not folders:
+        return JSONResponse({"ok": False, "error": "请先刷新收藏夹目录"}, status_code=400)
+    llm_cfg = make_llm_config()
+    if not llm_cfg.configured:
+        return JSONResponse({"ok": False, "error": "LLM 未配置"}, status_code=400)
+    state = APP["folder_merge_ai_run"] = {"running": True, "error": None, "count": 0}
+
+    def run():
+        try:
+            by_folder = {str(f["media_id"]): [] for f in folders}
+            overlap_counts: dict[tuple[str, str], int] = {}
+            for v in videos:
+                memberships = {str(x) for x in v.get("folder_ids", [])}
+                if not memberships and v.get("source_folder_id") is not None:
+                    memberships.add(str(v.get("source_folder_id")))
+                mids = sorted(x for x in memberships if x in by_folder)
+                for i, left in enumerate(mids):
+                    for right in mids[i + 1:]:
+                        overlap_counts[(left, right)] = overlap_counts.get((left, right), 0) + 1
+                sample = {"title": (v.get("title") or "")[:100]}
+                if v.get("upper_name"): sample["upper"] = str(v["upper_name"])[:40]
+                for fid in memberships:
+                    bucket = by_folder.get(fid)
+                    if bucket is not None:
+                        bucket.append(sample)
+
+            def spread_samples(items: list, limit: int = 9) -> list:
+                if len(items) <= limit:
+                    return items
+                indexes = sorted({round(i * (len(items) - 1) / (limit - 1)) for i in range(limit)})
+                return [items[i] for i in indexes]
+
+            profiles = []
+            for f in folders:
+                fid = str(f["media_id"])
+                overlaps = []
+                for (left, right), n in overlap_counts.items():
+                    if fid == left: overlaps.append({"folder_id": right, "count": n})
+                    elif fid == right: overlaps.append({"folder_id": left, "count": n})
+                overlaps.sort(key=lambda x: x["count"], reverse=True)
+                profile_row = {"id": fid, "name": f["title"],
+                               "count": int(f.get("count", 0) or 0),
+                               "samples": spread_samples(by_folder.get(fid, [])),
+                               "overlaps": overlaps[:8]}
+                saved_profile = current_profiles.get(fid)
+                if saved_profile:
+                    profile_row["current_content_profile"] = {
+                        "summary": saved_profile.get("summary", ""),
+                        "topics": saved_profile.get("topics", []),
+                        "typical_content": saved_profile.get("typical_content", []),
+                        "out_of_scope": saved_profile.get("out_of_scope", []),
+                        "coherence": saved_profile.get("coherence", ""),
+                        "confidence": saved_profile.get("confidence"),
+                    }
+                profiles.append(profile_row)
+            raw_groups = llm_analyzer.suggest_folder_merges(llm_cfg, profiles)
+            known = {str(f["media_id"]): f for f in folders}
+            used = set()
+            groups = []
+            for raw in raw_groups:
+                target = str(raw.get("target_id", ""))
+                sources = list(dict.fromkeys(str(x) for x in raw.get("source_ids", [])))
+                try: confidence = float(raw.get("confidence", 0) or 0)
+                except Exception: confidence = 0.0
+                level = str(raw.get("level", "")).lower()
+                if level not in ("high", "medium"):
+                    level = "high" if confidence >= 0.82 else "medium"
+                members = {target, *sources}
+                if (target not in known or not sources or target in sources or
+                        any(x not in known for x in sources) or used.intersection(members) or
+                        known[target]["title"] == "默认收藏夹" or
+                        any(known[x]["title"] == "默认收藏夹" for x in sources) or
+                        confidence < 0.68):
+                    continue
+                used.update(members)
+                groups.append({"target_id": target, "target_name": known[target]["title"],
+                               "source_ids": sources,
+                               "source_names": [known[x]["title"] for x in sources],
+                               "final_name": str(raw.get("final_name") or known[target]["title"]).strip(),
+                               "delete_sources": True, "status": "pending",
+                               "reason": str(raw.get("reason", "")).strip(),
+                               "profile_evidence": str(raw.get("profile_evidence", "")).strip(),
+                               "profile_context_ids": all_profile_ids,
+                               "profile_context_versions": all_profile_versions,
+                               "profile_basis_versions": all_profile_versions,
+                               "risk": str(raw.get("risk", "")).strip(),
+                               "merge_type": str(raw.get("merge_type", "")).strip(),
+                               "level": level, "confidence": confidence})
+            store.save_folder_merge_draft(groups)
+            state["count"] = len(groups)
+            emit("ok", f"AI 合并分析完成：生成 {len(groups)} 个候选组",
+                 phase="folder_merge_ai", kind="folder_merge_ai_end")
+        except Exception as e:
+            state["error"] = str(e)
+            emit("err", f"AI 合并分析失败：{e}", phase="folder_merge_ai",
+                 kind="folder_merge_ai_end")
+        finally:
+            state["running"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True, "started": True}
+
+
+@app.put("/api/folder-organize/draft")
+def folder_organize_draft(body: FolderMergePlanIn):
+    known = {str(f["media_id"]): f for f in store.load_folders()}
+    groups = []
+    for raw in body.groups:
+        target = str(raw.target_id)
+        sources = list(dict.fromkeys(str(x) for x in raw.source_ids if str(x) != target))
+        members = {target, *sources}
+        groups.append({"target_id": target,
+                       "target_name": (known.get(target) or {}).get("title", ""),
+                       "source_ids": sources,
+                       "source_names": [(known.get(x) or {}).get("title", x) for x in sources],
+                       "final_name": raw.final_name.strip(), "delete_sources": raw.delete_sources,
+                       "reason": raw.reason.strip(), "confidence": raw.confidence,
+                       "profile_evidence": raw.profile_evidence.strip(),
+                       "profile_context_ids": sorted(members.intersection(str(x) for x in raw.profile_context_ids)),
+                       "profile_context_versions": {
+                           str(mid): str(version) for mid, version in raw.profile_context_versions.items()
+                           if str(mid) in members},
+                       "profile_basis_versions": {
+                           str(mid): str(version) for mid, version in raw.profile_basis_versions.items()},
+                       "risk": raw.risk.strip(), "merge_type": raw.merge_type.strip(),
+                       "level": raw.level.strip(),
+                       "status": "pending"})
+    store.save_folder_merge_draft(groups)
+    return {"ok": True, "groups": groups}
+
+
+@app.put("/api/folder-organize/plan")
+def folder_organize_plan(body: FolderMergePlanIn):
+    if body.groups:
+        readiness = _organization_profile_readiness()
+        if not readiness["ready"]:
+            return JSONResponse({"ok": False, "error": readiness["message"],
+                                 "readiness": readiness}, status_code=409)
+    known = {str(f["media_id"]): f for f in store.load_folders()}
+    current_contexts = _current_folder_profile_contexts()
+    profile_ids = {row["id"] for row in current_contexts}
+    profile_versions = {row["id"]: row["revision"] for row in current_contexts}
+    old_groups = store.load_folder_merge_plan()
+    old_by_key = {(str(g.get("target_id")), tuple(sorted(str(x) for x in g.get("source_ids", []))),
+                   (g.get("final_name") or "").strip()): g for g in old_groups}
+    used_folders = set()
+    groups = []
+    for i, raw in enumerate(body.groups, 1):
+        target = str(raw.target_id)
+        sources = list(dict.fromkeys(str(x) for x in raw.source_ids))
+        if target not in known or target not in profile_ids:
+            return JSONResponse({"ok": False, "error": f"第 {i} 组目标夹不存在或没有当前画像"}, status_code=400)
+        if not sources or any(x not in known or x not in profile_ids for x in sources):
+            return JSONResponse({"ok": False, "error": f"第 {i} 组来源夹无效或没有当前画像"}, status_code=400)
+        basis_versions = {str(k): str(v) for k, v in raw.profile_basis_versions.items()}
+        if basis_versions and basis_versions != profile_versions:
+            return JSONResponse({"ok": False,
+                                 "error": f"第 {i} 组建议使用的画像版本已变化，请重新生成 AI 合并建议"},
+                                status_code=409)
+        if (not basis_versions and
+                (raw.confidence > 0 or raw.level or raw.merge_type or raw.profile_evidence)):
+            return JSONResponse({"ok": False,
+                                 "error": f"第 {i} 组是旧 AI 建议且缺少画像版本记录，请重新生成 AI 合并建议"},
+                                status_code=409)
+        if target in sources:
+            return JSONResponse({"ok": False, "error": f"第 {i} 组的目标夹不能同时是来源夹"}, status_code=400)
+        members = {target, *sources}
+        if used_folders.intersection(members):
+            return JSONResponse({"ok": False, "error": f"第 {i} 组包含已被其他组使用的收藏夹"}, status_code=400)
+        used_folders.update(members)
+        group = {"target_id": target, "target_name": known[target]["title"],
+                       "source_ids": sources,
+                       "source_names": [known[x]["title"] for x in sources],
+                       "final_name": raw.final_name.strip() or known[target]["title"],
+                       "delete_sources": raw.delete_sources, "status": "pending",
+                       "reason": raw.reason.strip(), "confidence": raw.confidence,
+                       "profile_evidence": raw.profile_evidence.strip(),
+                       "profile_context_ids": sorted(profile_ids),
+                       "profile_context_versions": profile_versions,
+                       "profile_basis_versions": profile_versions}
+        group.update(risk=raw.risk.strip(), merge_type=raw.merge_type.strip(), level=raw.level.strip())
+        key = (target, tuple(sorted(sources)), group["final_name"])
+        previous = old_by_key.get(key)
+        if previous and previous.get("status") in ("done", "unknown"):
+            group.update(status=previous["status"], results=previous.get("results", []))
+            if previous.get("error"): group["error"] = previous["error"]
+        groups.append(group)
+    store.save_folder_merge_plan(groups)
+    return {"ok": True, "groups": groups}
+
+
+@app.post("/api/folder-organize/start")
+def folder_organize_start():
+    if APP.get("folder_merge_run") and APP["folder_merge_run"].get("running"):
+        return JSONResponse({"ok": False, "error": "收藏夹合并已在运行"}, status_code=409)
+    if any(APP.get(k) and APP[k].get("running") for k in ("scan_run", "apply_run")):
+        return JSONResponse({"ok": False, "error": "扫描或内容执行正在运行，请稍后再合并"}, status_code=409)
+    plan = store.load_folder_merge_plan()
+    pending = [g for g in plan if g.get("status") not in ("done", "unknown")]
+    if not pending:
+        return JSONResponse({"ok": False, "error": "没有待执行的收藏夹合并方案"}, status_code=400)
+    readiness = _organization_profile_readiness()
+    if not readiness["ready"]:
+        return JSONResponse({"ok": False, "error": readiness["message"],
+                             "readiness": readiness}, status_code=409)
+    profile_ids = {row["id"] for row in _current_folder_profile_contexts()}
+    if any(str(g.get("target_id", "")) not in profile_ids or
+           any(str(mid) not in profile_ids for mid in g.get("source_ids", []))
+           for g in pending):
+        return JSONResponse({"ok": False, "error": "待执行方案包含没有当前画像的收藏夹，请重新生成并提交方案"}, status_code=409)
+    current_versions = readiness["profile_versions"]
+    if any(set(str(x) for x in g.get("profile_context_ids", [])) != set(current_versions) or
+           {str(k): str(v) for k, v in (g.get("profile_context_versions") or {}).items()} != current_versions
+           for g in pending):
+        return JSONResponse({"ok": False, "error": "合并方案使用的画像版本已变化，请重新生成并提交合并建议"}, status_code=409)
+    try:
+        session = bili_api.BiliSession(get_session_cookie())
+        cfg = load_config()
+        session.read_interval = int(cfg.get("scan_interval", 2) or 2)
+        session.write_interval = float(cfg.get("folder_merge_interval", 2) or 2)
+        owner_mid = session.get_mid()
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
+    state = APP["folder_merge_run"] = {"running": True, "stop": False, "done": 0,
+                                       "total": len(pending), "error": None, "status": "running"}
+
+    def save():
+        store.save_folder_merge_plan(plan)
+        store.save_folder_merge_state(dict(state))
+
+    def chunks(items, size=1000):
+        for i in range(0, len(items), size):
+            yield items[i:i + size]
+
+    def run():
+        try:
+            # 先把远端目录变化同步到 SQLite，并在所有写请求之前重验画像版本。
+            live_folders = session.list_folders()
+            store.save_folders(live_folders)
+            readiness_now = _organization_profile_readiness()
+            if not readiness_now["ready"]:
+                state.update(status="blocked", error=readiness_now["message"], stop=True)
+                emit("err", f"收藏夹合并已阻止：{readiness_now['message']}", phase="folder_merge")
+                return
+            if any(set(str(x) for x in g.get("profile_context_ids", [])) !=
+                   set(readiness_now["profile_versions"]) or
+                   {str(k): str(v) for k, v in (g.get("profile_context_versions") or {}).items()} !=
+                   readiness_now["profile_versions"] for g in pending):
+                state.update(status="blocked", error="画像版本在执行前发生变化，请重新生成合并建议",
+                             stop=True)
+                emit("err", "画像版本在执行前发生变化，合并未发送写请求；请重新生成合并建议",
+                     phase="folder_merge")
+                return
+            emit("info", f"开始收藏夹合并：{len(pending)} 组", phase="folder_merge")
+            for group in pending:
+                if state["stop"]: break
+                group["status"] = "running"
+                group["results"] = []
+                group_ok = True
+                live = {str(f["media_id"]): f for f in session.list_folders()}
+                target_id = str(group["target_id"])
+                if target_id not in live:
+                    group.update(status="failed", error="目标收藏夹不存在")
+                    state["done"] += 1; save(); continue
+                for source_id in group["source_ids"]:
+                    if state["stop"]: break
+                    live = {str(f["media_id"]): f for f in session.list_folders()}
+                    source = live.get(str(source_id))
+                    result = {"source_id": str(source_id), "status": "running"}
+                    group["results"].append(result)
+                    if not source:
+                        result["status"] = "already_absent"; save(); continue
+                    count = int(source.get("count", 0) or 0)
+                    videos = list(session.iter_folder_videos(str(source_id), count,
+                                  should_stop=lambda: state["stop"])) if count else []
+                    normal = [int(v.get("aid", 0) or 0) for v in videos
+                              if int(v.get("aid", 0) or 0) > 0 and not _is_invalid(v)]
+                    invalid = [int(v.get("aid", 0) or 0) for v in videos
+                               if int(v.get("aid", 0) or 0) > 0 and _is_invalid(v)]
+                    hidden_invalid = max(0, count - len(videos))
+                    result.update(before=count, movable=len(normal), invalid=len(invalid) + hidden_invalid)
+                    try:
+                        for batch in chunks(normal):
+                            session.move_batch(str(source_id), target_id, batch, mid=owner_mid,
+                                               should_stop=lambda: state["stop"])
+                        for batch in chunks(invalid):
+                            session.batch_delete(str(source_id), batch,
+                                                 should_stop=lambda: state["stop"])
+                        if hidden_invalid:
+                            session.clean_invalid_folder(str(source_id),
+                                                         should_stop=lambda: state["stop"])
+                        # B 站的收藏夹计数在 move 后可能短暂延迟，等待其收敛再决定是否删夹。
+                        after = count
+                        for attempt in range(6):
+                            live_after = {str(f["media_id"]): f for f in session.list_folders()}
+                            after = int((live_after.get(str(source_id)) or {}).get("count", 0) or 0)
+                            if after == 0 or state["stop"]:
+                                break
+                            if attempt < 5:
+                                time.sleep(2)
+                        result["after"] = after
+                        if after:
+                            result.update(status="not_empty", error=f"仍有 {after} 条，未删除夹")
+                            group_ok = False
+                        elif group.get("delete_sources", True):
+                            session.delete_folder(str(source_id), should_stop=lambda: state["stop"])
+                            result["status"] = "merged_and_deleted"
+                        else:
+                            result["status"] = "merged_kept"
+                    except (bili_api.WriteUncertainError, bili_api.RateLimitedError):
+                        raise
+                    except bili_api.BiliApiError as e:
+                        result.update(status="failed", error=str(e)); group_ok = False
+                    save()
+                if state["stop"]: break
+                if group_ok:
+                    final_name = (group.get("final_name") or "").strip()
+                    current = {str(f["media_id"]): f for f in session.list_folders()}.get(target_id)
+                    if current and final_name and current.get("title") != final_name:
+                        session.rename_folder(target_id, final_name, should_stop=lambda: state["stop"])
+                    group["status"] = "done"
+                else:
+                    group["status"] = "partial"
+                state["done"] += 1
+                emit("ok" if group_ok else "warn",
+                     f"合并组完成：{group.get('final_name')}", phase="folder_merge")
+                save()
+            state["status"] = "stopped" if state["stop"] else "done"
+        except bili_api.WriteUncertainError as e:
+            state.update(status="unknown", error=str(e), stop=True)
+            for g in plan:
+                if g.get("status") == "running": g["status"] = "unknown"
+            emit("err", f"合并结果不确定，已停止：{e}", phase="folder_merge")
+        except bili_api.RateLimitedError as e:
+            state.update(status="rate_limited", error=str(e), stop=True)
+            emit("err", f"触发风控，已停止：{e}", phase="folder_merge")
+        except Exception as e:
+            state.update(status="error", error=str(e), stop=True)
+            emit("err", f"收藏夹合并异常：{e}", phase="folder_merge")
+        finally:
+            state["running"] = False
+            save()
+            try:
+                folders = session.list_folders(); store.save_folders(folders); APP["folders"] = folders
+            except Exception: pass
+            emit("ok" if state["status"] == "done" else "warn", "收藏夹合并任务已结束",
+                 phase="folder_merge", kind="folder_merge_end")
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True, "started": True, "total": len(pending)}
+
+
+@app.post("/api/folder-organize/stop")
+def folder_organize_stop():
+    state = APP.get("folder_merge_run")
+    if state and state.get("running"):
+        state["stop"] = True
+        return {"ok": True}
+    return {"ok": False, "error": "没有运行中的收藏夹合并"}
+
+
+# ============ 连接测试 ============
+@app.post("/api/test/cookie")
+def test_cookie():
+    """测试已保存 Cookie 与 B站登录态(nav)。"""
+    try:
+        ci = get_session_cookie()
+        s = bili_api.BiliSession(ci)
+        mid = s.get_mid()
+        if not mid:
+            return {"ok": False, "error": "cookie 读到了，但 B站未返回 mid（可能未登录）"}
+        return {"ok": True, "mid": mid, "message": f"Cookie 可用，已登录 mid={mid}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/api/test/llm")
+def test_llm(body: Optional[ModelTestIn] = None):
+    """测试选中的模型；未传模型 ID 时测试当前激活模型。"""
+    raw = load_config()
+    if body and body.model_id:
+        if not store.get_model(body.model_id):
+            return {"ok": False, "error": "所选模型不存在"}
+        raw["active_model_id"] = body.model_id
+    cfg = resolved_llm_settings(raw)
+    if not cfg.get("base_url") or not cfg.get("model"):
+        return {"ok": False, "error": "请先选择供应商与模型"}
+    try:
+        import requests as _rq
+        url = cfg["base_url"].rstrip("/") + "/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if cfg.get("api_key"):
+            headers["Authorization"] = "Bearer " + cfg["api_key"]
+        test_config = llm_analyzer.LLMConfig(
+            base_url=cfg["base_url"], api_key=cfg.get("api_key", ""),
+            model=cfg["model"], params=cfg.get("llm_params") or {}, max_tokens=16)
+        payload = llm_analyzer.build_chat_completion_payload(
+            test_config, [{"role": "user", "content": "ping"}], max_tokens=16)
+        r = _rq.post(url, json=payload, headers=headers, timeout=30)
+        if not r.ok:
+            return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
+        return {"ok": True, "message": f"模型连接成功（{cfg['model']}）"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ============ 扫码登录获取 Cookie ============
+LOGIN = {"session": None, "qrcode_key": ""}
+PASSPORT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+               "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
+
+@app.post("/api/login/qr/generate")
+def login_qr_generate():
+    """生成 B站登录二维码（返回 base64 图片 + qrcode_key）。"""
+    try:
+        import base64
+        import io
+        import qrcode
+
+        s = requests.Session()
+        s.headers.update({"User-Agent": PASSPORT_UA, "Referer": "https://www.bilibili.com/"})
+        r = s.get("https://passport.bilibili.com/x/passport-login/web/qrcode/generate",
+                  timeout=15)
+        d = r.json()
+        if d.get("code") != 0:
+            return {"ok": False, "error": f"生成二维码失败：{d.get('message')}"}
+        data = d["data"]
+        LOGIN["session"] = s
+        LOGIN["qrcode_key"] = data["qrcode_key"]
+
+        img = qrcode.make(data["url"])
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        return {"ok": True, "image": "data:image/png;base64," + b64,
+                "key": data["qrcode_key"]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/login/qr/poll")
+def login_qr_poll():
+    """轮询扫码状态；成功后解析并保存 cookie。"""
+    s = LOGIN.get("session")
+    if not s:
+        return {"ok": False, "status": "error", "message": "请先生成二维码"}
+    try:
+        import urllib.parse
+        r = s.get("https://passport.bilibili.com/x/passport-login/web/qrcode/poll",
+                  params={"qrcode_key": LOGIN.get("qrcode_key", "")}, timeout=15)
+        d = r.json()
+        data = d.get("data") or {}
+        code = data.get("code")
+        if code == 0:
+            url = data.get("url", "")
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            sessdata = (q.get("SESSDATA") or [""])[0] or s.cookies.get("SESSDATA", "")
+            jct = (q.get("bili_jct") or [""])[0] or s.cookies.get("bili_jct", "")
+            uid = (q.get("DedeUserID") or [""])[0] or s.cookies.get("DedeUserID", "")
+            if sessdata and jct and uid:
+                cur = load_config()
+                cur["cookie_string"] = f"SESSDATA={sessdata}; bili_jct={jct}; DedeUserID={uid}"
+                save_config(cur)
+                LOGIN["session"] = None
+                return {"ok": True, "status": "ok", "message": "登录成功，Cookie 已保存"}
+            return {"ok": False, "status": "error", "message": "登录成功但未解析到 cookie"}
+        mapping = {86101: ("waiting", "未扫码"),
+                   86090: ("scanned", "已扫码，请在手机上确认"),
+                   86038: ("expired", "二维码已过期，请刷新")}
+        st, msg = mapping.get(code, ("unknown", f"未知状态 {code}"))
+        return {"ok": True, "status": st, "message": msg}
+    except Exception as e:
+        return {"ok": False, "status": "error", "message": str(e)}
+
+
+@app.get("/api/login/status")
+def login_status():
+    cfg = load_config()
+    return {"configured": bool((cfg.get("cookie_string") or "").strip())}
+
+
+# ============ 收藏夹画像 ============
+class FolderProfileGenerateIn(BaseModel):
+    folder_ids: list[str]
+    rebuild: bool = False
+
+
+def _folder_profile_data_complete(profile: dict | None) -> bool:
+    if not profile:
+        return False
+    if (not str(profile.get("summary", "")).strip() or
+            not isinstance(profile.get("topics"), list) or len(profile.get("topics", [])) < 2 or
+            not isinstance(profile.get("typical_content"), list) or
+            not isinstance(profile.get("out_of_scope"), list) or
+            profile.get("coherence") not in ("coherent", "mixed", "insufficient")):
+        return False
+    try:
+        if not 0 <= float(profile.get("confidence")) <= 1:
+            return False
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _folder_profile_is_current(profile: dict | None, folder: dict, scan: dict, item_count: int) -> bool:
+    if not _folder_profile_data_complete(profile):
+        return False
+    try:
+        source_count = int(profile.get("source_item_count", -1))
+    except (TypeError, ValueError):
+        return False
+    return (str(profile.get("folder_name", "")) == str(folder.get("title", "")) and
+            source_count == int(item_count) and
+            str(profile.get("source_snapshot_at", "")) ==
+            str(scan.get("snapshot_completed_at", "")))
+
+
+def _current_folder_profile_contexts() -> list[dict]:
+    """Profiles are useful to automation only when bound to the current complete snapshot."""
+    folders = store.load_folders()
+    profiles = store.load_folder_profiles()
+    scans = store.load_folder_scan_states()
+    item_counts = store.load_folder_item_counts()
+    result = []
+    for folder in folders:
+        mid = str(folder["media_id"])
+        profile = profiles.get(mid)
+        count = item_counts.get(mid, 0)
+        scan = scans.get(mid, {})
+        remote_count = int(folder.get("count", 0) or 0)
+        # Empty folders contain no evidence and are not classification targets.
+        if remote_count <= 0:
+            continue
+        complete = (scan.get("status") == "complete" and
+                    int(scan.get("expected_count") or 0) == remote_count and
+                    count == remote_count)
+        if not complete or not _folder_profile_is_current(profile, folder, scan, count):
+            continue
+        result.append({
+            "id": mid,
+            "name": str(folder.get("title", "")),
+            "summary": str(profile.get("summary", "")),
+            "topics": list(profile.get("topics") or []),
+            "typical_content": list(profile.get("typical_content") or []),
+            "out_of_scope": list(profile.get("out_of_scope") or []),
+            "coherence": str(profile.get("coherence", "")),
+            "confidence": profile.get("confidence"),
+            "revision": str(profile.get("profile_revision") or profile.get("generated_at") or
+                             profile.get("updated_at") or ""),
+        })
+    return result
+
+
+def _organization_profile_readiness() -> dict:
+    """Require a complete current profile for every non-empty active folder."""
+    folders = store.load_folders()
+    profiles = store.load_folder_profiles()
+    scans = store.load_folder_scan_states()
+    item_counts = store.load_folder_item_counts()
+    required = []
+    missing = []
+    current_versions = {}
+    empty_count = 0
+    for folder in folders:
+        mid = str(folder["media_id"])
+        remote_count = int(folder.get("count", 0) or 0)
+        if remote_count <= 0:
+            empty_count += 1
+            continue
+        required.append(mid)
+        scan = scans.get(mid, {})
+        local_count = int(item_counts.get(mid, 0) or 0)
+        complete = (scan.get("status") == "complete" and
+                    int(scan.get("expected_count") or 0) == remote_count and
+                    local_count == remote_count)
+        profile = profiles.get(mid)
+        current = complete and _folder_profile_is_current(profile, folder, scan, local_count)
+        if current:
+            current_versions[mid] = str(profile.get("profile_revision") or profile.get("generated_at") or
+                                        profile.get("updated_at") or "")
+            continue
+        if not complete:
+            reason = "扫描未完成或本地数量与目录不一致"
+        elif not profile:
+            reason = "尚未生成画像"
+        elif not _folder_profile_data_complete(profile):
+            reason = "画像结构不完整，请重建"
+        else:
+            reason = "画像对应的名称、成员数或扫描快照已变化"
+        missing.append({"id": mid, "name": str(folder.get("title", "")),
+                        "count": remote_count, "local_count": local_count,
+                        "scan_complete": complete,
+                        "profile_state": "stale" if profile else "missing",
+                        "reason": reason})
+    ready = bool(required) and not missing
+    return {"ready": ready, "required_count": len(required),
+            "current_count": len(required) - len(missing),
+            "empty_count": empty_count, "missing": missing,
+            "profile_versions": current_versions,
+            "message": ("所有有内容的 active 收藏夹均有当前完整画像。" if ready else
+                        ("没有可用于整理的非空 active 收藏夹。" if not required else
+                         "请先完成未扫描的收藏夹扫描，再生成或重建这些收藏夹的画像。"))}
+
+
+@app.get("/api/organization/readiness")
+def organization_readiness_get():
+    return _organization_profile_readiness()
+
+
+@app.get("/api/folder-profiles")
+def folder_profiles_get():
+    folders = store.load_folders()
+    profiles = store.load_folder_profiles()
+    scans = store.load_folder_scan_states()
+    item_counts = store.load_folder_item_counts()
+    rows = []
+    for folder in folders:
+        mid = str(folder["media_id"])
+        profile = profiles.get(mid)
+        scan = scans.get(mid, {})
+        item_count = item_counts.get(mid, 0)
+        complete = (scan.get("status") == "complete" and
+                    int(scan.get("expected_count") or 0) == int(folder.get("count", 0) or 0) and
+                    item_count == int(folder.get("count", 0) or 0))
+        current = complete and _folder_profile_is_current(profile, folder, scan, item_count)
+        rows.append({**folder, "local_count": item_count, "scan_complete": complete,
+                     "scan_state": scan.get("status", "never"),
+                     "scan_completed_at": scan.get("snapshot_completed_at"),
+                     "profile": profile,
+                     "profile_state": "current" if current else ("stale" if profile else "missing")})
+    return {"folders": rows, "run": APP.get("folder_profile_run") or {"running": False}}
+
+
+class FolderIntroPublishIn(BaseModel):
+    intro: str = Field(max_length=200)
+
+
+@app.get("/api/folder-profiles/{media_id}/bilibili")
+def folder_profile_bilibili_info(media_id: str):
+    """按需读取 B 站收藏夹简介，用于上传前对比。"""
+    folder = next((row for row in store.load_folders()
+                   if str(row.get("media_id")) == str(media_id)), None)
+    if not folder:
+        return JSONResponse({"ok": False, "error": "收藏夹不存在或已归档"}, status_code=404)
+    try:
+        session = bili_api.BiliSession(get_session_cookie())
+        session.read_interval = int(load_config().get("scan_interval", 2) or 2)
+        remote = session.get_folder_info(media_id)
+        attr = remote.get("attr")
+        try:
+            privacy = int(attr) & 1 if attr is not None else None
+        except (TypeError, ValueError):
+            privacy = None
+        return {"ok": True, "media_id": str(media_id),
+                "title": str(remote.get("title") or ""),
+                "intro": str(remote.get("intro") or ""),
+                "privacy": privacy}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
+@app.post("/api/folder-profiles/{media_id}/publish-intro")
+def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
+    """把用户确认的画像简介写回 B 站；保留远端标题、隐私状态与封面。"""
+    folder = next((row for row in store.load_folders()
+                   if str(row.get("media_id")) == str(media_id)), None)
+    if not folder:
+        return JSONResponse({"ok": False, "error": "收藏夹不存在或已归档"}, status_code=404)
+    profile = store.load_folder_profiles().get(str(media_id))
+    if not profile or not str(profile.get("summary") or "").strip():
+        return JSONResponse({"ok": False, "error": "该收藏夹还没有可上传的画像简介"}, status_code=409)
+    try:
+        session = bili_api.BiliSession(get_session_cookie())
+        cfg = load_config()
+        session.read_interval = int(cfg.get("scan_interval", 2) or 2)
+        session.write_interval = float(cfg.get("write_interval", 2) or 2)
+        remote = session.get_folder_info(media_id)
+        remote_title = str(remote.get("title") or "").strip()
+        local_title = str(folder.get("title") or "").strip()
+        if not remote_title or remote_title != local_title:
+            return JSONResponse({"ok": False,
+                                 "error": "B 站收藏夹名称与本地目录不一致；请先刷新收藏夹目录，再检查画像后上传"},
+                                status_code=409)
+        result = session.update_folder_intro(media_id, remote, body.intro)
+        saved_intro = str(result.get("intro", body.intro))
+        emit("ok", f"已上传「{local_title}」的收藏夹简介到 B 站（{len(body.intro)} 字）")
+        return {"ok": True, "media_id": str(media_id), "title": local_title,
+                "intro": saved_intro}
+    except bili_api.WriteUncertainError as exc:
+        return JSONResponse({"ok": False,
+                             "error": f"B 站未返回写入确认，结果可能已保存。请重新打开预览核对后再决定是否重试：{exc}"},
+                            status_code=502)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
+@app.post("/api/folder-profiles/generate")
+def folder_profiles_generate(body: FolderProfileGenerateIn):
+    current = APP.get("folder_profile_run") or {}
+    if current.get("running"):
+        return JSONResponse({"ok": False, "error": "收藏夹画像任务已在运行"}, status_code=409)
+    active = {str(folder["media_id"]): folder for folder in store.load_folders()}
+    requested = list(dict.fromkeys(str(mid) for mid in body.folder_ids))
+    if not requested:
+        return JSONResponse({"ok": False, "error": "请至少选择一个 active 收藏夹"}, status_code=400)
+    if any(mid not in active for mid in requested):
+        return JSONResponse({"ok": False, "error": "所选收藏夹不存在或已归档，请刷新列表"}, status_code=400)
+    cfg = load_config()
+    llm_cfg = make_llm_config(cfg)
+    context_tokens = int(resolved_llm_settings(cfg).get("model_context_tokens", 32768) or 32768)
+    tpm_limit_tokens = int(cfg.get("model_tpm_limit", 20000) or 20000)
+    request_interval = float(cfg.get("profile_request_interval", 2.0) or 0)
+    if not llm_cfg.configured:
+        return JSONResponse({"ok": False, "error": "LLM 未配置，请先选择供应商与模型"}, status_code=400)
+
+    state = APP["folder_profile_run"] = {
+        "running": True, "stop": False, "rebuild": bool(body.rebuild),
+        "total": len(requested), "done": 0, "generated": 0,
+        "skipped": 0, "failed": 0, "current": "", "error": None,
+    }
+
+    def run():
+        try:
+            scans = store.load_folder_scan_states()
+            profiles = store.load_folder_profiles()
+            for index, mid in enumerate(requested, 1):
+                if state["stop"]:
+                    break
+                folder = active[mid]
+                state["current"] = folder.get("title", mid)
+                total_items, samples = store.load_folder_profile_samples(mid)
+                scan = scans.get(mid, {})
+                old_profile = profiles.get(mid)
+                remote_count = int(folder.get("count", 0) or 0)
+                complete = (scan.get("status") == "complete" and
+                            int(scan.get("expected_count") or 0) == remote_count and
+                            total_items == remote_count)
+                if total_items <= 0:
+                    state["skipped"] += 1
+                    emit("warn", f"「{folder.get('title')}」没有本地条目，未生成画像",
+                         phase="folder_profile", kind="folder_profile_progress")
+                elif not complete:
+                    state["skipped"] += 1
+                    emit("warn", f"「{folder.get('title')}」扫描不完整（本地 {total_items} / 目录 {remote_count}），请先完成扫描",
+                         phase="folder_profile", kind="folder_profile_progress")
+                elif not body.rebuild and _folder_profile_is_current(old_profile, folder, scan, total_items):
+                    state["skipped"] += 1
+                    emit("info", f"「{folder.get('title')}」画像已是最新，跳过；如需重算请使用重建",
+                         phase="folder_profile", kind="folder_profile_progress")
+                else:
+                    compact = [{
+                        "title": str(item.get("title", ""))[:140],
+                        "description": str(item.get("desc", ""))[:260],
+                        "uploader": str(item.get("upper_name", ""))[:60],
+                        "tags": [str(tag)[:80] for tag in (item.get("tags") or [])[:12]]
+                                if isinstance(item.get("tags"), list) else [],
+                    } for item in samples]
+                    try:
+                        emit("info", f"「{folder.get('title')}」开始生成画像，读取 {len(compact)}/{total_items} 条本地内容",
+                             phase="folder_profile")
+                        result = llm_analyzer.generate_folder_profile(
+                            llm_cfg, folder, compact, total_items,
+                            context_window_tokens=context_tokens,
+                            tpm_limit_tokens=tpm_limit_tokens,
+                            request_interval=request_interval,
+                            retry_callback=lambda attempt, total, delay, detail: emit(
+                                "warn", f"「{folder.get('title')}」模型请求失败，{int(delay)} 秒后重试（第 {attempt}/{total} 次）：{detail}",
+                                phase="folder_profile"),
+                            throttle_callback=lambda delay, reason: emit(
+                                "info", f"「{folder.get('title')}」触发本地 {reason} 保护，约 {int(delay)} 秒后继续发送",
+                                phase="folder_profile"),
+                            progress_callback=lambda stage, done, total: emit(
+                                "info", f"「{folder.get('title')}」{stage} {done}/{total} 批",
+                                phase="folder_profile"),
+                            should_stop=lambda: state["stop"])
+                        used_sample_count = int(result.pop("sample_count", len(compact)))
+                        api_prompt_tokens = int(result.pop("api_prompt_tokens", 0) or 0)
+                        api_completion_tokens = int(result.pop("api_completion_tokens", 0) or 0)
+                        api_calls = int(result.pop("api_calls", 0) or 0)
+                        profile = {
+                            **result,
+                            "folder_name": str(folder.get("title", "")),
+                            "source_item_count": total_items,
+                            "remote_item_count": remote_count,
+                            "sample_count": used_sample_count,
+                            "source_snapshot_at": str(scan.get("snapshot_completed_at", "")),
+                            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                            "profile_revision": uuid.uuid4().hex,
+                            "model": llm_cfg.model,
+                        }
+                        store.save_folder_profile(mid, profile)
+                        profiles[mid] = profile
+                        state["generated"] += 1
+                        emit("info", f"「{folder.get('title')}」使用 {used_sample_count}/{total_items} 条内容生成画像",
+                             phase="folder_profile")
+                        emit("info", f"「{folder.get('title')}」模型请求 {api_calls} 次；实际用量：输入 {api_prompt_tokens:,}，输出 {api_completion_tokens:,} tokens",
+                             phase="folder_profile")
+                        emit("ok", f"「{folder.get('title')}」画像已{'重建' if body.rebuild else '生成'}",
+                             phase="folder_profile", kind="folder_profile_progress")
+                    except llm_analyzer.ProfileCancelledError as exc:
+                        state["skipped"] += 1
+                        emit("warn", f"「{folder.get('title')}」{exc}；不会再启动新的模型请求",
+                             phase="folder_profile", kind="folder_profile_progress")
+                    except llm_analyzer.ProfileRateLimitError as exc:
+                        state["failed"] += 1
+                        state["error"] = str(exc)
+                        state["stop"] = True
+                        emit("err", f"「{folder.get('title')}」画像生成遇到持续限流：{exc}；已暂停后续收藏夹",
+                             phase="folder_profile", kind="folder_profile_progress")
+                    except llm_analyzer.ProfileOutputTruncatedError as exc:
+                        state["failed"] += 1
+                        state["error"] = str(exc)
+                        state["stop"] = True
+                        emit("err", f"「{folder.get('title')}」模型输出持续截断：{exc}；已暂停后续收藏夹",
+                             phase="folder_profile", kind="folder_profile_progress")
+                    except Exception as exc:
+                        state["failed"] += 1
+                        state["error"] = str(exc)
+                        emit("err", f"「{folder.get('title')}」画像生成失败：{exc}",
+                             phase="folder_profile", kind="folder_profile_progress")
+                state["done"] = index
+                emit("progress", "", phase="folder_profile", kind="folder_profile_progress",
+                     done=state["done"], total=state["total"], generated=state["generated"],
+                     skipped=state["skipped"], failed=state["failed"], current=state["current"])
+        except Exception as exc:
+            state["error"] = str(exc)
+            emit("err", f"收藏夹画像任务失败：{exc}", phase="folder_profile")
+        finally:
+            state["running"] = False
+            state["current"] = ""
+            emit("ok" if not state.get("error") else "warn",
+                 f"画像任务结束：生成 {state['generated']}，跳过 {state['skipped']}，失败 {state['failed']}",
+                 phase="folder_profile", kind="folder_profile_end", done=state["done"],
+                 total=state["total"], generated=state["generated"],
+                 skipped=state["skipped"], failed=state["failed"])
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True, "started": True, "total": len(requested)}
+
+
+@app.get("/api/folder-profiles/status")
+def folder_profiles_status():
+    return APP.get("folder_profile_run") or {"running": False, "done": 0, "total": 0}
+
+
+@app.post("/api/folder-profiles/stop")
+def folder_profiles_stop():
+    state = APP.get("folder_profile_run")
+    if state and state.get("running"):
+        state["stop"] = True
+        return {"ok": True}
+    return {"ok": False, "error": "没有运行中的画像任务"}
+
+
+# ============ 阶段2: LLM 分析 ============
+class AnalyzeIn(BaseModel):
+    continuous: bool = False
+    folder_ids: Optional[list[str]] = None
+
+
+class AnalyzeContinuousIn(BaseModel):
+    enabled: bool
+
+
+def _make_analyzer(folders: list[str], folder_profiles: list[dict] | None = None) -> llm_analyzer.LLMAnalyzer:
+    def report_context_split(item_count, prompt_tokens, requested_output, context_tokens):
+        emit("warn", f"上下文保护正在拆分 {item_count} 条内容后重试"
+                     f"（估算输入 {prompt_tokens} + 输出上限 {requested_output}，"
+                     f"上下文 {context_tokens}）", phase="analyze")
+    return llm_analyzer.LLMAnalyzer(make_llm_config(),
+        folders=folders, folder_profiles=folder_profiles,
+        on_context_split=report_context_split)
+
+
+@app.post("/api/analyze/start")
+def analyze_start(body: Optional[AnalyzeIn] = None):
+    if APP["analyze_run"] and APP["analyze_run"].get("running"):
+        return JSONResponse({"ok": False, "error": "分析已在运行中"}, status_code=400)
+    readiness = _organization_profile_readiness()
+    if not readiness["ready"]:
+        names = "、".join(row["name"] for row in readiness["missing"][:8])
+        extra = f"；未就绪收藏夹：{names}" if names else ""
+        return JSONResponse({"ok": False,
+                             "error": "内容归类要求所有有内容的 active 收藏夹都有当前完整画像。"
+                                      + readiness["message"] + extra,
+                             "readiness": readiness}, status_code=409)
+    body = body or AnalyzeIn()
+    profile_versions = dict(readiness["profile_versions"])
+    selected = {str(x) for x in (body.folder_ids or store.load_scan_selection())}
+    profiled_folder_ids = {row["id"] for row in _current_folder_profile_contexts()}
+    def candidates():
+        rows = store.load_videos()
+        result = []
+        for video in rows:
+            memberships = {str(x) for x in (video.get("folder_ids") or [])}
+            if video.get("source_folder_id"):
+                memberships.add(str(video["source_folder_id"]))
+            memberships.intersection_update(profiled_folder_ids)
+            if (video.get("bvid") and memberships and
+                    (not selected or bool(selected.intersection(memberships)))):
+                result.append(video)
+        return result
+    videos = candidates()
+    scan_running_at_start = bool(APP.get("scan_run") and APP["scan_run"].get("running"))
+    if not videos and not (body.continuous and scan_running_at_start):
+        return JSONResponse({"ok": False, "error": "尚无已扫描数据，请先执行扫描"}, status_code=400)
+
+    folder_contexts = _current_folder_profile_contexts()
+    folders_titles = [row["name"] for row in folder_contexts]
+    analyzer = _make_analyzer(folders_titles, folder_contexts)
+    if not analyzer.config.configured:
+        return JSONResponse({"ok": False, "error": "LLM 未配置，请先选择供应商与模型"}, status_code=400)
+
+    cfg = load_config()
+    concurrency = max(1, min(4, int(cfg.get("analyze_concurrency", 1) or 1)))
+    batch_size = max(1, min(1000, int(cfg.get("analyze_batch", 20) or 20)))
+    state = APP["analyze_run"] = {"running": True, "done": 0, "total": len(videos),
+                                  "failed": 0, "stop": False, "error": None,
+                                  "concurrency": concurrency, "batch": batch_size,
+                                  "continuous": bool(body.continuous), "waiting": False,
+                                  "round": 0, "selected_ids": sorted(selected),
+                                  "inflight": 0}
+
+    def run():
+        from concurrent.futures import ThreadPoolExecutor
+        lock = threading.Lock()
+        fail_streak = [0]
+        failed_session: set[str] = set()
+
+        def work(batch, ctx):
+            """处理一个批次（一次请求多条）。"""
+            if state["stop"]:
+                return
+            with lock:
+                state["inflight"] += len(batch)
+                inflight = state["inflight"]
+                current_done = state["done"]
+                current_total = state["total"]
+                current_failed = state["failed"]
+            # 请求已交给模型：立即推送浅色「等待响应」进度。
+            emit("progress", "", phase="analyze", kind="analyze_progress",
+                 done=current_done, total=current_total, failed=current_failed,
+                 inflight=inflight)
+            err = ""
+            try:
+                got = analyzer.analyze_batch(batch)
+            except Exception as e:
+                got = {}
+                err = f"{type(e).__name__}: {e}"
+            okn = 0
+            with lock:
+                for bvid, res in (got or {}).items():
+                    if res:
+                        stored = dict(res)
+                        stored["organization_profile_versions"] = profile_versions
+                        store.save_analysis({bvid: stored})
+                        okn += 1
+                state["failed"] += (len(batch) - okn)
+                state["inflight"] = max(0, state["inflight"] - len(batch))
+                ctx["done"] += len(batch)
+                state["done"] = ctx["done"]
+                d, f, inflight = ctx["done"], state["failed"], state["inflight"]
+                if len(batch) and okn == 0:
+                    fail_streak[0] += 1
+                else:
+                    fail_streak[0] = 0
+                streak = fail_streak[0]
+                if err:
+                    state["error"] = state.get("error") or err
+            # 静默进度事件：前端只推进度条，不写日志
+            emit("progress", "", phase="analyze", kind="analyze_progress",
+                 done=d, total=state["total"], failed=f, inflight=inflight)
+            emit("ok" if okn == len(batch) else "warn",
+                 f"批完成 +{okn}/{len(batch)} · 累计 {d}/{len(videos)}（失败 {f}）",
+                 phase="analyze", done=d, total=state["total"], inflight=inflight)
+            if err:
+                emit("err", f"本批异常（{len(batch)} 条均失败）：{err}", phase="analyze")
+            # 连续多批全失败 → 疑似配置/额度问题，自动停止
+            if streak >= 5 and not state["stop"]:
+                state["stop"] = True
+                emit("err", f"连续 {streak} 批全部失败，已自动停止分析；"
+                            f"请检查模型配置、key 或额度", phase="analyze", kind="analyze_end")
+
+        try:
+            ctx = {"done": 0}
+            emit("info", f"开始分析，批大小 {batch_size} × 并发 {concurrency}"
+                 + ("，已启用连续分析" if state["continuous"] else ""),
+                 phase="analyze", kind="analyze_start", done=0, total=len(videos), failed=0,
+                 inflight=0)
+            while not state["stop"]:
+                current = candidates()
+                existing = store.load_analysis_raw()
+                current_analysis_ids = {
+                    bvid for bvid, row in existing.items()
+                    if {str(k): str(v) for k, v in
+                        (row.get("organization_profile_versions") or {}).items()} == profile_versions
+                }
+                pending = [v for v in current if v.get("bvid")
+                           and v["bvid"] not in current_analysis_ids
+                           and v["bvid"] not in failed_session
+                           and not _is_invalid(v)]
+                state["total"] = len(current)
+                state["done"] = len([v for v in current if _is_invalid(v) or
+                                     v.get("bvid") in current_analysis_ids])
+                ctx["done"] = state["done"]
+                if pending:
+                    state["waiting"] = False
+                    state["round"] += 1
+                    batches = [pending[i:i + batch_size] for i in range(0, len(pending), batch_size)]
+                    if concurrency <= 1:
+                        for b in batches:
+                            if state["stop"]: break
+                            work(b, ctx)
+                    else:
+                        with ThreadPoolExecutor(max_workers=concurrency) as ex:
+                            list(ex.map(lambda b: work(b, ctx), batches))
+                    after = store.load_analysis_raw()
+                    after_current_ids = {
+                        bvid for bvid, row in after.items()
+                        if {str(k): str(v) for k, v in
+                            (row.get("organization_profile_versions") or {}).items()} == profile_versions
+                    }
+                    failed_session.update(v["bvid"] for v in pending
+                                          if v["bvid"] not in after_current_ids and
+                                          v["bvid"] not in current_analysis_ids)
+                    continue
+                scan_running = bool(APP.get("scan_run") and APP["scan_run"].get("running"))
+                if not state["continuous"] or not scan_running:
+                    break
+                state["waiting"] = True
+                emit("progress", "", phase="analyze", kind="analyze_progress",
+                     done=state["done"], total=state["total"], failed=state["failed"],
+                     inflight=state["inflight"], waiting=True)
+                ANALYZE_WAKE.clear()
+                ANALYZE_WAKE.wait(3)
+
+            if state["stop"]:
+                emit("warn", "已停止分析（进度已保存）", phase="analyze",
+                     kind="analyze_end", done=ctx["done"], total=state["total"])
+            else:
+                emit("ok" if not state["failed"] else "warn",
+                     f"分析结束：完成 {ctx['done']}，失败 {state['failed']}",
+                     phase="analyze", kind="analyze_end",
+                     done=ctx["done"], total=state["total"])
+        except Exception as e:
+            state["error"] = str(e)
+            emit("err", f"分析出错：{e}", phase="analyze", kind="analyze_end")
+        finally:
+            state["running"] = False
+            state["stop"] = False
+            state["continuous"] = False
+            state["waiting"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True, "started": True, "total": len(videos)}
+
+
+@app.get("/api/analyze/status")
+def analyze_status():
+    return APP["analyze_run"] or {"running": False, "done": 0, "total": 0,
+                                  "failed": 0, "stop": False, "error": None}
+
+
+@app.post("/api/analyze/stop")
+def analyze_stop():
+    if APP["analyze_run"]:
+        APP["analyze_run"]["stop"] = True
+        ANALYZE_WAKE.set()
+        return {"ok": True}
+    return {"ok": False, "error": "没有运行中的分析"}
+
+
+@app.post("/api/analyze/continuous")
+def analyze_continuous(body: AnalyzeContinuousIn):
+    state = APP.get("analyze_run")
+    if not state or not state.get("running"):
+        return {"ok": True, "enabled": False}
+    state["continuous"] = bool(body.enabled)
+    ANALYZE_WAKE.set()
+    return {"ok": True, "enabled": state["continuous"]}
+
+
+# ============ 阶段3: 预归类方案 ============
+@app.get("/api/plan")
+def get_plan():
+    """返回分析结果 + 现有收藏夹，供前端展示归类方案。"""
+    readiness = _organization_profile_readiness()
+    profile_versions = readiness["profile_versions"]
+    analysis = store.load_analysis()
+    folders = store.load_folders()
+    active_folder_ids = {str(folder["media_id"]) for folder in folders}
+    videos = {}
+    for video in store.load_videos():
+        if not video.get("bvid"):
+            continue
+        memberships = {str(x) for x in (video.get("folder_ids") or [])}
+        if video.get("source_folder_id"):
+            memberships.add(str(video["source_folder_id"]))
+        if memberships.intersection(active_folder_ids):
+            videos[video["bvid"]] = video
+    analysis = [row for row in analysis if str(row.get("bvid", "")) in videos]
+    stale_analysis_count = 0
+    decorated_analysis = []
+    for row in analysis:
+        current = (readiness["ready"] and
+                   {str(k): str(v) for k, v in
+                    (row.get("organization_profile_versions") or {}).items()} == profile_versions)
+        stale_analysis_count += int(not current)
+        decorated_analysis.append({**row, "organization_profile_current": current})
+    analysis = decorated_analysis
+    current_profiles = _current_folder_profile_contexts()
+    profile_current_ids = [row["id"] for row in current_profiles]
+    profile_current_id_set = set(profile_current_ids)
+    saved_profile_ids = set(store.load_folder_profiles())
+    current_profile_id_set = set(profile_current_ids)
+    profile_stale_ids = [str(folder["media_id"]) for folder in folders
+                         if str(folder["media_id"]) in saved_profile_ids and
+                         str(folder["media_id"]) not in current_profile_id_set]
+    invalid = [v["bvid"] for v in videos.values() if _is_invalid(v)]
+    plan_rows = {}
+    for bvid, item in store.load_plan_raw().items():
+        if bvid not in videos:
+            continue
+        row = dict(item)
+        if row.get("action") in ("move_to_existing", "create_new"):
+            row["profile_context_current"] = (
+                readiness["ready"] and
+                {str(k): str(v) for k, v in
+                 (row.get("organization_profile_versions") or {}).items()} == profile_versions)
+        else:
+            row["profile_context_current"] = True
+        plan_rows[bvid] = row
+    return {
+        "analysis": analysis,
+        "existing_folders": [folder for folder in folders
+                             if str(folder["media_id"]) in profile_current_id_set],
+        "videos_by_bvid": videos,
+        "invalid_count": len(invalid),
+        "invalid_bvids": invalid,
+        "profile_current_ids": profile_current_ids,
+        "profile_current_revisions": {row["id"]: row["revision"] for row in current_profiles},
+        "profile_stale_ids": profile_stale_ids,
+        "organization_profile_versions": profile_versions,
+        "stale_analysis_count": stale_analysis_count,
+        "plan": plan_rows,
+    }
+
+
+@app.post("/api/plan/mark_invalid")
+def plan_mark_invalid():
+    """把所有标题恰为「已失效视频」的视频标记为删除（写入 plan.json，等执行）。
+
+    防火墙：只挑选标题**恰好**等于「已失效视频」的条目。
+    """
+    active_ids = {str(folder["media_id"]) for folder in store.load_folders()}
+    videos = store.load_videos()
+    inv = [v for v in videos if v.get("bvid") and _is_invalid(v) and
+           active_ids.intersection({str(x) for x in (v.get("folder_ids") or [])} |
+                                   ({str(v.get("source_folder_id"))} if v.get("source_folder_id") else set()))]
+    if not inv:
+        return {"ok": True, "count": 0, "message": "没有发现失效视频"}
+    plan = {}
+    for v in inv:
+        plan[v["bvid"]] = {"bvid": v["bvid"], "action": "delete_invalid",
+                           "target_folder": "", "create_new_name": ""}
+    store.save_plan(plan)
+    emit("warn", f"已把 {len(inv)} 条失效视频标记为删除（到阶段❹点「开始执行」生效）")
+    return {"ok": True, "count": len(inv)}
+
+
+class PlanReview(BaseModel):
+    apply_list: list  # [{bvid, action, target_folder, create_new_name?}]
+
+
+@app.post("/api/plan/apply")
+def apply_plan(body: PlanReview):
+    """把前端确认后的归类方案存入 plan.json，作为执行阶段的输入。
+
+    关键：**保留已存在的 done 状态**，否则已执行过的条目会被重置为待办 → 重复执行。
+    """
+    destination_error = _default_folder_destination_error(body.apply_list)
+    if destination_error:
+        return JSONResponse({"ok": False, "error": destination_error}, status_code=409)
+    classification_actions = {"move_to_existing", "create_new"}
+    profile_versions = {}
+    if any(str(item.get("action", "skip")) in classification_actions
+           for item in body.apply_list):
+        readiness = _organization_profile_readiness()
+        if not readiness["ready"]:
+            return JSONResponse({"ok": False, "error": readiness["message"],
+                                 "readiness": readiness}, status_code=409)
+        profile_versions = readiness["profile_versions"]
+        if any(str(item.get("action", "skip")) in classification_actions and
+               {str(k): str(v) for k, v in
+                (item.get("organization_profile_versions") or {}).items()} != profile_versions
+               for item in body.apply_list):
+            return JSONResponse({"ok": False,
+                                 "error": "归类结果对应的画像版本已变化或缺少版本记录，请重新分析后再确认"},
+                                status_code=409)
+        profile_ids = {row["id"] for row in _current_folder_profile_contexts()}
+        profile_names = {str(folder.get("title", "")) for folder in store.load_folders()
+                         if str(folder["media_id"]) in profile_ids}
+        invalid_targets = [str(item.get("target_folder", "")) for item in body.apply_list
+                           if str(item.get("action", "skip")) == "move_to_existing" and
+                           str(item.get("target_folder", "")) not in profile_names]
+        if invalid_targets:
+            return JSONResponse({"ok": False,
+                                 "error": "内容归类目标必须是有当前完整画像的收藏夹，请刷新预归类方案"},
+                                status_code=409)
+
+    old = store.load_plan_raw()
+    plan = {}
+    kept_done = 0
+    for item in body.apply_list:
+        bvid = item.get("bvid", "")
+        if not bvid:
+            continue
+        entry = {
+            "bvid": bvid,
+            "action": item.get("action", "skip"),
+            "target_folder": item.get("target_folder", ""),
+            "create_new_name": item.get("create_new_name", ""),
+            "status": "pending",
+        }
+        if entry["action"] in classification_actions:
+            entry["organization_profile_versions"] = profile_versions
+        prev = old.get(bvid) or {}
+        if prev.get("status") == "done":
+            entry["status"] = "done"
+            entry["result"] = prev.get("result", "")
+            entry["at"] = prev.get("at", "")
+            kept_done += 1
+        plan[bvid] = entry
+    # 保留 plan 中原本存在、但本次未提交的条目（例如"标记失效视频"）
+    for bvid, prev in old.items():
+        plan.setdefault(bvid, prev)
+    store.save_plan(plan)
+    msg = f"已写入方案 {len(plan)} 条"
+    if kept_done:
+        msg += f"（其中 {kept_done} 条已完成状态已保留，不会重复执行）"
+    emit("info", msg)
+    return {"ok": True, "planned": len(plan), "kept_done": kept_done}
+
+
+class PlanStatusIn(BaseModel):
+    bvids: list = []          # 要处理的所有 bvid
+    status: str = "pending"   # pending / done
+    all: bool = False         # True 表示对 plan 中全部条目生效
+
+
+@app.post("/api/plan/set_status")
+def plan_set_status(body: PlanStatusIn):
+    """把条目在「待操作 / 已完成」之间移动（例如把已完成的移回待操作）。"""
+    st = body.status if body.status in ("pending", "done") else "pending"
+    plan = store.load_plan_raw()
+    targets = set(plan.keys()) if body.all else set(body.bvids or [])
+    n = 0
+    for bvid, item in plan.items():
+        if bvid in targets:
+            item["status"] = st
+            if st == "pending":
+                item["result"] = ""
+            n += 1
+    store.save_plan(plan)
+    emit("info", f"已把 {n} 条改为「{'待操作' if st == 'pending' else '已完成'}」")
+    return {"ok": True, "count": n, "status": st}
+
+
+class PlanRemoveIn(BaseModel):
+    bvids: list = []
+
+
+@app.post("/api/plan/remove")
+def plan_remove(body: PlanRemoveIn):
+    """把条目从方案中彻底移除（只删本地方案，不动 B站）。"""
+    plan = store.load_plan_raw()
+    targets = set(body.bvids or [])
+    n = 0
+    for b in list(plan.keys()):
+        if b in targets:
+            plan.pop(b, None)
+            n += 1
+    store.replace_plan(plan)
+    emit("warn", f"已从方案中移除 {n} 条")
+    return {"ok": True, "count": n}
+
+
+# ============ 阶段4: 执行 ============
+@app.post("/api/apply/start")
+def apply_start():
+    """批量执行 plan：失效视频 batch-del，其余视频 move。
+
+    明确业务失败记录后继续；风控停止；超时/无响应标记 unknown 并停止，
+    交由用户人工复核。
+    """
+    if APP["apply_run"] and APP["apply_run"].get("running"):
+        return JSONResponse({"ok": False, "error": "执行已在运行中"}, status_code=400)
+    plan = store.load_plan_raw()
+    if not plan:
+        return JSONResponse({"ok": False, "error": "没有可执行的方案，请先在阶段3确认"}, status_code=400)
+    # 执行阶段按需自建会话（不依赖是否先扫描过）
+    if APP["session"] is None:
+        try:
+            APP["session"] = bili_api.BiliSession(get_session_cookie())
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
+    session = APP["session"]
+    cfg = load_config()
+    session.write_interval = float(cfg.get("write_interval", 2) or 2)
+    batch_size = max(1, min(1000, int(cfg.get("apply_batch", 1000) or 1000)))
+    videos = {v["bvid"]: v for v in store.load_videos() if v.get("bvid")}
+
+    # 迁移：把"上次执行断点"之前的条目补上已完成状态（早期版本没记录结果）
+    prev = store.load_apply_state()
+    done_idx = int(prev.get("last_ok", 0) or 0)
+    migrated = 0
+    if done_idx:
+        for i, (_b, it) in enumerate(plan.items()):
+            if i < done_idx and it.get("status") != "done":
+                it["status"] = "done"
+                it["result"] = it.get("result") or "（历史执行，按断点视为已完成）"
+                it["at"] = it.get("at") or ""
+                migrated += 1
+        if migrated:
+            store.save_plan(plan)
+        store.save_apply_state({})   # 迁移只做一次；之后一律以 status 为准
+
+    # unknown 必须人工复核后移回 pending，不自动重发。
+    pending = [(b, it) for b, it in plan.items()
+               if it.get("status") not in ("done", "unknown")]
+    destination_error = _default_folder_destination_error([it for _, it in pending])
+    if destination_error:
+        return JSONResponse({"ok": False, "error": destination_error}, status_code=409)
+    needs_profiles = any(it.get("action") in ("move_to_existing", "create_new")
+                         for _, it in pending)
+    if needs_profiles:
+        readiness = _organization_profile_readiness()
+        if not readiness["ready"]:
+            return JSONResponse({"ok": False, "error": readiness["message"],
+                                 "readiness": readiness}, status_code=409)
+        if any(it.get("action") in ("move_to_existing", "create_new") and
+               {str(k): str(v) for k, v in
+                (it.get("organization_profile_versions") or {}).items()} !=
+               readiness["profile_versions"] for _, it in pending):
+            return JSONResponse({"ok": False,
+                                 "error": "待执行方案对应的画像版本已变化或缺少版本记录，请重新分析并确认方案"},
+                                status_code=409)
+    total = len(pending)
+    already_done = len([1 for it in plan.values() if it.get("status") == "done"])
+    held_unknown = len([1 for it in plan.values() if it.get("status") == "unknown"])
+
+    state = APP["apply_run"] = {"running": True, "done": 0, "total": total,
+                                "ok": 0, "failed": 0, "skip": 0, "deleted": 0,
+                                "unknown": 0, "stop": False, "error": None, "log": [],
+                                "batch_size": batch_size, "batch_done": 0, "batch_total": 0}
+
+    def _mark(item, status: str, result: str):
+        """写入一条方案的执行结果。"""
+        item["status"] = status
+        item["result"] = result
+        item["at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def chunks(items):
+        for i in range(0, len(items), batch_size):
+            yield items[i:i + batch_size]
+
+    def run():
+        def save_progress():
+            store.save_plan(plan)
+            store.save_videos(videos)
+
+        def finish_items(entries, status, message, *, target_id="", source_id=""):
+            for bvid, item, video in entries:
+                _mark(item, status, message)
+                if status == "done" and (target_id or source_id):
+                    old_source = str(source_id or video.get("source_folder_id") or "")
+                    memberships = {str(x) for x in (video.get("folder_ids") or [])}
+                    if old_source:
+                        memberships.discard(old_source)
+                    if target_id:
+                        memberships.add(str(target_id))
+                        video["source_folder_id"] = str(target_id)
+                    else:
+                        video["source_folder_id"] = sorted(memberships)[0] if memberships else ""
+                    video["folder_ids"] = sorted(memberships)
+                state["done"] += 1
+            n = len(entries)
+            if status == "done":
+                state["ok"] += n
+            elif status == "unknown":
+                state["unknown"] += n
+            elif status == "failed":
+                state["failed"] += n
+            save_progress()
+            emit("progress", "", phase="apply", kind="apply_progress",
+                 done=state["done"], total=total)
+
+        def fail_entries(entries, message):
+            finish_items(entries, "failed", message)
+            emit("warn", f"{message}（{len(entries)} 条）", phase="apply")
+
+        def run_batch(kind, src, target_id, target_name, entries):
+            if state["stop"]:
+                return False
+            aids = [int(video.get("aid", 0) or 0) for _, _, video in entries]
+            state["batch_done"] += 1
+            bn = state["batch_done"]
+            bt = state["batch_total"]
+            label = "删除失效" if kind == "delete" else f"移入「{target_name}」"
+            emit("info", f"批次 {bn}/{bt}：{label} {len(entries)} 条",
+                 phase="apply", done=state["done"], total=total)
+            try:
+                if kind == "delete":
+                    session.batch_delete(src, aids, should_stop=lambda: state["stop"])
+                    msg = f"批量删除失效视频成功（批次 {bn}）"
+                    finish_items(entries, "done", msg, source_id=src)
+                    state["deleted"] += len(entries)
+                else:
+                    session.move_batch(src, target_id, aids, mid=owner_mid,
+                                       should_stop=lambda: state["stop"])
+                    msg = f"批量移入「{target_name}」成功（批次 {bn}）"
+                    finish_items(entries, "done", msg, target_id=target_id, source_id=src)
+                emit("ok", f"批次 {bn}/{bt} 完成：{len(entries)} 条",
+                     phase="apply", done=state["done"], total=total)
+                return True
+            except bili_api.WriteUncertainError as e:
+                msg = f"批次 {bn} 结果不确定：{e}"
+                finish_items(entries, "unknown", msg)
+                state["error"] = msg + "。已停止，请人工复核后再继续。"
+                state["stop"] = True
+                emit("err", state["error"], phase="apply", kind="apply_end",
+                     done=state["done"], total=total)
+                return False
+            except bili_api.RateLimitedError as e:
+                state["error"] = ("已手动停止，本批保留待处理。" if state["stop"] else
+                                  f"风控触发：{e}。已停止，本批保留待处理。")
+                state["stop"] = True
+                emit("err", state["error"], phase="apply", kind="apply_end",
+                     done=state["done"], total=total)
+                return False
+            except bili_api.BiliApiError as e:
+                # 明确业务失败：记账后继续后续批次。
+                fail_entries(entries, f"批次 {bn} 失败：{e}")
+                return True
+            except Exception as e:
+                fail_entries(entries, f"批次 {bn} 异常：{e}")
+                return True
+
+        try:
+            if migrated:
+                emit("info", f"已把历史断点前 {migrated} 条补标为已完成")
+            emit("info", f"开始批量执行：待操作 {total} 条，单批上限 {batch_size}"
+                         f"（已完成 {already_done}，待人工复核 {held_unknown}）",
+                 phase="apply", kind="apply_start", done=0, total=total)
+
+            # 每次执行都实时刷新收藏夹映射，不使用过期 folders.json。
+            owner_mid = session.get_mid()
+            live_folders = session.list_folders()
+            store.save_folders(live_folders)
+            if needs_profiles:
+                readiness_now = _organization_profile_readiness()
+                if not readiness_now["ready"]:
+                    state["error"] = ("画像状态在执行前发生变化，未发送移动请求：" +
+                                       readiness_now["message"])
+                    state["stop"] = True
+                    emit("err", state["error"], phase="apply", kind="apply_end",
+                         done=state["done"], total=total)
+                    return
+                if any(it.get("action") in ("move_to_existing", "create_new") and
+                       {str(k): str(v) for k, v in
+                        (it.get("organization_profile_versions") or {}).items()} !=
+                       readiness_now["profile_versions"] for _, it in pending):
+                    state["error"] = "画像版本在执行前发生变化，未发送移动请求；请重新分析并确认方案"
+                    state["stop"] = True
+                    emit("err", state["error"], phase="apply", kind="apply_end",
+                         done=state["done"], total=total)
+                    return
+                profile_ids = {row["id"] for row in _current_folder_profile_contexts()}
+                profile_names = {str(folder.get("title", "")) for folder in live_folders
+                                 if str(folder["media_id"]) in profile_ids}
+                destination_error = _default_folder_destination_error([it for _, it in pending])
+                if destination_error:
+                    state["error"] = destination_error + "；未发送移动请求"
+                    state["stop"] = True
+                    emit("err", state["error"], phase="apply", kind="apply_end",
+                         done=state["done"], total=total)
+                    return
+                if any(it.get("action") == "move_to_existing" and
+                       str(it.get("target_folder", "")) not in profile_names
+                       for _, it in pending):
+                    state["error"] = "执行目标不再是有当前完整画像的收藏夹，未发送移动请求"
+                    state["stop"] = True
+                    emit("err", state["error"], phase="apply", kind="apply_end",
+                         done=state["done"], total=total)
+                    return
+            name_to_id = {f["title"]: str(f["media_id"]) for f in live_folders}
+            active_ids = {str(f["media_id"]) for f in live_folders}
+            latest_videos = {}
+            for video in store.load_videos():
+                memberships = {str(x) for x in (video.get("folder_ids") or [])}
+                if video.get("source_folder_id"):
+                    memberships.add(str(video["source_folder_id"]))
+                if video.get("bvid") and memberships.intersection(active_ids):
+                    latest_videos[video["bvid"]] = video
+            videos.clear()
+            videos.update(latest_videos)
+            executable = []
+            archived_only = 0
+            for bvid, item in pending:
+                if item.get("action") not in ("skip", "") and bvid not in videos:
+                    _mark(item, "failed", "该内容已没有 active 收藏夹关系，未执行；请刷新并重新分析")
+                    state["done"] += 1
+                    state["failed"] += 1
+                    archived_only += 1
+                else:
+                    executable.append((bvid, item))
+            pending[:] = executable
+            if archived_only:
+                store.save_plan(plan)
+                emit("warn", f"跳过 {archived_only} 条已归档或无 active 收藏关系的内容，未发送写请求",
+                     phase="apply", done=state["done"], total=total)
+
+            delete_groups = {}
+            move_groups = {}
+            new_groups = {}
+
+            # 先处理无需发请的条目，再分组。
+            for bvid, item in pending:
+                video = videos.get(bvid, {})
+                aid = int(video.get("aid", 0) or 0)
+                action = item.get("action", "skip")
+                src = str(item.get("source_folder_id") or video.get("source_folder_id") or "")
+                entry = (bvid, item, video)
+                if action in ("skip", ""):
+                    _mark(item, "done", f"{bvid} 已按方案跳过")
+                    state["done"] += 1
+                    state["skip"] += 1
+                elif not aid:
+                    fail_entries([entry], f"{bvid} 无有效 aid")
+                elif not src:
+                    fail_entries([entry], f"{bvid} 来源收藏夹未知")
+                elif src not in {str(x) for x in (video.get("folder_ids") or [])}:
+                    fail_entries([entry], f"{bvid} 已不在来源收藏夹中，拒绝使用过期关系执行")
+                elif action == "delete_invalid":
+                    if not _is_invalid(video):
+                        fail_entries([entry], f"{bvid} 非失效视频，拒绝删除")
+                    else:
+                        delete_groups.setdefault(src, []).append(entry)
+                elif action == "create_new":
+                    name = (item.get("create_new_name") or item.get("target_folder") or "").strip()
+                    if name == DEFAULT_FAVORITE_NAME:
+                        fail_entries([entry], "默认收藏夹只能移出，不能作为新建或移入目标")
+                    elif not name:
+                        fail_entries([entry], f"{bvid} 新收藏夹名为空")
+                    else:
+                        new_groups.setdefault(name, []).append((src, entry))
+                else:
+                    target_name = (item.get("target_folder") or "").strip()
+                    target_id = name_to_id.get(target_name, "")
+                    if target_name == DEFAULT_FAVORITE_NAME:
+                        fail_entries([entry], "默认收藏夹只能移出，不能作为内容整理的移入目标")
+                    elif not target_id:
+                        fail_entries([entry], f"{bvid} 目标收藏夹「{target_name}」不存在")
+                    elif src == target_id:
+                        _mark(item, "done", f"{bvid} 已在「{target_name}」，无需移动")
+                        state["done"] += 1
+                        state["skip"] += 1
+                    else:
+                        move_groups.setdefault((src, target_id, target_name), []).append(entry)
+
+            save_progress()
+
+            # 实际请求数：删除 -> 移动到现有夹 -> 新建夹并移动。
+            def batch_count(groups):
+                return sum((len(items) + batch_size - 1) // batch_size
+                           for items in groups.values())
+            new_batch_total = 0
+            for grouped in new_groups.values():
+                by_src_count = {}
+                for src, entry in grouped:
+                    by_src_count[src] = by_src_count.get(src, 0) + 1
+                new_batch_total += sum((n + batch_size - 1) // batch_size
+                                       for n in by_src_count.values())
+            state["batch_total"] = (batch_count(delete_groups) + batch_count(move_groups)
+                                    + new_batch_total)
+
+            for src, entries in delete_groups.items():
+                for batch in chunks(entries):
+                    if not run_batch("delete", src, "", "", batch):
+                        return
+
+            for (src, target_id, target_name), entries in move_groups.items():
+                for batch in chunks(entries):
+                    if not run_batch("move", src, target_id, target_name, batch):
+                        return
+
+            for name, grouped in new_groups.items():
+                if state["stop"]:
+                    return
+                target_id = name_to_id.get(name, "")
+                entries = [entry for _, entry in grouped]
+                if not target_id:
+                    try:
+                        target_id = session.create_folder(name)
+                        if not target_id:
+                            raise bili_api.BiliApiError("未返回收藏夹 id")
+                        name_to_id[name] = target_id
+                        emit("ok", f"已新建收藏夹「{name}」", phase="apply")
+                    except bili_api.RateLimitedError as e:
+                        state["error"] = f"新建「{name}」时触发风控：{e}。已停止。"
+                        state["stop"] = True
+                        emit("err", state["error"], phase="apply", kind="apply_end",
+                             done=state["done"], total=total)
+                        return
+                    except Exception as e:
+                        fail_entries(entries, f"新建收藏夹「{name}」失败：{e}")
+                        continue
+                # 同一新夹的条目仍需按来源夹分组。
+                by_src = {}
+                for src, entry in grouped:
+                    if src == str(target_id):
+                        finish_items([entry], "done", f"已在「{name}」，无需移动",
+                                     target_id=target_id, source_id=src)
+                        state["skip"] += 1
+                    else:
+                        by_src.setdefault(src, []).append(entry)
+                for src, src_entries in by_src.items():
+                    for batch in chunks(src_entries):
+                        if not run_batch("move", src, target_id, name, batch):
+                            return
+
+            level = "ok" if not state["failed"] else "warn"
+            emit(level, f"批量执行结束：成功 {state['ok']}"
+                        f"（其中删除失效 {state['deleted']}），"
+                        f"失败 {state['failed']}，跳过 {state['skip']}",
+                 phase="apply", kind="apply_end", done=state["done"], total=total)
+        except bili_api.RateLimitedError as e:
+            state["error"] = f"风控触发：{e}。已停止。"
+            emit("err", state["error"], phase="apply", kind="apply_end",
+                 done=state["done"], total=total)
+        except Exception as e:
+            state["error"] = f"执行初始化失败：{e}"
+            emit("err", state["error"], phase="apply", kind="apply_end",
+                 done=state["done"], total=total)
+        finally:
+            save_progress()
+            state["running"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True, "started": True, "total": total, "batch_size": batch_size,
+            "held_unknown": held_unknown}
+
+
+@app.get("/api/apply/status")
+def apply_status():
+    return APP["apply_run"] or {"running": False, "done": 0, "total": 0,
+                                "ok": 0, "failed": 0, "skip": 0, "unknown": 0,
+                                "error": None,
+                                "log": []}
+
+
+@app.post("/api/apply/stop")
+def apply_stop():
+    if APP["apply_run"]:
+        APP["apply_run"]["stop"] = True
+        return {"ok": True}
+    return {"ok": False, "error": "没有运行中的执行"}
+
+
+# ============ 全局状态 ============
+@app.get("/api/status")
+def status():
+    return {
+        "stats": store.stats(),
+        "scan": APP["scan_run"],
+        "analyze": APP["analyze_run"],
+        "apply": APP["apply_run"],
+    }
+
+
+# ============ 静态页面 ============
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/")
+def index():
+    return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="B站收藏夹整理")
+    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--log-file", default="server.log",
+                        help="服务日志文件（默认 server.log，可指定其它名字）")
+    args = parser.parse_args()
+
+    log_path = Path(args.log_file)
+    if not log_path.is_absolute():
+        log_path = HERE / log_path
+
+    # 先把 uvicorn 的日志配置建好，再建自己的 handler：
+    # uvicorn.Config 内部会 dictConfig，而 dictConfig 会关掉此前创建的所有 handler
+    # （stream 被置空、再写入就无效），所以自己的 handler 只能在它之后创建。
+    config = uvicorn.Config(app, host="127.0.0.1", port=args.port, log_level="info")
+
+    # 服务自己的日志（logger 名 server）：dictConfig 之后 root 已没有可用 handler，这里补回控制台
+    root = logging.getLogger()
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+    root.setLevel(logging.INFO)
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter(LOG_FORMAT))
+    root.addHandler(console)
+
+    # 控制台保持 uvicorn 原生格式（带配色），文件里另存一份纯文本
+    try:
+        fh = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+        fh.setFormatter(logging.Formatter(LOG_FORMAT))
+        root.addHandler(fh)
+        # uvicorn 的日志分成两个 logger，各自的 handler 要单独挂
+        for name in ("uvicorn", "uvicorn.access"):
+            logging.getLogger(name).addHandler(fh)
+        log.info("日志文件：%s", log_path)
+    except Exception as e:
+        log.warning("无法写入日志文件 %s：%s", log_path, e)
+
+    uvicorn.Server(config).run()
+
+
+if __name__ == "__main__":
+    main()
