@@ -1333,7 +1333,14 @@ def scan(body: Optional[ScanIn] = None):
                 app_state["current"] = ""
                 app_state["folder_done"] += 1
                 ANALYZE_WAKE.set()
-                emit("ok", f"「{folder['title']}」完成：{unique_count} 条（{strategy}）",
+                strategy_label = {
+                    "indexed_ids": "ID 清单核对 + 本地索引",
+                    "bulk_ids_infos": "批量元数据",
+                    "paged": "分页明细",
+                    "paged_fallback": "批量失败后分页",
+                    "paged_index_fallback": "索引路径失败后分页",
+                }.get(strategy, strategy)
+                emit("ok", f"「{folder['title']}」完成：{unique_count} 条（{strategy_label}）",
                      kind="scan_progress", done=done, total=app_state["total"],
                      fdone=app_state["folder_done"], ftotal=app_state["folder_total"],
                      current="", unique=unique_count, strategy=strategy)

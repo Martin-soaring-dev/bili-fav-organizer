@@ -29,8 +29,6 @@ Windows 用户双击源码目录中的 `启动.bat`。首次启动时会检查 P
 
 服务启动后浏览器会打开 **http://127.0.0.1:8080**（默认端口 8080，可用 `--port 8090` 改）。关闭服务窗口即可停止服务。
 
-开发者也可以手动安装依赖后，在项目目录中运行 `python server.py`。
-
 > ⚠️ **凭据安全**：SQLite 主库保存供应商 API Key，`secrets.json` 保存 B 站 Cookie；它们与 `config.json`、`data/` 都含本地数据，
 > **请勿分享本目录或以任何方式提交到网上**；`.gitignore` 已默认忽略它们。
 > 页面上的 `/api/config` 接口只回显凭据的**尾 4 位**，不会回显完整值。
@@ -40,6 +38,7 @@ Windows 用户双击源码目录中的 `启动.bat`。首次启动时会检查 P
 1. **⓿ 连接配置**
    - Cookie 获取方式默认二维码登录；也可切换为手动输入，保存后用「测试 Cookie」确认登录态
    - 在「模型配置」选供应商和模型；首次使用时点「管理模型」添加预设或自定义供应商，在供应商设置中填写 API Key
+   - [AMD Radeon Cloud Token Factory](https://developer.amd.com.cn/radeon/tokenfactory) 可直接选择预设并粘贴平台生成的 API Key。截至 2026-09-26，当前活动参考额度约为每天 10 美元；AMD 公开页面没有承诺统一固定金额，额度、模型和限速可能调整，实际以登录后的 AMD Usage 页面为准，不视为永久额度。
    - 「管理模型」默认打开当前激活模型并进入编辑；点选其他模型只打开编辑，保存后需点「激活」才会切换。供应商预设从下拉菜单添加
    - 需要时可以刷新模型列表、测试模型，或手动编辑模型上下文与输出参数；主界面点「保存配置」也会激活当前选中的模型
 
@@ -105,7 +104,18 @@ Windows 用户双击源码目录中的 `启动.bat`。首次启动时会检查 P
 
 ## 数据存储
 
-应用配置、Cookie、日志和 SQLite 主库默认保存在当前 Windows 用户的 `%LOCALAPPDATA%\BiliFavOrganizer\`（主库位于 `data/library.sqlite3`），不随程序目录移动或更新。首次启动会把程序目录中已有的 `config.json` 和 `secrets.json` 复制到用户数据目录，不覆盖已存在的用户设置；旧版项目 `data/library.sqlite3` 首次启动时会用 SQLite 在线备份方式复制过去，校验成功后保留原库作为回滚副本。若没有旧 SQLite，则从项目内旧 JSON 导入。可通过环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 指定数据库路径。
+Windows 下，应用数据默认保存在**当前 Windows 用户**的 `%LOCALAPPDATA%\BiliFavOrganizer\`，通常是 `C:\Users\<用户名>\AppData\Local\BiliFavOrganizer\`。打开文件夹：按 **Win+R**，输入 `%LOCALAPPDATA%\BiliFavOrganizer`，再按 Enter。
+
+| 文件/目录 | 内容 |
+| --- | --- |
+| `config.json` | 应用设置 |
+| `secrets.json` | B 站 Cookie |
+| `data\library.sqlite3` | 收藏夹、视频元数据索引、画像、分析方案，以及供应商 API Key 和模型配置 |
+| `server.log` | 最近一次运行日志 |
+
+这些数据与程序 ZIP 分开保存；升级或移动程序目录不会清除它们。另一个 Windows 账户或另一台电脑会使用自己的数据目录，所以不会自动带上原电脑的 Cookie、API Key 或本地索引。首次启动还会把程序目录中已有的旧 `config.json` 和 `secrets.json` 复制到用户数据目录，不覆盖已存在的设置；旧版项目 `data/library.sqlite3` 会通过 SQLite 在线备份迁移并校验，旧库保留作为回滚副本。可通过环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 指定数据库目录。
+
+换电脑时，可在旧电脑使用页面顶部的「导出项目数据」，再在新电脑点「读取项目数据」导入收藏夹、视频索引、画像和整理数据。导出文件不含 Cookie 或 API Key；供应商/模型设置也需在新电脑重新配置。若要完整搬迁现有配置和凭据，可在两台电脑都关闭程序后，私下安全地复制整个 `BiliFavOrganizer` 数据目录；该目录含登录凭据，**不要上传到 GitHub、发到群聊或交给他人**。如果新电脑已运行过程序，先备份它已有的数据目录再替换。
 
 数据库将收藏夹记录标记为 `active` 或 `archived`。目录同步按 ID 更新名称/数量；消失的收藏夹转为 archived 并清除它的 `folder_items` 关系，但保留视频元数据索引。完整重扫时会替换该夹的成员关系，因此取消收藏的内容关系直接删除。视频索引采用按资源 ID 增量 upsert，多个收藏夹共享一份视频元数据。
 
@@ -113,7 +123,7 @@ Windows 用户双击源码目录中的 `启动.bat`。首次启动时会检查 P
 
 画像不直接改动收藏关系。归类与合并要求所有有内容的 active 收藏夹都有当前完整画像；偏离判断会记录收藏夹 ID 和简短依据，供本地内容和预归类方案人工复核。合并建议同时参考代表条目、重复关系和最新画像。画像完整性状态也会在内容整理和收藏夹整理页显示。详情见 [持久视频索引与收藏夹画像](docs/design/persistent-index-folder-profiles.md)。
 
-网页上的「导出项目数据」仍导出兼容 JSON bundle，包含 active/archived 收藏夹及画像；导入前会备份当前 SQLite 数据库和相关本地数据。SQLite 内的数据表结构与扫描状态说明见 [实施方案](docs/design/scan-sqlite-migration-plan.md)。
+网页上的「导出项目数据」会导出兼容 JSON bundle，包含 active/archived 收藏夹及画像；导入会覆盖当前收藏和整理数据，并先自动备份，但不会导出或覆盖 Cookie、API Key、供应商和模型配置。SQLite 内的数据表结构与扫描状态说明见 [实施方案](docs/design/scan-sqlite-migration-plan.md)。
 
 要清理数据，请使用页面上的数据清除功能；不要手动删除 JSON 或 SQLite 文件。
 
