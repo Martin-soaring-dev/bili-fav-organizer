@@ -4,15 +4,66 @@ config.json
 data/
 server.log
 *.log
-/.private
+.private/
+.secrets/
+**/backups/
+**/exports/
 
 # 环境变量 / 凭据 / Cookie
 .env
 .env.*
 !.env.example
+/.envrc
+/.netrc
+/.pypirc
+/.npmrc
+!/.npmrc.example
+.aws/
+.ssh/
+credentials.json
+credentials.*
+*credentials*.json
+*service-account*.json
+auth.json
+auth.*.json
+tokens.json
+session.json
+session.*.json
+local.settings.json
+api_key.txt
+api-key.txt
+api_key.json
+api-key.json
+access_token
+access_token.*
+refresh_token
+refresh_token.*
+cookie
+cookies
+*.cookie
+*cookie*.txt
 *cookie*.json
 *cookies*.json
 *secret*.json
+token.json
+
+# 本地数据库、密钥与证书
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.sqlite-journal
+*.db
+*.db-*
+*.db3
+*-wal
+*-shm
+*-journal
+*.pem
+*.p12
+*.pfx
+*.key
+id_rsa
+id_ed25519
 
 # 个人收藏数据、探测输出与导出包
 _probe_*
@@ -20,6 +71,7 @@ _probe_*
 bili_fav_data_*.json
 write_operations.jsonl
 bili-data-*/
+审查日志_v2.md
 
 # Python
 __pycache__/
@@ -29,4 +81,7 @@ __pycache__/
 # 备份 / 临时
 *.tmp
 *.bak
+*.backup
+*.orig
+*.old
 bili_ck_profile/

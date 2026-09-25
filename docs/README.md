@@ -9,7 +9,7 @@
 
 | 文档 | 内容 | 本项目用处 |
 |---|---|---|
-| [fav/action.md](fav/action.md) | 收藏夹操作：**新建/修改/删除夹**；**批量复制 copy / 批量移动 move / 批量删除 batch-del / 清空失效 clean** | 审查日志 v2 · P1-6 批量重构的接口依据（resources 参数格式 `aid:2,aid:2,...`，错误码 11010 等） |
+| [fav/action.md](fav/action.md) | 收藏夹操作：**新建/修改/删除夹**；**批量复制 copy / 批量移动 move / 批量删除 batch-del / 清空失效 clean**；修改接口可提交收藏夹 `intro` | 审查日志 v2 · P1-6 批量重构的接口依据（resources 参数格式 `aid:2,aid:2,...`，错误码 11010 等）；当前项目尚未接入收藏夹简介读取/写回 |
 | [fav/info.md](fav/info.md) | 收藏夹元数据、created/list-all、collected/list、resource/infos | bili_api.list_folders 对应接口；attr 属性位含"是否默认收藏夹"判定 |
 | [fav/list.md](fav/list.md) | resource/list（内容明细，**ps 定义域 1-20**）、resource/ids（全部id） | bili_api.iter_folder_videos 对应接口；has_more 翻页语义；medias[].attr 失效标记（0 正常/1 删除/9 UP自删）；批内校验可回读 ids 接口 |
 | [misc/sign/wbi.md](misc/sign/wbi.md) | WBI 签名算法（w_rid/wts、mixinKeyEncTab 完整实现与多语言示例） | bili_api._wbi_sign 的算法依据与验证参照 |
@@ -17,6 +17,11 @@
 | [video/action.md](video/action.md) | 稿件观众操作（收藏 deal 接口的另一份描述，含 add/del_media_ids 语义） | bili_api.add_with_aid / remove_from_folder 参数依据 |
 | [login/login_info.md](login/login_info.md) | nav 接口（获取 mid、wbi_img 密钥来源） | get_mid / _refresh_wbi_keys 的响应结构参照 |
 | [login/login_action/QR.md](login/login_action/QR.md) | 网页二维码登录（generate/poll、状态码 86101/86090/86038） | server.py 扫码登录接口的依据 |
+
+## 项目实施方案
+
+- [design/scan-sqlite-migration-plan.md](design/scan-sqlite-migration-plan.md)：新版收藏夹扫描流程与 SQLite 迁移步骤。
+- [design/persistent-index-folder-profiles.md](design/persistent-index-folder-profiles.md)：持久视频索引、收藏夹 active/archive 生命周期、简介同步现状、画像完整性门槛及内容批次上下文预检。
 
 ## 批量重构（P1-6）前需留意的文档要点
 

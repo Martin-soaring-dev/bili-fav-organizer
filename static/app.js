@@ -80,17 +80,145 @@
     } catch (e) { return null; }
   }
 
-  // ---------- 配置 ----------
+  async function refreshOrganizationReadiness() {
+    const contentBox = $("content-profile-readiness");
+    const mergeBox = $("merge-profile-readiness");
+    try {
+      const status = await api("GET", "/api/organization/readiness");
+      const missingRows = (status.missing || []).slice(0, 8);
+      const names = missingRows.map(row => row.name
+        ? `${row.name}（${row.reason || "画像未就绪"}）` : "").filter(Boolean);
+      const suffix = names.length
+        ? ` · 待处理：${names.join("、")}${status.missing.length > names.length ? ` 等 ${status.missing.length} 个` : ""}`
+        : "";
+      const text = status.ready
+        ? `画像就绪：${status.current_count}/${status.required_count} 个有内容的 active 收藏夹均已完成扫描并有当前画像。空收藏夹不作为整理目标。`
+        : `${status.message || "画像尚未就绪。"}${suffix}`;
+      for (const box of [contentBox, mergeBox]) {
+        if (!box) continue;
+        box.textContent = text;
+        box.className = "profile-gate-status " + (status.ready ? "ready" : "blocked");
+      }
+      for (const id of ["analyze-start", "merge-ai", "merge-submit", "merge-start"]) {
+        if ($(id)) $(id).disabled = !status.ready;
+      }
+      return status;
+    } catch (e) {
+      const text = "无法读取画像完整性状态；刷新页面或检查服务连接后重试。";
+      for (const box of [contentBox, mergeBox]) if (box) box.textContent = text;
+      for (const id of ["analyze-start", "merge-ai", "merge-submit", "merge-start"]) {
+        if ($(id)) $(id).disabled = true;
+      }
+      return null;
+    }
+  }
+
+  // ---------- 配置 / 供应商模型 ----------
+  let providersCache = [];
+  let modelsCache = [];
+  let activeModelId = "";
+  let manageSelectedProviderId = "";
+  let editingProviderId = "";
+  let editingModelId = "";
+  let modelFormBaseline = null;
+  let modelFormTouched = { ctx: false, out: false };
+  let providerPresetsCache = [];
+  let lastRefreshDiff = null;
+  let selectedRefreshModels = new Map();
+  let selectedRefreshPreset = "";
+
+  function modelsOf(providerId) {
+    return modelsCache.filter(m => m.provider_id === providerId);
+  }
+
+  function providerById(id) {
+    return providersCache.find(p => p.id === id) || null;
+  }
+
+  function modelById(id) {
+    return modelsCache.find(m => m.id === id) || null;
+  }
+
+  function fillProviderSelect(selectedId) {
+    const sel = $("cfg-provider");
+    const current = selectedId !== undefined ? selectedId : sel.value;
+    sel.replaceChildren();
+    if (!providersCache.length) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = "（无供应商，请点「管理模型」新增）";
+      sel.appendChild(o);
+      return;
+    }
+    for (const p of providersCache) {
+      const o = document.createElement("option");
+      o.value = p.id;
+      o.textContent = p.name;
+      sel.appendChild(o);
+    }
+    sel.value = providersCache.some(p => p.id === current) ? current : (providersCache[0] || {}).id || "";
+  }
+
+  function fillModelSelect(selectedId) {
+    const sel = $("cfg-model");
+    const providerId = $("cfg-provider").value;
+    const current = selectedId !== undefined ? selectedId : sel.value;
+    const list = providerId ? modelsOf(providerId) : [];
+    sel.replaceChildren();
+    if (!list.length) {
+      const o = document.createElement("option");
+      o.value = "";
+      o.textContent = "（该供应商下无模型）";
+      sel.appendChild(o);
+      return;
+    }
+    for (const m of list) {
+      const o = document.createElement("option");
+      o.value = m.id;
+      o.textContent = m.name;
+      sel.appendChild(o);
+    }
+    sel.value = list.some(m => m.id === current) ? current
+      : (list.find(m => m.id === activeModelId) || list[0] || {}).id || "";
+  }
+
+  function renderActiveModelInfo() {
+    const box = $("active-model-info");
+    const model = modelById($("cfg-model").value || activeModelId);
+    const provider = providerById($("cfg-provider").value || (model && model.provider_id) || "");
+    if (!model || !provider) {
+      box.textContent = "选择供应商与模型后显示地址与参数。";
+      return;
+    }
+    const bits = [
+      `供应商：${provider.name}`,
+      `地址：${provider.base_url}`,
+      `API Key：${provider.api_key_set ? (provider.api_key_masked || "已配置") : "未配置"}`,
+      `模型：${model.name}`,
+      `上下文：${modelLimitLabel(model.context_tokens, model.context_source)} tokens`,
+      `最大输出：${modelLimitLabel(model.max_output_tokens, model.output_source)} tokens`,
+      `思考强度：${model.thinking_effort || "默认"}`,
+      `测试：${({ ok: "通过", fail: "失败", testing: "测试中", untested: "未测试" })[model.test_status] || model.test_status}`,
+    ];
+    box.textContent = bits.join("  ·  ");
+    box.classList.toggle("is-active", model.id === activeModelId);
+  }
+
   async function loadConfig() {
     try {
       const c = await api("GET", "/api/config");
-      $("cfg-base-url").value = c.base_url || "";
-      $("cfg-model").value = c.model || "";
-      $("cfg-key").value = "";   // P0-1：不回显凭据
-      $("cfg-key").placeholder = c.api_key_set
-        ? `已配置（${c.api_key_masked}）— 留空表示不修改`
-        : "（本地无鉴权模型可留空）";
-      if (c.browser) $("cfg-browser").value = c.browser;
+      providersCache = c.providers || [];
+      modelsCache = c.models || [];
+      activeModelId = c.active_model_id || "";
+      fillProviderSelect(modelById(activeModelId) ? modelById(activeModelId).provider_id : undefined);
+      if (activeModelId) {
+        const am = modelById(activeModelId);
+        if (am) fillModelSelect(am.id);
+        else fillModelSelect();
+      } else {
+        fillModelSelect();
+      }
+      renderActiveModelInfo();
       if (c.scan_interval) $("scan-interval").value = String(c.scan_interval);
       if (c.write_interval) $("write-interval").value = String(c.write_interval);
       if (c.folder_merge_interval) $("merge-interval").value = String(c.folder_merge_interval);
@@ -98,8 +226,22 @@
       if (c.analyze_concurrency) $("analyze-concurrency").value = String(c.analyze_concurrency);
       if (c.analyze_batch) $("analyze-batch").value = String(c.analyze_batch);
       if (c.analyze_max_tokens) $("analyze-max-tokens").value = String(c.analyze_max_tokens);
+      if (c.model_context_tokens) $("model-context-tokens").value = String(c.model_context_tokens);
+      if (c.model_tpm_limit) $("model-tpm-limit").value = String(c.model_tpm_limit);
+      if (c.profile_request_interval) $("profile-request-interval").value = String(c.profile_request_interval);
+      renderManageLists();
+      providerPresetsCache = c.provider_presets || [];
+      renderPresetList(providerPresetsCache);
     } catch (e) { log("读取配置失败: " + e.message, "err"); }
   }
+
+  $("cfg-provider").addEventListener("change", () => {
+    fillModelSelect();
+    renderActiveModelInfo();
+  });
+  $("cfg-model").addEventListener("change", () => {
+    renderActiveModelInfo();
+  });
 
   // 请求间隔改动即时保存
   $("scan-interval").addEventListener("change", async () => {
@@ -147,7 +289,7 @@
     const v = parseInt($("analyze-batch").value, 10);
     try {
       await api("POST", "/api/config", { analyze_batch: v });
-      log(`分析批大小已设为 ${v}（每次请求带 ${v} 条视频）`);
+      log(`分析批大小上限已设为 ${v} 条；超过上下文安全预算时会在发送前自动拆分`);
     } catch (e) { log("保存批大小失败: " + (e.error || e.message), "err"); }
   });
 
@@ -161,18 +303,42 @@
     } catch (e) { log("保存最大输出失败: " + (e.error || e.message), "err"); }
   });
 
+  $("model-context-tokens").addEventListener("change", async () => {
+    const v = parseInt($("model-context-tokens").value, 10);
+    if (!v || v < 4096) { log("模型上下文窗口无效（需 ≥ 4096）", "warn"); return; }
+    try {
+      await api("POST", "/api/config", { model_context_tokens: v });
+      log(`模型上下文窗口已设为 ${v} tokens`);
+    } catch (e) { log("保存上下文窗口失败: " + (e.error || e.message), "err"); }
+  });
+
+  $("profile-request-interval").addEventListener("change", async () => {
+    const v = parseFloat($("profile-request-interval").value);
+    if (!Number.isFinite(v) || v < 0.5) { log("画像请求间隔无效（需 ≥ 0.5 秒）", "warn"); return; }
+    try {
+      await api("POST", "/api/config", { profile_request_interval: v });
+      log(`画像请求间隔已设为 ${v} 秒`);
+    } catch (e) { log("保存画像请求间隔失败: " + (e.error || e.message), "err"); }
+  });
+
+  $("model-tpm-limit").addEventListener("change", async () => {
+    const v = parseInt($("model-tpm-limit").value, 10);
+    if (!v || v < 1000) { log("模型 TPM 上限无效（需 ≥ 1000）", "warn"); return; }
+    try {
+      await api("POST", "/api/config", { model_tpm_limit: v });
+      log(`模型 TPM 上限已设为 ${v.toLocaleString("zh-CN")} tokens/分钟`);
+    } catch (e) { log("保存模型 TPM 上限失败: " + (e.error || e.message), "err"); }
+  });
+
   $("save-config").addEventListener("click", async () => {
     try {
+      const modelId = $("cfg-model").value;
       const payload = {
-        base_url: $("cfg-base-url").value.trim(),
-        model: $("cfg-model").value.trim(),
-        browser: $("cfg-browser").value,
+        active_model_id: modelId || "",
       };
-      // P0-1：留空表示不修改已保存的 key
-      const k = $("cfg-key").value.trim();
-      if (k) payload.api_key = k;
       await api("POST", "/api/config", payload);
-      log(k ? "配置已保存（含新的 API Key）" : "配置已保存（API Key 未改动）");
+      activeModelId = modelId || "";
+      log(modelId ? "配置已保存（已切换激活模型）" : "配置已保存（未选择模型）");
       await loadConfig();
     } catch (e) { log("保存配置失败: " + (e.error || e.message), "err"); }
   });
@@ -182,9 +348,11 @@
   // ---------- 进度条 ----------
   function setProgress(el, id, done, total) {
     const pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 0;
-    document.getElementById(id + "-fill").style.width = pct + "%";
-    document.getElementById(id + "-text").textContent = `${done}/${total} (${pct}%)`;
-    el.style.display = "flex";
+    const fill = document.getElementById(id + "-fill");
+    const text = document.getElementById(id + "-text");
+    if (fill) fill.style.width = pct + "%";
+    if (text) text.textContent = `${done}/${total} (${pct}%)`;
+    if (el) el.style.display = "flex";
   }
 
   function setAnalyzeProgress(done, inflight, total) {
@@ -198,10 +366,15 @@
   // ---------- 步骤1 扫描 ----------
   $("scan-btn").addEventListener("click", async () => {
     try {
-      await api("POST", "/api/scan");
+      const directory = await api("GET", "/api/folders");
+      await api("POST", "/api/scan", {
+        folder_ids: directory.selected_ids || [],
+        mode: $("scan-mode").value || "resume"
+      });
       $("scan-progress").style.display = "flex";
       setProgress($("scan-progress"), "scan", 0, 0);
-      log("扫描已启动（具体进度见下方事件日志）");
+      await refreshOrganizationReadiness();
+      log("扫描已启动；优先复用本地索引，缺失内容再读取 B 站元数据");
     } catch (e) {
       log("启动扫描失败: " + (e.error || e.message || ""), "err");
     }
@@ -213,6 +386,8 @@
       log(`收藏夹目录已刷新，共 ${r.folders.length} 个`, "ok");
       await refreshTree();
       await loadFolderMerge();
+      if (folderProfileListLoaded) await loadFolderProfiles();
+      await refreshOrganizationReadiness();
     } catch (e) { log("刷新目录失败: " + (e.error || e.message), "err"); }
   });
 
@@ -267,14 +442,21 @@
       const r = await api("POST", "/api/data/clear", { scopes });
       log(`已清除：${r.cleared.join("、")}`, "warn"); clearModal.style.display = "none";
       refreshStats(); loadFolderMerge();
+      if (scopes.includes("folder_profile")) {
+        await loadFolderProfiles();
+        await refreshOrganizationReadiness();
+      }
     } catch (e) { log("清除失败: " + (e.error || e.message), "err"); }
   });
 
   // ---------- 扫码登录 ----------
   let qrTimer = null;
 
-  $("qr-btn").addEventListener("click", async () => {
+  async function refreshQrCode() {
+    if (qrTimer) { clearInterval(qrTimer); qrTimer = null; }
+    $("qr-box").style.display = "none";
     $("qr-status").textContent = "生成中 ...";
+    $("qr-btn").disabled = true;
     try {
       const r = await api("POST", "/api/login/qr/generate");
       if (!r.ok) { $("qr-status").textContent = "失败：" + r.error; return; }
@@ -282,10 +464,25 @@
       $("qr-box").style.display = "flex";
       $("qr-status").textContent = "请用手机 B站 App 扫码";
       log("二维码已生成，请用手机 B站 App 扫码");
-      if (qrTimer) clearInterval(qrTimer);
       qrTimer = setInterval(pollQr, 2000);
-    } catch (e) { $("qr-status").textContent = "失败：" + e.message; }
-  });
+    } catch (e) {
+      $("qr-status").textContent = "失败：" + e.message;
+    } finally {
+      $("qr-btn").disabled = false;
+    }
+  }
+
+  $("qr-btn").addEventListener("click", refreshQrCode);
+
+  function setCookieMethod(method, refreshQr = false) {
+    const useQr = method !== "manual";
+    $("cookie-qr-panel").hidden = !useQr;
+    $("cookie-manual-panel").hidden = useQr;
+    if (!useQr && qrTimer) { clearInterval(qrTimer); qrTimer = null; }
+    if (useQr && refreshQr) refreshQrCode();
+  }
+  $("cookie-method").addEventListener("change", () =>
+    setCookieMethod($("cookie-method").value, $("cookie-method").value === "qr"));
 
   async function pollQr() {
     try {
@@ -295,11 +492,13 @@
         $("qr-box").style.display = "none";
         $("qr-status").textContent = "✅ 登录成功，Cookie 已保存";
         log("✅ 扫码登录成功，Cookie 已保存", "ok");
-        loadCookieState();
+        loadCookieState().then(() => {
+          $("qr-status").textContent = "✅ 登录成功，Cookie 已保存";
+        });
       } else if (r.status === "expired") {
         clearInterval(qrTimer); qrTimer = null;
         $("qr-status").textContent = "二维码已过期，请重新生成";
-        log("二维码已过期，请点「显示登录二维码」刷新", "warn");
+        log("二维码已过期，请点「刷新二维码」重新获取", "warn");
       } else if (r.status === "scanned") {
         $("qr-status").textContent = "已扫码，请在手机上确认";
       } else if (r.status === "waiting") {
@@ -318,6 +517,11 @@
       const c = await api("GET", "/api/cookie");
       if (c.configured) {
         $("cfg-cookie").placeholder = `已保存 Cookie（长度 ${c.length}），重新粘贴可覆盖`;
+        $("cookie-state").textContent = `已保存 Cookie（${c.masked || "已配置"}）`;
+        $("qr-status").textContent = "已保存登录 Cookie；需要更换时可刷新二维码";
+      } else {
+        $("cookie-state").textContent = "尚未保存 Cookie";
+        $("qr-status").textContent = "尚未登录，请扫码并在手机上确认";
       }
     } catch (e) { /* ignore */ }
   }
@@ -333,19 +537,21 @@
   });
 
   // ---------- 连接测试 ----------
-  $("test-cookie").addEventListener("click", async () => {
+  async function testCookie() {
     log("测试 Cookie 读取 ...");
     try {
       const r = await api("POST", "/api/test/cookie");
       if (r.ok) log("✅ " + r.message, "ok");
       else log("❌ Cookie 测试失败: " + r.error, "err");
     } catch (e) { log("❌ 请求失败: " + e.message, "err"); }
-  });
+  }
+  $("test-cookie-qr").addEventListener("click", testCookie);
+  $("test-cookie-manual").addEventListener("click", testCookie);
 
   $("test-llm").addEventListener("click", async () => {
     log("测试模型连接 ...");
     try {
-      const r = await api("POST", "/api/test/llm");
+      const r = await api("POST", "/api/test/llm", { model_id: $("cfg-model").value || "" });
       if (r.ok) log("✅ " + r.message, "ok");
       else log("❌ 模型连接失败: " + r.error, "err");
     } catch (e) { log("❌ 请求失败: " + e.message, "err"); }
@@ -374,24 +580,361 @@
       t.folders.forEach(f => {
         const pct = f.expected > 0 ? Math.round(f.scanned / f.expected * 100) : 100;
         const cls = f.done ? "ok" : (f.scanned > 0 ? "partial" : "none");
-        const ico = f.done ? "✅" : (f.scanned > 0 ? "🔄" : "⬜");
+        const ico = f.done ? "✅" : (f.status === "inconsistent" ? "⚠️" : (f.scanned > 0 ? "🔄" : "⬜"));
         const row = document.createElement("div");
         row.className = "tree-row";
         row.innerHTML = `<input class="folder-pick" type="checkbox" data-id="${f.media_id}">
           <span class="ico"></span>
           <span class="nm${f.done ? " done" : ""}"></span>
           <span class="cnt"></span>
+          <span class="scan-state"></span>
           <span class="pct ${cls}"></span>`;
         row.querySelector(".ico").textContent = ico;
         row.querySelector(".folder-pick").checked = selected.has(String(f.media_id));
         row.querySelector(".nm").textContent = f.title;
         row.querySelector(".cnt").textContent = `${f.scanned} / ${f.expected}`;
+        const strategyLabel = f.strategy === "indexed_ids" ? "索引复用" :
+          f.strategy === "bulk_ids_infos" ? "批量" :
+          f.strategy === "paged" ? "分页" :
+          (f.strategy === "paged_fallback" || f.strategy === "paged_index_fallback") ? "回退分页" : "";
+        const stateLabel = f.done ? `完成 · ${strategyLabel}` :
+          f.status === "inconsistent" ? `数量不一致 · ${strategyLabel}` :
+          f.status === "stale" ? "旧进度需校验" : f.status === "partial" ? `未完成 · ${strategyLabel}` : "未扫描";
+        row.querySelector(".scan-state").textContent = stateLabel;
         row.querySelector(".pct").textContent = pct + "%";
         body.appendChild(row);
       });
       $("scan-selection-summary").textContent = `已选 ${selected.size || t.folders.length} / ${t.folders.length} 个`;
     } catch (e) { log("读取扫描状态失败: " + e.message, "err"); }
   }
+
+  // ---------- 本地收藏内容浏览 ----------
+  const libraryModal = $("library-modal");
+  const libraryPageSize = 100;
+  let libraryFolders = [];
+  let librarySelectedFolder = null;
+  let libraryOffset = 0;
+  let libraryTotal = 0;
+  let librarySearchTimer = null;
+  let libraryRequestId = 0;
+  const librarySortMode = $("library-sort-mode");
+  const librarySortDirection = $("library-sort-direction");
+  librarySortMode.value = localStorage.getItem("library-sort-mode") || "bili";
+  librarySortDirection.value = localStorage.getItem("library-sort-direction") || "asc";
+
+  $("library-view-btn").addEventListener("click", async () => {
+    libraryModal.style.display = "flex";
+    $("library-meta").textContent = "正在读取本地收藏夹和扫描状态…";
+    try {
+      const [tree, directory, profileData] = await Promise.all([
+        api("GET", "/api/scan/tree"), api("GET", "/api/folders"),
+        api("GET", "/api/folder-profiles"),
+      ]);
+      const scanById = new Map((tree.folders || []).map(folder => [String(folder.media_id), folder]));
+      const profileById = new Map((profileData.folders || []).map(folder => [String(folder.media_id), folder]));
+      libraryFolders = (directory.folders || []).map((folder, index) => ({
+        ...folder,
+        ...(scanById.get(String(folder.media_id)) || {}),
+        ...folder,
+        profile_data: profileById.get(String(folder.media_id)) || null,
+        _biliOrder: index,
+        expected: Number(folder.count || 0),
+      }));
+      $("library-meta").textContent =
+        `本地收藏夹 ${tree.total_count} 个 · 已完成扫描 ${tree.done_count} 个 · 这里只读取本地已扫描数据`;
+      renderLibraryFolders();
+      if (libraryFolders.length) {
+        const selected = libraryFolders.find(x => String(x.media_id) === String(librarySelectedFolder));
+        selectLibraryFolder((selected || libraryFolders[0]).media_id);
+      }
+      else {
+        $("library-items").textContent = "没有收藏夹目录，请先刷新收藏夹目录。";
+        $("library-detail").textContent = "选择一条内容查看详情";
+        $("library-folder-info").textContent = "没有收藏夹目录。";
+      }
+    } catch (e) {
+      $("library-meta").textContent = "读取失败：" + e.message;
+      $("library-folders").textContent = "";
+      $("library-items").textContent = "";
+    }
+  });
+  $("library-close").addEventListener("click", () => { libraryModal.style.display = "none"; });
+  libraryModal.addEventListener("click", e => { if (e.target === libraryModal) libraryModal.style.display = "none"; });
+
+  function renderLibraryFolders() {
+    const container = $("library-folders");
+    container.replaceChildren();
+    const collator = new Intl.Collator("zh-CN", { numeric: true, sensitivity: "base" });
+    const direction = librarySortDirection.value === "desc" ? -1 : 1;
+    const ordered = [...libraryFolders].sort((a, b) => {
+      let compare = 0;
+      if (librarySortMode.value === "count") {
+        compare = Number(a.count || 0) - Number(b.count || 0);
+      } else if (librarySortMode.value === "name") {
+        compare = collator.compare(String(a.title || ""), String(b.title || ""));
+      } else {
+        compare = Number(a._biliOrder || 0) - Number(b._biliOrder || 0);
+      }
+      return compare * direction;
+    });
+    ordered.forEach(folder => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "library-folder" +
+        (String(folder.media_id) === String(librarySelectedFolder) ? " active" : "");
+      button.setAttribute("role", "treeitem");
+      button.setAttribute("aria-selected", String(String(folder.media_id) === String(librarySelectedFolder)));
+      const title = document.createElement("span");
+      title.className = "library-folder-name";
+      title.textContent = folder.title || "未命名收藏夹";
+      const count = document.createElement("span");
+      count.className = "library-folder-count";
+      count.textContent = `${folder.scanned || 0} / ${folder.expected || 0}`;
+      button.append(title, count);
+      button.addEventListener("click", () => selectLibraryFolder(folder.media_id));
+      container.appendChild(button);
+    });
+  }
+
+  function selectLibraryFolder(mediaId) {
+    librarySelectedFolder = String(mediaId);
+    libraryOffset = 0;
+    const folder = libraryFolders.find(x => String(x.media_id) === librarySelectedFolder);
+    $("library-items-title").textContent = folder ? `${folder.title} · 内容` : "内容";
+    renderLibraryFolderInfo(folder);
+    renderLibraryFolderDetail(folder);
+    renderLibraryFolders();
+    loadLibraryItems();
+  }
+
+  function folderScanStatus(folder) {
+    if (folder.scan_state === "inconsistent" || folder.status === "inconsistent") return "数量不一致，需复核";
+    if (folder.scan_state === "stale" || folder.status === "stale") return "旧进度待校验";
+    if (folder.done) return "已完成";
+    if (folder.scanned_count || folder.scanned) return "部分扫描";
+    return "尚未扫描";
+  }
+
+  function folderStrategy(folder) {
+    const strategy = folder.scan_strategy || folder.strategy;
+    return ({ indexed_ids: "ID 核对 + 本地索引", bulk_ids_infos: "批量元数据",
+      paged: "分页扫描", paged_fallback: "批量失败后分页",
+      paged_index_fallback: "索引路径失败后分页" })[strategy] || "—";
+  }
+
+  function renderLibraryFolderInfo(folder, localCount = null) {
+    const box = $("library-folder-info");
+    box.replaceChildren();
+    if (!folder) { box.textContent = "选择收藏夹查看数量、扫描状态和画像状态。"; return; }
+    const name = document.createElement("strong");
+    name.className = "library-folder-info-name";
+    name.textContent = folder.title || "未命名收藏夹";
+    const stats = document.createElement("span");
+    stats.textContent = `B 站内容 ${Number(folder.count || 0).toLocaleString("zh-CN")} 条`;
+    const local = document.createElement("span");
+    local.textContent = localCount === null
+      ? `本地扫描记录 ${Number(folder.scanned_count || folder.scanned || 0).toLocaleString("zh-CN")} 条`
+      : `本地记录 ${Number(localCount).toLocaleString("zh-CN")} 条`;
+    const scan = document.createElement("span");
+    scan.textContent = `扫描：${folderScanStatus(folder)} · ${folderStrategy(folder)}`;
+    const profile = document.createElement("span");
+    profile.className = "library-profile-state";
+    const savedProfile = folder.profile_data && folder.profile_data.profile;
+    profile.textContent = savedProfile
+      ? `内容画像${folder.profile_data.profile_state === "current" ? "" : "（过期）"}：${savedProfile.summary || "已生成"}`
+      : "内容画像：尚未生成";
+    box.append(name, stats, local, scan, profile);
+    if (folder.scanned_at) {
+      const at = document.createElement("span");
+      at.textContent = `最近扫描：${folder.scanned_at}`;
+      box.appendChild(at);
+    }
+  }
+
+  function renderLibraryFolderDetail(folder) {
+    const detail = $("library-detail");
+    $("library-detail-title").textContent = "收藏夹信息";
+    detail.replaceChildren();
+    if (!folder) { detail.textContent = "选择收藏夹查看信息"; return; }
+    const fields = [
+      ["名称", folder.title], ["收藏夹 ID", folder.media_id],
+      ["B 站内容数量", Number(folder.count || 0).toLocaleString("zh-CN")],
+      ["已扫描数量", Number(folder.scanned_count || folder.scanned || 0).toLocaleString("zh-CN")],
+      ["扫描状态", folderScanStatus(folder)], ["扫描方式", folderStrategy(folder)],
+      ["最近扫描", folder.scanned_at || "暂无"],
+      ["画像状态", folder.profile_data ? (folder.profile_data.profile_state === "current" ? "最新" : "过期，建议重建") : "尚未生成"],
+    ];
+    const profile = folder.profile_data && folder.profile_data.profile;
+    if (profile) {
+      fields.push(["画像简介", profile.summary]);
+      fields.push(["主题", (profile.topics || []).join("、")]);
+      fields.push(["适合收纳", (profile.typical_content || []).join("；")]);
+      fields.push(["明显范围外", (profile.out_of_scope || []).join("；")]);
+      fields.push(["画像样本", `${profile.sample_count || 0} / ${profile.source_item_count || 0} 条 · ${profile.generated_at || profile.updated_at || ""}`]);
+    }
+    const list = document.createElement("dl");
+    list.className = "library-detail-list";
+    fields.forEach(([label, value]) => {
+      const term = document.createElement("dt"); term.textContent = label;
+      const description = document.createElement("dd"); description.textContent = String(value ?? "");
+      list.append(term, description);
+    });
+    detail.appendChild(list);
+  }
+
+  async function loadLibraryItems() {
+    if (!librarySelectedFolder) return;
+    const requestId = ++libraryRequestId;
+    const query = $("library-search").value.trim();
+    const params = new URLSearchParams({
+      q: query, offset: String(libraryOffset), limit: String(libraryPageSize),
+    });
+    $("library-items").textContent = "读取本地数据…";
+    try {
+      const result = await api("GET", `/api/library/folders/${encodeURIComponent(librarySelectedFolder)}/items?${params}`);
+      if (requestId !== libraryRequestId) return;
+      libraryTotal = result.total;
+      const folder = libraryFolders.find(x => String(x.media_id) === librarySelectedFolder);
+      renderLibraryFolderInfo(folder, query ? null : libraryTotal);
+      renderLibraryItems(result.items || []);
+      const page = libraryTotal ? Math.floor(libraryOffset / libraryPageSize) + 1 : 0;
+      const pages = Math.ceil(libraryTotal / libraryPageSize);
+      $("library-page-label").textContent = `${page} / ${pages || 0} 页 · ${libraryTotal} 条`;
+      $("library-prev").disabled = libraryOffset <= 0;
+      $("library-next").disabled = libraryOffset + libraryPageSize >= libraryTotal;
+    } catch (e) {
+      if (requestId !== libraryRequestId) return;
+      $("library-items").textContent = "读取失败：" + e.message;
+      $("library-page-label").textContent = "—";
+      $("library-prev").disabled = true;
+      $("library-next").disabled = true;
+    }
+  }
+
+  function renderLibraryItems(items) {
+    const container = $("library-items");
+    container.replaceChildren();
+    if (!items.length) {
+      container.textContent = "没有匹配的本地内容。未扫描的收藏夹不会自动联网获取。";
+      return;
+    }
+    items.forEach(item => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "library-item";
+      const title = document.createElement("span");
+      title.className = "library-item-title";
+      title.textContent = item.title || item.bvid || item.resource_key || "未命名内容";
+      const sub = document.createElement("span");
+      sub.className = "library-item-sub";
+      sub.textContent = [item.upper_name, item.bvid, formatLibraryTime(item.fav_time)].filter(Boolean).join(" · ");
+      button.append(title, sub);
+      const review = libraryProfileReview(item);
+      if (review) {
+        const reviewTag = document.createElement("span");
+        reviewTag.className = "library-item-profile" + (review.startsWith("⚠️") ? " mismatch" : "");
+        reviewTag.textContent = review;
+        button.appendChild(reviewTag);
+      }
+      button.addEventListener("click", () => {
+        container.querySelectorAll(".library-item.active").forEach(x => x.classList.remove("active"));
+        button.classList.add("active");
+        renderLibraryDetail(item);
+      });
+      container.appendChild(button);
+    });
+  }
+
+  function formatLibraryTime(value) {
+    if (value === null || value === undefined || value === "") return "";
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) {
+      const date = new Date(numeric < 1e12 ? numeric * 1000 : numeric);
+      if (!Number.isNaN(date.getTime())) return date.toLocaleString("zh-CN", { hour12: false });
+    }
+    return String(value);
+  }
+
+  function libraryProfileReview(item) {
+    const folder = libraryFolders.find(x => String(x.media_id) === String(librarySelectedFolder));
+    if (!folder || !folder.profile_data || !folder.profile_data.profile) return "";
+    if (folder.profile_data.profile_state !== "current") return "画像已过期";
+    const analysis = item.analysis || {};
+    const checked = new Set((analysis.profile_checked_folder_ids || []).map(String));
+    const mismatched = new Set((analysis.profile_mismatch_folder_ids || []).map(String));
+    const folderId = String(librarySelectedFolder);
+    const currentRevision = String(folder.profile_data.profile.profile_revision ||
+      folder.profile_data.profile.generated_at || folder.profile_data.profile.updated_at || "");
+    const checkedRevision = String((analysis.profile_checked_versions || {})[folderId] || "");
+    if (!checked.has(folderId) || !currentRevision || checkedRevision !== currentRevision) return "画像待核对";
+    if (mismatched.has(folderId)) return "⚠️画像不符";
+    return "画像核对通过";
+  }
+
+  function renderLibraryDetail(item) {
+    const detail = $("library-detail");
+    $("library-detail-title").textContent = "内容详情";
+    detail.replaceChildren();
+    const fields = [
+      ["标题", item.title], ["BVID", item.bvid], ["AV 号", item.aid], ["资源 ID", item.id],
+      ["资源类型", item.type], ["UP 主", item.upper_name], ["UP 主 UID", item.upper_mid],
+      ["时长（秒）", item.duration], ["收藏时间", formatLibraryTime(item.fav_time)],
+      ["发布时间", formatLibraryTime(item.pubtime)], ["简介", item.desc],
+      ["标签", Array.isArray(item.tags) ? item.tags.join("、") : item.tags],
+      ["属性值", item.attr], ["来源收藏夹 ID", item.source_folder_id], ["资源标识", item.resource_key],
+    ];
+    const review = libraryProfileReview(item);
+    if (review) {
+      const analysis = item.analysis || {};
+      fields.push(["收藏夹画像核对", review +
+        (review.startsWith("⚠️") && analysis.profile_mismatch_reason
+          ? " · " + analysis.profile_mismatch_reason : "")]);
+    }
+    const list = document.createElement("dl");
+    list.className = "library-detail-list";
+    fields.forEach(([label, value]) => {
+      if (value === null || value === undefined || value === "") return;
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const description = document.createElement("dd");
+      description.textContent = String(value);
+      if (label === "简介") description.classList.add("library-description");
+      list.append(term, description);
+    });
+    detail.appendChild(list);
+    if (item.bvid) {
+      const link = document.createElement("a");
+      link.href = `https://www.bilibili.com/video/${encodeURIComponent(item.bvid)}`;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.className = "library-video-link";
+      link.textContent = "在 B 站打开 ↗";
+      detail.appendChild(link);
+    }
+  }
+
+  $("library-search").addEventListener("input", () => {
+    clearTimeout(librarySearchTimer);
+    librarySearchTimer = setTimeout(() => { libraryOffset = 0; loadLibraryItems(); }, 250);
+  });
+  librarySortMode.addEventListener("change", () => {
+    localStorage.setItem("library-sort-mode", librarySortMode.value);
+    renderLibraryFolders();
+  });
+  librarySortDirection.addEventListener("change", () => {
+    localStorage.setItem("library-sort-direction", librarySortDirection.value);
+    renderLibraryFolders();
+  });
+  $("library-prev").addEventListener("click", () => {
+    libraryOffset = Math.max(0, libraryOffset - libraryPageSize);
+    loadLibraryItems();
+  });
+  $("library-next").addEventListener("click", () => {
+    if (libraryOffset + libraryPageSize < libraryTotal) {
+      libraryOffset += libraryPageSize;
+      loadLibraryItems();
+    }
+  });
 
   $("tree-all").addEventListener("click", () => document.querySelectorAll(".folder-pick").forEach(x => x.checked = true));
   $("tree-none").addEventListener("click", () => document.querySelectorAll(".folder-pick").forEach(x => x.checked = false));
@@ -406,11 +949,237 @@
     modal.style.display = "none";
   });
 
-  // ---------- 双路线标签 ----------
+  // ---------- 三路线标签（内容整理 / 收藏夹整理 / 收藏夹画像） ----------
   document.querySelectorAll(".route-tab").forEach(tab => tab.addEventListener("click", () => {
     document.querySelectorAll(".route-tab").forEach(x => x.classList.toggle("active", x === tab));
-    document.querySelectorAll(".route-panel").forEach(x => { x.style.display = x.id === tab.dataset.route ? "block" : "none"; });
+    document.querySelectorAll(".route-panel").forEach(x => {
+      x.style.display = x.id === tab.dataset.route ? "block" : "none";
+    });
+    const stack = document.querySelector(".route-stack");
+    if (stack && stack.scrollIntoView) stack.scrollIntoView({ block: "start", behavior: "smooth" });
+    if (tab.dataset.route === "profile-route") loadFolderProfiles();
   }));
+
+  // ---------- 收藏夹画像 ----------
+  let folderProfileRows = [];
+  let folderProfileListLoaded = false;
+  let profileIntroFolder = null;
+  let profileIntroRemote = null;
+  let profileIntroRequest = 0;
+  let profileIntroLoading = false;
+
+  function updateProfileIntroCounter() {
+    const value = $("profile-intro-edit").value || "";
+    const overLimit = value.length > 200;
+    const sameAsRemote = profileIntroRemote && value === String(profileIntroRemote.intro || "");
+    $("profile-intro-count").textContent = `${value.length} / 200` + (overLimit ? "（超出上限）" : "");
+    $("profile-intro-count").classList.toggle("over-limit", overLimit);
+    const nameMatches = profileIntroFolder && profileIntroRemote &&
+      String(profileIntroRemote.title || "").trim() === String(profileIntroFolder.title || "").trim();
+    $("profile-intro-publish").disabled = profileIntroLoading || !profileIntroRemote ||
+      !nameMatches || overLimit || sameAsRemote;
+    $("profile-intro-publish").textContent = sameAsRemote ? "简介已同步" : "确认上传简介";
+  }
+
+  async function openProfileIntroModal(row) {
+    const modal = $("profile-intro-modal");
+    const requestId = ++profileIntroRequest;
+    profileIntroFolder = row;
+    profileIntroRemote = null;
+    profileIntroLoading = true;
+    $("profile-intro-title").textContent = `同步「${row.title || "未命名收藏夹"}」简介`;
+    $("profile-intro-status").textContent = row.profile_state === "current"
+      ? "正在读取 B 站当前简介…"
+      : "本地画像已过期或未完成核对，请检查内容后再决定是否上传。正在读取 B 站当前简介…";
+    $("profile-intro-remote").value = "";
+    $("profile-intro-edit").value = String(row.profile?.summary || "");
+    modal.style.display = "flex";
+    updateProfileIntroCounter();
+    try {
+      const remote = await api("GET", `/api/folder-profiles/${encodeURIComponent(row.media_id)}/bilibili`);
+      if (requestId !== profileIntroRequest) return;
+      profileIntroRemote = remote;
+      $("profile-intro-remote").value = String(remote.intro || "");
+      const matches = String(remote.title || "").trim() === String(row.title || "").trim();
+      const profileNotice = row.profile_state === "current" ? "" : "；注意：该画像不是当前有效版本";
+      const privacyLabel = remote.privacy === null || remote.privacy === undefined
+        ? "公开状态未知" : (remote.privacy ? "私密收藏夹" : "公开收藏夹");
+      $("profile-intro-status").textContent = matches
+        ? `已读取 B 站现有简介（${privacyLabel}）${profileNotice}`
+        : `B 站当前名称为「${remote.title || "未命名收藏夹"}」，与本地目录不一致；请先刷新收藏夹目录${profileNotice}`;
+      updateProfileIntroCounter();
+    } catch (e) {
+      if (requestId !== profileIntroRequest) return;
+      profileIntroLoading = false;
+      $("profile-intro-status").textContent = "读取 B 站简介失败：" + (e.error || e.message);
+      updateProfileIntroCounter();
+    } finally {
+      if (requestId === profileIntroRequest) {
+        profileIntroLoading = false;
+        updateProfileIntroCounter();
+      }
+    }
+  }
+
+  $("profile-intro-edit").addEventListener("input", updateProfileIntroCounter);
+  function closeProfileIntroModal() {
+    profileIntroRequest++;
+    profileIntroFolder = null;
+    profileIntroRemote = null;
+    profileIntroLoading = false;
+    $("profile-intro-modal").style.display = "none";
+  }
+  $("profile-intro-close").addEventListener("click", closeProfileIntroModal);
+  $("profile-intro-cancel").addEventListener("click", closeProfileIntroModal);
+  $("profile-intro-modal").addEventListener("click", event => {
+    if (event.target === $("profile-intro-modal")) closeProfileIntroModal();
+  });
+  $("profile-intro-publish").addEventListener("click", async () => {
+    if (!profileIntroFolder || !profileIntroRemote) return;
+    const intro = $("profile-intro-edit").value;
+    if (intro.length > 200) return;
+    if (!confirm(`将用本地画像简介覆盖 B 站「${profileIntroFolder.title}」的当前简介？\n\n` +
+                 "上传时会保留收藏夹名称、公开状态和封面。")) return;
+    const button = $("profile-intro-publish");
+    button.disabled = true;
+    button.textContent = "上传中…";
+    try {
+      const result = await api("POST",
+        `/api/folder-profiles/${encodeURIComponent(profileIntroFolder.media_id)}/publish-intro`,
+        { intro });
+      profileIntroRemote = { ...profileIntroRemote, intro: result.intro ?? intro };
+      $("profile-intro-remote").value = String(profileIntroRemote.intro || "");
+      $("profile-intro-status").textContent = `已上传并收到 B 站成功响应；本地画像未修改。`;
+      log(`「${profileIntroFolder.title}」收藏夹简介已上传到 B 站`, "ok");
+      updateProfileIntroCounter();
+    } catch (e) {
+      const message = e.error || e.message;
+      $("profile-intro-status").textContent = "上传失败：" + message;
+      updateProfileIntroCounter();
+      if (!button.disabled) button.textContent = "重试上传";
+      log(`「${profileIntroFolder.title}」简介上传失败：${message}`, "err");
+    }
+  });
+
+  function profileStateLabel(row) {
+    if (!row.scan_complete) return "扫描未完成";
+    if (row.profile_state === "current") return "画像最新";
+    if (row.profile_state === "stale") return "画像过期";
+    return "尚无画像";
+  }
+
+  async function loadFolderProfiles() {
+    folderProfileListLoaded = true;
+    try {
+      const response = await api("GET", "/api/folder-profiles");
+      folderProfileRows = response.folders || [];
+      renderFolderProfiles();
+      const run = response.run || {};
+      $("profile-status").textContent = run.running
+        ? "生成中 " + (run.done || 0) + "/" + (run.total || 0) + " · " + (run.current || "")
+        : folderProfileRows.length + " 个 active 收藏夹";
+    } catch (e) {
+      $("folder-profile-list").textContent = "读取画像列表失败：" + e.message;
+      $("profile-status").textContent = "";
+    }
+  }
+
+  function renderFolderProfiles() {
+    const box = $("folder-profile-list");
+    box.replaceChildren();
+    if (!folderProfileRows.length) {
+      box.textContent = "没有 active 收藏夹。点击「刷新收藏夹目录」同步 B 站目录。";
+      return;
+    }
+    folderProfileRows.forEach(row => {
+      const card = document.createElement("article");
+      card.className = "folder-profile-card";
+      const head = document.createElement("div");
+      head.className = "folder-profile-head";
+      const pick = document.createElement("input");
+      pick.type = "checkbox";
+      pick.className = "folder-profile-pick";
+      pick.value = String(row.media_id);
+      const title = document.createElement("strong");
+      title.textContent = row.title || "未命名收藏夹";
+      const state = document.createElement("span");
+      state.className = "folder-profile-state-badge " + (row.profile_state || "missing");
+      state.textContent = profileStateLabel(row);
+      const count = document.createElement("span");
+      count.className = "muted";
+      count.textContent = "内容 " + Number(row.local_count || 0).toLocaleString("zh-CN") +
+        " / " + Number(row.count || 0).toLocaleString("zh-CN");
+      head.append(pick, title, state, count);
+      card.appendChild(head);
+
+      const profile = row.profile;
+      if (profile) {
+        const summary = document.createElement("p");
+        summary.className = "folder-profile-summary";
+        summary.textContent = profile.summary || "画像没有简介";
+        card.appendChild(summary);
+        const traits = [];
+        if (profile.topics && profile.topics.length) traits.push("主题：" + profile.topics.join("、"));
+        if (profile.typical_content && profile.typical_content.length) traits.push("适合：" + profile.typical_content.join("；"));
+        if (profile.out_of_scope && profile.out_of_scope.length) traits.push("范围外：" + profile.out_of_scope.join("；"));
+        if (traits.length) {
+          const notes = document.createElement("div");
+          notes.className = "folder-profile-notes";
+          notes.textContent = traits.join("　|　");
+          card.appendChild(notes);
+        }
+        const meta = document.createElement("div");
+        meta.className = "folder-profile-meta muted";
+        meta.textContent = "样本 " + (profile.sample_count || 0) + " / " +
+          (profile.source_item_count || 0) + " 条 · 一致性 " + (profile.coherence || "—") +
+          " · 画像把握 " + Math.round(Number(profile.confidence || 0) * 100) + "% · 更新 " +
+          (profile.generated_at || profile.updated_at || "—");
+        card.appendChild(meta);
+        const actions = document.createElement("div");
+        actions.className = "folder-profile-actions";
+        const upload = document.createElement("button");
+        upload.type = "button";
+        upload.className = "btn ghost mini-btn";
+        upload.textContent = "上传简介到 B 站";
+        upload.title = "先预览 B 站现有简介，再确认覆盖";
+        upload.addEventListener("click", () => openProfileIntroModal(row));
+        actions.appendChild(upload);
+        card.appendChild(actions);
+      } else {
+        const empty = document.createElement("p");
+        empty.className = "muted folder-profile-empty";
+        empty.textContent = row.scan_complete ? "尚未生成画像。" : "先完成该收藏夹的扫描，再生成画像。";
+        card.appendChild(empty);
+      }
+      box.appendChild(card);
+    });
+  }
+
+  async function startFolderProfileGeneration(rebuild) {
+    const folderIds = [...document.querySelectorAll(".folder-profile-pick:checked")].map(input => input.value);
+    if (!folderIds.length) { log("请先选择 active 收藏夹", "warn"); return; }
+    try {
+      const result = await api("POST", "/api/folder-profiles/generate", { folder_ids: folderIds, rebuild });
+      $("profile-status").textContent = "画像任务已启动，共 " + result.total + " 个收藏夹";
+      $("profile-progress").style.display = "flex";
+      setProgress($("profile-progress"), "profile", 0, result.total || 0);
+      $("profile-text").textContent = "等待开始 0/" + (result.total || 0);
+    } catch (e) {
+      log("启动画像任务失败: " + (e.error || e.message), "err");
+    }
+  }
+
+  $("profile-refresh").addEventListener("click", loadFolderProfiles);
+  $("profile-select-all").addEventListener("click", () =>
+    document.querySelectorAll(".folder-profile-pick").forEach(x => { x.checked = true; }));
+  $("profile-select-none").addEventListener("click", () =>
+    document.querySelectorAll(".folder-profile-pick").forEach(x => { x.checked = false; }));
+  $("profile-generate").addEventListener("click", () => startFolderProfileGeneration(false));
+  $("profile-rebuild").addEventListener("click", () => startFolderProfileGeneration(true));
+  $("profile-stop").addEventListener("click", async () => {
+    try { await api("POST", "/api/folder-profiles/stop"); log("正在停止画像任务…", "warn"); }
+    catch (e) { log("停止画像任务失败: " + e.message, "err"); }
+  });
 
   // ---------- 收藏夹整理：可编辑合并组表 ----------
   let mergeFolders = [];
@@ -419,6 +1188,12 @@
   let draftTimer = null;
   let editingSourceIndex = -1;
   const folderById = () => Object.fromEntries(mergeFolders.map(f => [String(f.media_id), f]));
+  function clearMergeProfileEvidence(group) {
+    group.profile_context_ids = [];
+    group.profile_context_versions = {};
+    group.profile_evidence = "";
+    group.profile_context_state = "none";
+  }
   function saveMergeDraftSoon() {
     clearTimeout(draftTimer);
     draftTimer = setTimeout(async () => {
@@ -444,7 +1219,9 @@
       const tr = document.createElement("tr");
       const nameTd = document.createElement("td");
       const name = document.createElement("input"); name.value = g.final_name || g.target_name || "";
-      name.addEventListener("input", () => { g.final_name = name.value.trim(); saveMergeDraftSoon(); }); nameTd.appendChild(name);
+      name.addEventListener("input", () => {
+        g.final_name = name.value.trim(); clearMergeProfileEvidence(g); saveMergeDraftSoon();
+      }); nameTd.appendChild(name);
 
       const targetTd = document.createElement("td");
       const target = document.createElement("select");
@@ -456,6 +1233,7 @@
       target.addEventListener("change", () => {
         g.target_id = target.value;
         g.source_ids = (g.source_ids || []).filter(x => String(x) !== target.value);
+        clearMergeProfileEvidence(g);
         normalizeMergeNames(g); renderMergePlan(); saveMergeDraftSoon();
       }); targetTd.appendChild(target);
 
@@ -468,6 +1246,7 @@
         const remove = document.createElement("button"); remove.textContent = "×"; remove.title = "移除";
         remove.addEventListener("click", () => {
           g.source_ids = g.source_ids.filter(x => String(x) !== String(id));
+          clearMergeProfileEvidence(g);
           normalizeMergeNames(g); renderMergePlan(); saveMergeDraftSoon();
         }); card.appendChild(remove); cards.appendChild(card);
       });
@@ -486,6 +1265,21 @@
       refTd.textContent = (levelName ? `[ ${levelName} ] ` : "") + (g.reason || "手动添加");
       if (g.confidence) refTd.textContent += ` · ${Math.round(g.confidence * 100)}%`;
       if (g.risk) refTd.textContent += ` · 风险：${g.risk}`;
+      const profileContextNames = (g.profile_context_ids || []).map(id =>
+        (folderById()[String(id)] || {}).title || String(id));
+      if (g.profile_basis_state === "stale") {
+        refTd.textContent += " · 建议画像版本已过期，需重新生成 AI 建议";
+      } else if (!profileContextNames.length && g.profile_basis_state === "current") {
+        refTd.textContent += " · 人工调整（原建议画像版本仍有效）";
+      } else if (profileContextNames.length) {
+        const statusText = g.profile_context_state === "current" ? "画像最新"
+          : (g.profile_context_state === "stale" ? "画像已过期" : "画像参考");
+        refTd.textContent += ` · ${statusText}（${profileContextNames.join("、")}）`;
+        if (g.profile_evidence) refTd.textContent += `：${g.profile_evidence}`;
+        else if (g.profile_context_state === "stale") refTd.textContent += "；建议重新生成候选";
+      } else if (g.profile_evidence) {
+        refTd.textContent += ` · 画像依据：${g.profile_evidence}`;
+      }
       if (g.status && g.status !== "pending") refTd.textContent += ` · ${g.status}`;
       const actTd = document.createElement("td");
       const del = document.createElement("button"); del.className = "mini"; del.textContent = "删除行";
@@ -577,6 +1371,7 @@
     if (editingSourceIndex < 0) return;
     const g = mergeGroups[editingSourceIndex];
     g.source_ids = [...document.querySelectorAll("#source-modal-list input:checked")].map(x => x.value).filter(x => x !== String(g.target_id));
+    clearMergeProfileEvidence(g);
     normalizeMergeNames(g); sourceModal.style.display = "none"; renderMergePlan(); saveMergeDraftSoon();
   });
 
@@ -616,23 +1411,62 @@
       planFolders = (p.existing_folders || []).map(f => f.title);
       const idToTitle = {};
       (p.existing_folders || []).forEach(f => { idToTitle[String(f.media_id)] = f.title; });
+      const currentProfileIds = new Set((p.profile_current_ids || []).map(String));
+      const staleProfileIds = new Set((p.profile_stale_ids || []).map(String));
+      const currentProfileRevisions = p.profile_current_revisions || {};
       const videos = p.videos_by_bvid || {};
       const planMap = p.plan || {};
       const withMeta = (base, bvid) => {
         const v = videos[bvid] || {};
         const pl = planMap[bvid] || {};
+        const planIsClassification = ["move_to_existing", "create_new"].includes(pl.action);
+        const stalePlan = planIsClassification && pl.profile_context_current === false;
+        const usePlan = !!planMap[bvid] && !stalePlan;
         return Object.assign({}, base, {
           _title: v.title || base.bvid || bvid,
           _upper: v.upper_name || "",
           _cur: idToTitle[String(v.source_folder_id || "")] || "",
-          _status: pl.status || "pending",
+          _profileCheckText: (() => {
+            if (base.organization_profile_current === false) return "画像版本已变化，需重新分析";
+            if (stalePlan && base._fromPlan) return "已提交方案的画像版本已过期，需重新分析";
+            if (stalePlan) return "旧方案画像已过期，当前建议来自新分析";
+            const memberships = new Set((v.folder_ids || []).map(String));
+            if (v.source_folder_id) memberships.add(String(v.source_folder_id));
+            const checked = new Set((base.profile_checked_folder_ids || []).map(String));
+            const checkedVersions = base.profile_checked_versions || {};
+            const mismatched = new Set((base.profile_mismatch_folder_ids || []).map(String));
+            const freshMemberships = [...memberships].filter(id => currentProfileIds.has(id));
+            const staleMemberships = [...memberships].filter(id => staleProfileIds.has(id));
+            const freshChecked = freshMemberships.filter(id => checked.has(id) &&
+              String(checkedVersions[id] || "") === String(currentProfileRevisions[id] || ""));
+            const freshMismatched = freshChecked.filter(id => mismatched.has(id));
+            if (freshMismatched.length) return "⚠️画像偏离：" + freshMismatched.map(id => idToTitle[id] || id).join("、");
+            if (freshChecked.length) return "画像核对：未见明显偏离";
+            if (staleMemberships.length) return "画像已过期，需重建：" + staleMemberships.map(id => idToTitle[id] || id).join("、");
+            if (freshMemberships.length) return "画像待核对";
+            return "";
+          })(),
+          _profileMismatchReason: (() => {
+            const checked = new Set((base.profile_checked_folder_ids || []).map(String));
+            const checkedVersions = base.profile_checked_versions || {};
+            return (base.profile_mismatch_folder_ids || []).some(id =>
+              currentProfileIds.has(String(id)) && checked.has(String(id)) &&
+              String(checkedVersions[String(id)] || "") === String(currentProfileRevisions[String(id)] || ""))
+              ? (base.profile_mismatch_reason || "") : "";
+          })(),
+          _status: ["done", "unknown"].includes(pl.status) ? pl.status
+            : ((usePlan || base._fromPlan) ? (pl.status || "pending") : "pending"),
           _result: pl.result || "",
           _at: pl.at || "",
           // E：带上"已提交方案"的动作与目标，否则会显示回 LLM 建议
-          _hasPlan: !!planMap[bvid],
-          _planAction: pl.action || "",
-          _planTarget: pl.target_folder || "",
-          _planNew: pl.create_new_name || "",
+          _hasPlan: usePlan,
+          _planAction: usePlan ? (pl.action || "") : "",
+          _planTarget: usePlan ? (pl.target_folder || "") : "",
+          _planNew: usePlan ? (pl.create_new_name || "") : "",
+          _profileAnalysisStale: base.organization_profile_current === false,
+          _profilePlanStale: stalePlan,
+          organization_profile_versions: base.organization_profile_versions ||
+            pl.organization_profile_versions || {},
         });
       };
       planRows = (p.analysis || []).map(a => withMeta(a, a.bvid));
@@ -655,7 +1489,8 @@
       $("apply-meta").textContent = planned
         ? `已提交方案 ${planned} 条（待操作 ${nP} · 已完成 ${nD}）`
         : "尚未提交方案";
-      log(`已加载 ${planRows.length} 条待处理记录（另有 ${invCount} 条已失效视频）`);
+      log(`已加载 ${planRows.length} 条待处理记录（另有 ${invCount} 条已失效视频）` +
+          (p.stale_analysis_count ? `；${p.stale_analysis_count} 条分析基于旧画像，需重新分析` : ""));
     } catch (e) { log("加载方案失败: " + e.message, "err"); }
   }
   $("plan-load").addEventListener("click", loadPlan);
@@ -687,15 +1522,18 @@
       let mode;
       if (!rec || r.action === "skip") mode = "skip";
       else if (r._cur && rec === r._cur) mode = "keep";      // 已在目标夹 → 无需移动
+      else if (rec === "默认收藏夹") mode = "skip";          // 默认夹不可作为移入目标
       else if (isExisting) mode = "existing";
       else mode = "new";
       if (mode === "keep") nKeep++;
       else if (mode === "existing") nExisting++;
       else if (mode === "new") nNew++;
       else nSkip++;
-      const key = mode === "skip" ? "（跳过）"
-                : (mode === "new" ? "（新建）" + rec : rec);
-      byTarget.set(key, (byTarget.get(key) || 0) + 1);
+      // Top 目标只统计会产生实际动作的去向；留在原夹和跳过不属于整理目标。
+      if (mode === "existing" || mode === "new") {
+        const key = mode === "new" ? "（新建）" + rec : rec;
+        byTarget.set(key, (byTarget.get(key) || 0) + 1);
+      }
     });
     $("plan-meta").textContent =
       `共 ${planRows.length} 条 · ${planFolders.length} 个现有收藏夹`;
@@ -712,7 +1550,13 @@
     const top = [...byTarget.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
     const tops = document.createElement("div");
     tops.className = "plan-top";
-    tops.appendChild(document.createTextNode("Top 目标："));
+    tops.appendChild(document.createTextNode("Top 目标（仅实际移动/新建）："));
+    if (!top.length) {
+      const empty = document.createElement("span");
+      empty.className = "muted";
+      empty.textContent = "暂无实际移动或新建目标";
+      tops.appendChild(empty);
+    }
     top.forEach(([k, n]) => {
       const s = document.createElement("span");
       s.className = "tag" + (k.startsWith("（新建）") ? " new" : "");
@@ -764,6 +1608,7 @@
     // 失效视频：默认不动（不自动移动也不自动删除），删除需显式选择
     if ((row._title || "").trim() === "已失效视频") return { mode: "skip" };
     if (!rec || row.action === "skip") return { mode: "skip" };
+    if (rec === "默认收藏夹" && row._cur !== "默认收藏夹") return { mode: "skip" };
     if (folders.includes(rec)) return { mode: "existing", name: rec };
     return { mode: "new", name: rec };
   }
@@ -800,12 +1645,28 @@
   }
 
   function visibleRows() {
-    return baseRows().filter(r => {
-      if (planFilter.cur && (r._cur || "未知") !== planFilter.cur) return false;
-      if (planFilter.target && targetLabel(r) !== planFilter.target) return false;
-      if (planFilter.action && actionLabel(r) !== planFilter.action) return false;
+    return rowsMatchingFilters(baseRows());
+  }
+
+  // 每个下拉选项按其他筛选条件计算计数；改变“操作”时，当前夹和目标夹的数量会同步刷新。
+  function rowsMatchingFilters(rows, exceptKey = "") {
+    return rows.filter(r => {
+      if (exceptKey !== "cur" && planFilter.cur && (r._cur || "未知") !== planFilter.cur) return false;
+      if (exceptKey !== "target" && planFilter.target && targetLabel(r) !== planFilter.target) return false;
+      if (exceptKey !== "action" && planFilter.action && actionLabel(r) !== planFilter.action) return false;
       return true;
     });
+  }
+
+  function countedOptions(rows, key, labels) {
+    const counts = new Map(labels.map(label => [label, 0]));
+    rowsMatchingFilters(rows, key).forEach(row => {
+      const label = key === "cur" ? (row._cur || "未知")
+        : key === "target" ? targetLabel(row) : actionLabel(row);
+      counts.set(label, (counts.get(label) || 0) + 1);
+    });
+    return labels.map(value => ({ value, count: counts.get(value) || 0 }))
+      .sort((a, b) => (a.count === 0) - (b.count === 0) || b.count - a.count || a.value.localeCompare(b.value, "zh-CN"));
   }
 
   function sortRows(rows) {
@@ -857,8 +1718,13 @@
       `当前：${row._cur || "未知"}` +
       (row._upper ? " · UP: " + row._upper : "") +
       (row._result ? ` · ${stTxt}${row._result}` : "") +
-      (row.reason ? " · " + row.reason : "");
-    if (row.reason) t.querySelector(".reason").textContent = "建议: " + row.reason;
+      (row.reason ? " · " + row.reason : "") +
+      (row._profileCheckText ? " · " + row._profileCheckText : "");
+    if (row.reason || row._profileMismatchReason) {
+      t.querySelector(".reason").textContent =
+        (row.reason ? "建议: " + row.reason : "") +
+        (row._profileMismatchReason ? (row.reason ? " · " : "") + "画像依据: " + row._profileMismatchReason : "");
+    }
 
     const rec = row.recommended || "";
     const isExisting = folders.includes(rec);
@@ -878,6 +1744,8 @@
     sel.value = dt.mode === "delete" ? "__delete__"
       : dt.mode === "existing" ? (folders.includes(dt.name) ? dt.name : "__skip__")
         : dt.mode === "new" ? "__new__" : "__skip__";
+    const defaultTargetOption = sel.querySelector('option[value="默认收藏夹"]');
+    if (defaultTargetOption) defaultTargetOption.disabled = true;
 
     sel.addEventListener("change", () => {
       const v = sel.value;
@@ -886,8 +1754,15 @@
       } else if (v === "__new__") {
         const name = prompt("输入新收藏夹名称：", rec || row.create_new_name || "");
         if (name && name.trim()) {
-          row._target = { mode: "new", name: name.trim() };
-          showBadge(item, "new", name.trim());
+          if (name.trim() === "默认收藏夹") {
+            log("默认收藏夹只能移出，不能作为新建或移入目标", "warn");
+            sel.value = "__skip__";
+            row._target = { mode: "skip" };
+            showBadge(item, "skip", "跳过");
+          } else {
+            row._target = { mode: "new", name: name.trim() };
+            showBadge(item, "new", name.trim());
+          }
         } else { sel.value = "__skip__"; row._target = { mode: "skip" }; showBadge(item, "skip", "跳过"); }
       } else if (v === "__skip__") {
         row._target = { mode: "skip" }; showBadge(item, "skip", "跳过");
@@ -896,6 +1771,8 @@
         if (row._cur && v === row._cur) showBadge(item, "keep", "无需移动");
         else showBadge(item, "existing", v);
       }
+      planPage = 1;
+      renderPlan(planFolders);
     });
 
     const conf = document.createElement("span");
@@ -989,20 +1866,22 @@
     const bar = document.createElement("div");
     bar.className = "plan-filters";
     const base = baseRows();
-    const curs = [...new Set(base.map(r => r._cur || "未知"))].sort();
-    const targets = [...new Set(base.map(r => targetLabel(r)))].sort();
-    const acts = ACTION_NAMES.filter(a => base.some(r => actionLabel(r) === a));
+    const curs = [...new Set(base.map(r => r._cur || "未知"))];
+    const targets = [...new Set(base.map(r => targetLabel(r)))];
+    const acts = [...ACTION_NAMES];
+    if (planFilter.cur && !curs.includes(planFilter.cur)) curs.push(planFilter.cur);
+    if (planFilter.target && !targets.includes(planFilter.target)) targets.push(planFilter.target);
     const mkSel = (label, key, options) => {
       const w = document.createElement("label");
       w.className = "inline-label";
       w.appendChild(document.createTextNode(label));
       const s = document.createElement("select");
       const o0 = document.createElement("option");
-      o0.value = ""; o0.textContent = "全部";
+      o0.value = ""; o0.textContent = `全部（${rowsMatchingFilters(base, key).length}）`;
       s.appendChild(o0);
-      options.forEach(v => {
+      countedOptions(base, key, options).forEach(({ value, count }) => {
         const o = document.createElement("option");
-        o.value = v; o.textContent = v;
+        o.value = value; o.textContent = `${value}（${count}）`;
         s.appendChild(o);
       });
       s.value = planFilter[key] || "";
@@ -1052,7 +1931,7 @@
     const o0 = document.createElement("option");
     o0.value = ""; o0.textContent = "目标收藏夹...";
     fsel.appendChild(o0);
-    planFolders.forEach(f => {
+    planFolders.filter(f => f !== "默认收藏夹").forEach(f => {
       const o = document.createElement("option"); o.value = f; o.textContent = f;
       fsel.appendChild(o);
     });
@@ -1171,6 +2050,14 @@
   async function confirmPlan() {
     // 已完成的不提交（保持原状，避免被重置为待办）；按 删除>新建>移动>不移动>跳过 排序提交
     const pend = sortPending(planRows.filter(r => r._status !== "done"));
+    const staleRows = pend.filter(r =>
+      ((r._profileAnalysisStale && !r._hasPlan) || (r._profilePlanStale && r._fromPlan)) &&
+      (["move_to_existing", "create_new"].includes(r.action) ||
+       ["move_to_existing", "create_new"].includes(r._planAction)));
+    if (staleRows.length) {
+      log(`${staleRows.length} 条归类结果对应的画像已变化，请先重新分析再确认方案`, "warn");
+      return;
+    }
     const applyList = pend.map(r => {
       // 未渲染（超出显示上限）的条目也用同一套默认目标，避免被静默跳过
       const tg = defaultTarget(r);
@@ -1184,6 +2071,7 @@
                 : (tg.mode === "existing" ? "move_to_existing" : "skip"))),
         target_folder: tg.name || "",
         create_new_name: tg.name || "",
+        organization_profile_versions: r.organization_profile_versions || {},
       };
     });
     try {
@@ -1222,6 +2110,7 @@
 
       // 扫描：仅事件到达时更新进度
       if (ev.kind === "scan_start" || ev.kind === "scan_progress") {
+        if (ev.kind === "scan_start") refreshOrganizationReadiness();
         const box = $("scan-progress");
         box.style.display = "flex";
         if (typeof ev.done === "number") {
@@ -1230,6 +2119,8 @@
           if (typeof ev.unique === "number") parts.push(`去重 ${ev.unique}`);
           if (ev.ftotal) parts.push(`收藏夹 ${ev.fdone}/${ev.ftotal}`);
           if (ev.current) parts.push(`当前：${ev.current}`);
+          if (ev.strategy) parts.push(ev.strategy === "indexed_ids" ? "ID 核对 + 本地索引" :
+            (ev.strategy === "bulk_ids_infos" ? "批量元数据" : "分页明细"));
           $("scan-text").textContent = parts.join(" · ");
         }
         if (modal.style.display === "flex") refreshTree();
@@ -1238,6 +2129,8 @@
       if (ev.kind === "scan_end") {
         $("scan-progress").style.display = "none";
         refreshStats();
+        if (folderProfileListLoaded) loadFolderProfiles();
+        refreshOrganizationReadiness();
       }
 
       // 分析
@@ -1258,8 +2151,27 @@
         $("analyze-progress").style.display = "none";
         $("analyze-continuous").checked = false;
         refreshStats();
+        loadPlan();
       }
       if (ev.phase === "folder_merge" || ev.phase === "folder_merge_ai") loadFolderMerge();
+
+      if (ev.phase === "folder_profile") {
+        if (typeof ev.done === "number" && typeof ev.total === "number") {
+          const box = $("profile-progress");
+          box.style.display = "flex";
+          setProgress(box, "profile", ev.done, ev.total);
+          $("profile-text").textContent = "已处理 " + ev.done + "/" + ev.total +
+            (ev.current ? " · " + ev.current : "") +
+            " · 生成 " + (ev.generated || 0) + " · 跳过 " + (ev.skipped || 0) + " · 失败 " + (ev.failed || 0);
+        }
+        if (ev.kind === "folder_profile_end") {
+          $("profile-progress").style.display = "none";
+          $("profile-status").textContent = "生成 " + (ev.generated || 0) +
+            " · 跳过 " + (ev.skipped || 0) + " · 失败 " + (ev.failed || 0);
+          if (folderProfileListLoaded) loadFolderProfiles();
+          refreshOrganizationReadiness();
+        }
+      }
 
       // 执行
       if (ev.phase === "apply" && typeof ev.done === "number") {
@@ -1276,17 +2188,708 @@
     };
   }
 
+  // ---------- 管理供应商 / 模型 ----------
+  const manageModal = $("manage-modal");
+  const refreshModal = $("refresh-modal");
+  const testModal = $("test-modal");
+
+  function setManageStatus(text) {
+    const el = $("manage-status");
+    if (el) el.textContent = text || "";
+  }
+
+  function renderPresetList(presets) {
+    const select = $("preset-select");
+    if (!select) return;
+    select.replaceChildren();
+    const other = document.createElement("option");
+    other.value = "custom";
+    other.textContent = "其他";
+    select.appendChild(other);
+    for (const preset of presets) {
+      if (preset.key === "custom") continue;
+      const option = document.createElement("option");
+      option.value = preset.key;
+      option.textContent = preset.name;
+      option.title = preset.base_url || "需手动填写地址";
+      select.appendChild(option);
+    }
+    select.value = "custom";
+  }
+
+  async function addSelectedProviderPreset() {
+    const key = $("preset-select").value || "custom";
+    const preset = providerPresetsCache.find(item => item.key === key);
+    let name = preset ? preset.name : "";
+    let base = preset ? (preset.base_url || "") : "";
+    if (key === "custom" || !preset) {
+      name = (prompt("输入供应商名称：") || "").trim();
+      if (!name) return;
+      base = (prompt("输入供应商 base_url：") || "").trim();
+    } else if (!base) {
+      base = (prompt(`输入「${name}」的 base_url：`) || "").trim();
+    }
+    if (!base) return;
+    try {
+      let selected = providersCache.find(x => x.name === name && x.base_url === base);
+      if (!selected) {
+        const result = await api("POST", "/api/providers", { name, base_url: base, api_key: "" });
+        selected = result.provider;
+        setManageStatus(`已添加预设「${name}」，请填写 API Key`);
+        await loadConfig();
+      } else {
+        setManageStatus(`供应商「${name}」已存在，打开设置`);
+      }
+      manageSelectedProviderId = selected.id;
+      openProviderForm(selected.id);
+      renderManageLists({ resetModelScroll: true });
+    } catch (e) { log("添加预设失败: " + (e.error || e.message), "err"); }
+  }
+
+  function openProviderForm(providerId) {
+    editingProviderId = providerId || "";
+    const form = $("provider-form");
+    form.hidden = false;
+    const p = providerId ? providerById(providerId) : null;
+    $("pf-name").value = p ? p.name : "";
+    $("pf-url").value = p ? p.base_url : "";
+    $("pf-key").value = "";
+    $("pf-clear-key").checked = false;
+    $("pf-clear-key-wrap").hidden = !(p && p.api_key_set);
+    $("pf-key").placeholder = p && p.api_key_set
+      ? `已配置（${p.api_key_masked}）— 留空不修改`
+      : "sk-…（仅本地保存，界面保密显示）";
+    $("pf-name").focus();
+  }
+
+  function closeProviderForm() {
+    editingProviderId = "";
+    $("provider-form").hidden = true;
+    $("pf-clear-key").checked = false;
+  }
+
+  function openModelForm(modelId) {
+    editingModelId = modelId || "";
+    const form = $("model-form");
+    form.hidden = false;
+    const m = modelId ? modelById(modelId) : null;
+    $("mf-name").value = m ? m.name : "";
+    $("mf-ctx").value = String(m && Number(m.context_tokens) > 0 ? m.context_tokens : "");
+    $("mf-out").value = String(m && Number(m.max_output_tokens) > 0 ? m.max_output_tokens : "");
+    modelFormBaseline = m ? {
+      context_source: m.context_source || "legacy_unknown",
+      output_source: m.output_source || "legacy_unknown",
+    } : null;
+    modelFormTouched = { ctx: false, out: false };
+    $("mf-think").value = m ? (m.thinking_effort || "") : "";
+    $("mf-activate").hidden = !m;
+  }
+
+  function closeModelForm() {
+    editingModelId = "";
+    $("model-form").hidden = true;
+    $("mf-activate").hidden = true;
+    modelFormBaseline = null;
+  }
+
+  function modelLimitLabel(value, source) {
+    if (!(Number(value) > 0)) return "未知（API未提供）";
+    const origin = {
+      api: "API",
+      manual: "手动",
+      documented_cap: "API / 供应商上限",
+      legacy_unknown: "来源未记录",
+      legacy_config: "旧配置",
+      unknown: "来源未知",
+    }[source || "unknown"] || "来源未知";
+    return `${Number(value).toLocaleString("zh-CN")}（${origin}）`;
+  }
+
+  function statusDot(status) {
+    const map = { ok: "ok", fail: "fail", testing: "testing", untested: "untested" };
+    return map[status] || "untested";
+  }
+
+  function modelIconButton(label, svgMarkup) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mini icon-btn";
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    button.innerHTML = svgMarkup;
+    return button;
+  }
+
+  function renderManageLists(options = {}) {
+    const pbox = $("provider-list");
+    if (!pbox) return;
+    const providerScrollTop = pbox.scrollTop;
+    const mbox = $("model-list");
+    const modelScrollTop = mbox.scrollTop;
+    pbox.replaceChildren();
+    if (!providersCache.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted manage-empty";
+      empty.textContent = "尚无供应商，可用下方预设快速添加。";
+      pbox.appendChild(empty);
+    }
+    for (const p of providersCache) {
+      const row = document.createElement("div");
+      row.className = "manage-row provider-row" + (p.id === manageSelectedProviderId ? " active" : "");
+      const main = document.createElement("button");
+      main.type = "button";
+      main.className = "manage-row-main";
+      main.innerHTML = `<div class="mr-name"></div><div class="mr-sub"></div><div class="mr-key"></div>`;
+      main.querySelector(".mr-name").textContent = p.name;
+      main.querySelector(".mr-sub").textContent = p.base_url;
+      main.querySelector(".mr-key").textContent = p.api_key_set
+        ? `Key ${p.api_key_masked || "****"}` : "Key 未配置";
+      main.addEventListener("click", () => {
+        manageSelectedProviderId = p.id;
+        closeModelForm();
+        renderManageLists({ resetModelScroll: true });
+      });
+      const acts = document.createElement("div");
+      acts.className = "row-acts";
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "mini";
+      edit.textContent = "编辑";
+      edit.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        manageSelectedProviderId = p.id;
+        openProviderForm(p.id);
+        renderManageLists();
+      });
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "mini danger-mini";
+      del.textContent = "删除";
+      del.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (!confirm(`删除供应商「${p.name}」及其全部模型？`)) return;
+        try {
+          await api("DELETE", "/api/providers/" + p.id);
+          if (manageSelectedProviderId === p.id) manageSelectedProviderId = "";
+          closeModelForm();
+          setManageStatus("已删除供应商");
+          await loadConfig();
+        } catch (e) { log("删除供应商失败: " + (e.error || e.message), "err"); }
+      });
+      acts.append(edit, del);
+      row.append(main, acts);
+      pbox.appendChild(row);
+    }
+
+    const hasProvider = Boolean(manageSelectedProviderId && providerById(manageSelectedProviderId));
+    $("model-refresh").disabled = !hasProvider;
+    $("model-test").disabled = !hasProvider;
+    $("model-add-btn").disabled = !hasProvider;
+
+    mbox.replaceChildren();
+    if (!hasProvider) {
+      const empty = document.createElement("div");
+      empty.className = "muted manage-empty";
+      empty.textContent = "选择左侧供应商后查看模型。";
+      mbox.appendChild(empty);
+      $("model-pane-status").textContent = "";
+      pbox.scrollTop = providerScrollTop;
+      mbox.scrollTop = options.resetModelScroll ? 0 : modelScrollTop;
+      return;
+    }
+    const list = modelsOf(manageSelectedProviderId);
+    $("model-pane-status").textContent = `${list.length} 个模型`;
+    if (!list.length) {
+      const empty = document.createElement("div");
+      empty.className = "muted manage-empty";
+      empty.textContent = "该供应商下暂无模型；点「刷新」从远程拉取，或「新增模型」手动添加。";
+      mbox.appendChild(empty);
+      pbox.scrollTop = providerScrollTop;
+      mbox.scrollTop = options.resetModelScroll ? 0 : modelScrollTop;
+      return;
+    }
+    for (const m of list) {
+      const row = document.createElement("div");
+      row.className = "manage-row model-row" + (m.id === editingModelId ? " selected" : "");
+      row.dataset.modelId = m.id;
+      const main = document.createElement("button");
+      main.type = "button";
+      main.className = "manage-row-main model-main";
+      const dot = document.createElement("span");
+      dot.className = "test-dot " + statusDot(m.test_status);
+      dot.title = m.test_status + (m.test_message ? "：" + m.test_message : "");
+      const body = document.createElement("span");
+      body.className = "model-body";
+      body.innerHTML = `<div class="mr-name"></div><div class="mr-sub"></div>`;
+      body.querySelector(".mr-name").textContent = m.name + (m.id === activeModelId ? "（激活）" : "");
+      body.querySelector(".mr-sub").textContent =
+        `上下文 ${modelLimitLabel(m.context_tokens, m.context_source)} · 输出 ${modelLimitLabel(m.max_output_tokens, m.output_source)} · 思考 ${m.thinking_effort || "默认"}`;
+      main.append(dot, body);
+      main.addEventListener("click", () => {
+        openModelForm(m.id);
+        for (const modelRow of mbox.querySelectorAll(".model-row")) {
+          modelRow.classList.toggle("selected", modelRow.dataset.modelId === m.id);
+        }
+        setManageStatus(`正在编辑「${m.name}」；保存后如需切换请点「激活」`);
+      });
+      const acts = document.createElement("div");
+      acts.className = "row-acts";
+      const copy = modelIconButton("复制模型名称", '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3.5" width="12" height="13" rx="1.5"></rect><path d="M16 7.5H5.5A1.5 1.5 0 0 0 4 9v10a1.5 1.5 0 0 0 1.5 1.5H15a1.5 1.5 0 0 0 1.5-1.5V8"></path></svg>');
+      copy.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(m.name);
+          setManageStatus("已复制模型名称");
+        } catch (_) {
+          prompt("复制模型名称：", m.name);
+        }
+      });
+      const edit = modelIconButton("编辑模型", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 16.5-.8 4.3 4.3-.8L19.8 7.7a2.1 2.1 0 0 0-3-3L4 16.5Z"></path><path d="m14.9 6.6 3 3"></path></svg>');
+      edit.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        openModelForm(m.id);
+        for (const modelRow of mbox.querySelectorAll(".model-row")) {
+          modelRow.classList.toggle("selected", modelRow.dataset.modelId === m.id);
+        }
+      });
+      const del = modelIconButton("删除模型", '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>');
+      del.classList.add("danger-mini");
+      del.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (!confirm(`删除模型「${m.name}」？`)) return;
+        try {
+          await api("DELETE", "/api/models/" + m.id);
+          if (editingModelId === m.id) closeModelForm();
+          setManageStatus("已删除模型");
+          await loadConfig();
+        } catch (e) { log("删除模型失败: " + (e.error || e.message), "err"); }
+      });
+      acts.append(copy, edit, del);
+      row.append(main, acts);
+      mbox.appendChild(row);
+    }
+    pbox.scrollTop = providerScrollTop;
+    if (options.scrollToActive) {
+      const activeRow = [...mbox.querySelectorAll(".model-row")]
+        .find(row => row.dataset.modelId === activeModelId);
+      if (activeRow) {
+        const rowTop = activeRow.getBoundingClientRect().top - mbox.getBoundingClientRect().top + mbox.scrollTop;
+        mbox.scrollTop = Math.max(0, rowTop - (mbox.clientHeight - activeRow.offsetHeight) / 2);
+      } else {
+        mbox.scrollTop = options.resetModelScroll ? 0 : modelScrollTop;
+      }
+    } else {
+      mbox.scrollTop = options.resetModelScroll ? 0 : modelScrollTop;
+    }
+  }
+
+  $("manage-models-btn").addEventListener("click", async () => {
+    manageModal.style.display = "flex";
+    setManageStatus("");
+    try { await loadConfig(); } catch (_) { /* loadConfig already logs */ }
+    const activeModel = modelById(activeModelId);
+    manageSelectedProviderId = activeModel ? activeModel.provider_id : (providersCache[0] || {}).id || "";
+    if (activeModel) openModelForm(activeModel.id);
+    else closeModelForm();
+    renderManageLists({ resetModelScroll: true, scrollToActive: Boolean(activeModel) });
+  });
+  $("manage-close").addEventListener("click", () => { manageModal.style.display = "none"; });
+  $("manage-done").addEventListener("click", () => { manageModal.style.display = "none"; });
+  $("provider-add-btn").addEventListener("click", () => openProviderForm(""));
+  $("preset-add-btn").addEventListener("click", addSelectedProviderPreset);
+  $("pf-cancel").addEventListener("click", closeProviderForm);
+  $("pf-save").addEventListener("click", async () => {
+    const name = $("pf-name").value.trim();
+    const base = $("pf-url").value.trim();
+    const key = $("pf-key").value.trim();
+    if (!name || !base) { setManageStatus("名称与 base_url 必填"); return; }
+    try {
+      if (editingProviderId) {
+        const body = { name, base_url: base };
+        if ($("pf-clear-key").checked) body.api_key = "";
+        else if (key) body.api_key = key;
+        await api("PUT", "/api/providers/" + editingProviderId, body);
+        setManageStatus("供应商已更新");
+      } else {
+        const r = await api("POST", "/api/providers", { name, base_url: base, api_key: key });
+        manageSelectedProviderId = r.provider.id;
+        setManageStatus("供应商已创建");
+      }
+      closeProviderForm();
+      await loadConfig();
+      renderManageLists();
+    } catch (e) { setManageStatus(e.error || e.message); }
+  });
+
+  $("model-add-btn").addEventListener("click", () => openModelForm(""));
+  $("mf-ctx").addEventListener("input", () => { modelFormTouched.ctx = true; });
+  $("mf-out").addEventListener("input", () => { modelFormTouched.out = true; });
+  $("mf-cancel").addEventListener("click", closeModelForm);
+  function currentModelFormValues() {
+    const name = $("mf-name").value.trim();
+    const ctx = parseInt($("mf-ctx").value, 10);
+    const out = parseInt($("mf-out").value, 10);
+    const think = $("mf-think").value;
+    if (!name) throw new Error("模型名称不能为空");
+    const values = { name, context_tokens: Number.isFinite(ctx) ? ctx : 0,
+      max_output_tokens: Number.isFinite(out) ? out : 0, thinking_effort: think };
+    if (modelFormBaseline) {
+      if (!modelFormTouched.ctx) {
+        values.context_source = modelFormBaseline.context_source;
+      }
+      if (!modelFormTouched.out) {
+        values.output_source = modelFormBaseline.output_source;
+      }
+    }
+    return values;
+  }
+
+  async function saveCurrentModelForm() {
+    const values = currentModelFormValues();
+    let modelId = editingModelId;
+    if (modelId) {
+      await api("PUT", "/api/models/" + modelId, values);
+      setManageStatus("模型已更新");
+    } else {
+      const result = await api("POST", "/api/models", {
+        provider_id: manageSelectedProviderId, ...values,
+      });
+      modelId = result.model && result.model.id || "";
+      setManageStatus("模型已添加");
+    }
+    return modelId;
+  }
+
+  $("mf-save").addEventListener("click", async () => {
+    try {
+      await saveCurrentModelForm();
+      closeModelForm();
+      await loadConfig();
+      renderManageLists();
+    } catch (e) { setManageStatus(e.error || e.message); }
+  });
+  $("mf-activate").addEventListener("click", async () => {
+    const modelId = editingModelId;
+    if (!modelId) return;
+    try {
+      await saveCurrentModelForm();
+      await api("POST", "/api/config", { active_model_id: modelId });
+      activeModelId = modelId;
+      await loadConfig();
+      openModelForm(modelId);
+      renderManageLists();
+      setManageStatus(`已保存并激活「${modelById(modelId)?.name || "模型"}」`);
+    } catch (e) { setManageStatus(e.error || e.message); }
+  });
+
+  $("model-refresh").addEventListener("click", async () => {
+    if (!manageSelectedProviderId) return;
+    $("refresh-meta").textContent = "正在从供应商读取模型…";
+    $("refresh-diff").replaceChildren();
+    $("refresh-modal").style.display = "flex";
+    lastRefreshDiff = null;
+    selectedRefreshModels = new Map();
+    selectedRefreshPreset = "";
+    $("sync-save-selected").disabled = true;
+    try {
+      const r = await api("POST", `/api/providers/${manageSelectedProviderId}/remote-models`);
+      lastRefreshDiff = { ...r, provider_id: manageSelectedProviderId };
+      const add = (r.added || []).length, rem = (r.removed || []).length, com = (r.common || []).length;
+      $("refresh-meta").textContent =
+        `远程 ${r.remote.length} · 本地 ${r.local.length} · 新增 ${add} · 失效 ${rem} · 共有 ${com} · 已选 0`;
+      const box = $("refresh-diff");
+      box.replaceChildren();
+      if ((r.metadata_warnings || []).length) {
+        const warning = document.createElement("div");
+        warning.className = "hint warning";
+        warning.textContent = `规格读取提示：${r.metadata_warnings.join("；")}。未从 API 返回的上下文/输出限制会显示为未知，可手动填写。`;
+        box.appendChild(warning);
+      }
+      const remoteByName = new Map((r.remote_models || []).map(model => [model.name, model]));
+      const sections = [
+        { key: "added", cls: "new", title: "新增（远程有、本地无）" },
+        { key: "removed", cls: "removed", title: "失效（本地有、远程无）" },
+        { key: "common", cls: "common", title: "共有" },
+      ];
+      for (const sec of sections) {
+        const names = r[sec.key] || [];
+        if (!names.length) continue;
+        const h = document.createElement("div");
+        h.className = "diff-head " + sec.cls;
+        h.textContent = `${sec.title}（${names.length}）`;
+        box.appendChild(h);
+        for (const n of names) {
+          const line = document.createElement("div");
+          const selectable = true;
+          line.className = "diff-line " + sec.cls + (selectable ? " selectable" : "");
+          if (selectable) {
+            line.dataset.modelName = n;
+            line.dataset.category = sec.key;
+            line.setAttribute("role", "button");
+            line.setAttribute("aria-pressed", "false");
+            line.tabIndex = 0;
+            line.title = sec.key === "added"
+              ? "点击选择增加；再次点击取消选择"
+              : "点击选择移除；再次点击取消选择";
+          }
+          const remoteModel = remoteByName.get(n) || {};
+          const localModel = modelsCache.find(model => model.provider_id === manageSelectedProviderId && model.name === n);
+          const details = [];
+          if (Number(remoteModel.context_tokens) > 0) {
+            details.push(`API 上下文 ${Number(remoteModel.context_tokens).toLocaleString("zh-CN")}`);
+          } else if (localModel && Number(localModel.context_tokens) > 0) {
+            details.push(`本地上下文 ${modelLimitLabel(localModel.context_tokens, localModel.context_source)}`);
+          } else details.push("API未提供上下文");
+          if (Number(remoteModel.max_output_tokens) > 0) {
+            details.push(`API 输出 ${Number(remoteModel.max_output_tokens).toLocaleString("zh-CN")}`);
+          } else if (localModel && Number(localModel.max_output_tokens) > 0) {
+            details.push(`本地输出 ${modelLimitLabel(localModel.max_output_tokens, localModel.output_source)}`);
+          } else details.push("API未提供输出上限");
+          if (remoteModel.thinking_effort) details.push(`API 思考 ${remoteModel.thinking_effort}`);
+          else if (localModel?.thinking_effort) details.push(`本地思考 ${localModel.thinking_effort}`);
+          line.textContent = details.length ? `${n} · ${details.join(" · ")}` : n;
+          if (selectable) {
+            const toggleSelection = () => {
+              if (selectedRefreshPreset) {
+                selectedRefreshPreset = "";
+                for (const [name, action] of selectedRefreshModels) {
+                  if (action === "keep") selectedRefreshModels.delete(name);
+                }
+              }
+              if (selectedRefreshModels.has(n)) selectedRefreshModels.delete(n);
+              else selectedRefreshModels.set(n, sec.key === "added" ? "add" : "remove");
+              updateRefreshSelectionSummary(r);
+            };
+            line.addEventListener("click", toggleSelection);
+            line.addEventListener("keydown", (ev) => {
+              if (ev.key === "Enter" || ev.key === " ") {
+                ev.preventDefault();
+                toggleSelection();
+              }
+            });
+          }
+          box.appendChild(line);
+        }
+      }
+      if (!box.children.length) {
+        box.textContent = "没有可对比的模型。";
+      }
+      updateRefreshSelectionSummary(r);
+    } catch (e) {
+      $("refresh-meta").textContent = "刷新失败：" + (e.error || e.message);
+    }
+  });
+  $("refresh-close").addEventListener("click", () => { refreshModal.style.display = "none"; });
+
+  const refreshPresetLabels = {
+    overwrite: "覆盖列表",
+    remove_stale: "移除失效模型",
+    add_new: "增加新模型",
+    remove_all: "移除全部本地模型",
+  };
+  function updateRefreshSelectionSummary(diff = lastRefreshDiff) {
+    if (!diff) return;
+    let adds = 0, removes = 0, keeps = 0;
+    for (const action of selectedRefreshModels.values()) {
+      if (action === "add") adds++;
+      else if (action === "remove") removes++;
+      else if (action === "keep") keeps++;
+    }
+    for (const line of document.querySelectorAll("#refresh-diff .diff-line.selectable")) {
+      const action = selectedRefreshModels.get(line.dataset.modelName) || "";
+      line.classList.toggle("is-selected", !!action);
+      line.classList.toggle("is-selected-add", action === "add");
+      line.classList.toggle("is-selected-remove", action === "remove");
+      line.classList.toggle("is-selected-keep", action === "keep");
+      line.setAttribute("aria-pressed", String(!!action));
+    }
+    const preset = selectedRefreshPreset ? ` · 快速选择：${refreshPresetLabels[selectedRefreshPreset]}` : "";
+    $("refresh-meta").textContent =
+      `远程 ${(diff.remote || []).length} · 本地 ${(diff.local || []).length} · 新增 ${(diff.added || []).length} · 失效 ${(diff.removed || []).length} · 共有 ${(diff.common || []).length} · 已选 ${selectedRefreshModels.size}（增加 ${adds} / 移除 ${removes} / 保留 ${keeps}）${preset}`;
+    const canSavePreset = selectedRefreshPreset === "overwrite" ? (diff.remote || []).length > 0
+      : selectedRefreshPreset === "remove_all" ? (diff.local || []).length > 0
+        : selectedRefreshPreset === "remove_stale" ? (diff.removed || []).length > 0
+          : selectedRefreshPreset === "add_new" ? (diff.added || []).length > 0 : false;
+    $("sync-save-selected").disabled = !canSavePreset && selectedRefreshModels.size === 0;
+  }
+  function quickSelectRefreshPreset(mode) {
+    if (!lastRefreshDiff) return;
+    selectedRefreshPreset = mode;
+    selectedRefreshModels.clear();
+    if (mode === "overwrite") {
+      for (const name of lastRefreshDiff.added || []) selectedRefreshModels.set(name, "add");
+      for (const name of lastRefreshDiff.removed || []) selectedRefreshModels.set(name, "remove");
+      for (const name of lastRefreshDiff.common || []) selectedRefreshModels.set(name, "keep");
+    } else if (mode === "remove_stale") {
+      for (const name of lastRefreshDiff.removed || []) selectedRefreshModels.set(name, "remove");
+    } else if (mode === "add_new") {
+      for (const name of lastRefreshDiff.added || []) selectedRefreshModels.set(name, "add");
+    } else if (mode === "remove_all") {
+      for (const name of [...(lastRefreshDiff.removed || []), ...(lastRefreshDiff.common || [])]) {
+        selectedRefreshModels.set(name, "remove");
+      }
+    }
+    updateRefreshSelectionSummary();
+  }
+
+  async function applySync() {
+    if (!lastRefreshDiff) return;
+    const mode = selectedRefreshPreset;
+    if (mode === "remove_all") {
+      const count = (lastRefreshDiff.local || []).length;
+      if (!count) { setManageStatus("该供应商下没有本地模型"); return; }
+      if (!confirm(`移除该供应商下全部 ${count} 个本地模型？供应商和 API Key 会保留；如果激活模型在其中，也会取消激活。`)) return;
+      try {
+        const result = await api("DELETE", `/api/providers/${lastRefreshDiff.provider_id}/models`);
+        if (editingModelId) closeModelForm();
+        refreshModal.style.display = "none";
+        setManageStatus(`已全部移除 ${result.removed || 0} 个模型`);
+        await loadConfig();
+      } catch (e) {
+        const message = e.error || e.message;
+        $("refresh-meta").textContent = "保存失败：" + message;
+        setManageStatus(message);
+      }
+      return;
+    }
+    if (mode === "overwrite") {
+      if (!confirm("用远程列表完整覆盖本地模型列表？远程不存在的本地模型会被移除，同名模型保留本地 ID、参数和测试状态。")) return;
+    } else if (!mode && !selectedRefreshModels.size) {
+      setManageStatus("请先选择模型，或使用快速选择按钮");
+      return;
+    } else if (!mode && [...selectedRefreshModels.values()].includes("remove")) {
+      const count = [...selectedRefreshModels.values()].filter(action => action === "remove").length;
+      if (!confirm(`将移除所选 ${count} 个本地模型？若其中包含当前激活模型，会取消激活。`)) return;
+    }
+    let addedBeforeFailure = 0;
+    try {
+      const request = {
+        provider_id: lastRefreshDiff.provider_id,
+        names: lastRefreshDiff.remote || [],
+        remote_models: lastRefreshDiff.remote_models || [],
+      };
+      if (mode) {
+        await api("POST", "/api/models/sync", { ...request, mode });
+        const action = { overwrite: "已覆盖完整远程列表",
+          remove_stale: "已移除全部失效模型", add_new: "已增加全部新模型" };
+        setManageStatus(action[mode] || "模型列表已保存");
+      } else {
+        const addNames = [...selectedRefreshModels]
+          .filter(([, action]) => action === "add").map(([name]) => name);
+        const removeNames = [...selectedRefreshModels]
+          .filter(([, action]) => action === "remove").map(([name]) => name);
+        if (addNames.length) {
+          await api("POST", "/api/models/sync", {
+            ...request, mode: "add_selected", selected_names: addNames,
+          });
+          addedBeforeFailure = addNames.length;
+        }
+        if (removeNames.length) {
+          // An empty remote-name list makes remove_selected apply to any selected local model,
+          // including common models, and is supported by older running server versions too.
+          await api("POST", "/api/models/sync", {
+            provider_id: lastRefreshDiff.provider_id,
+            mode: "remove_selected",
+            names: [],
+            remote_models: [],
+            selected_names: removeNames,
+          });
+        }
+        setManageStatus(`已保存所选模型（增加 ${addNames.length} · 移除 ${removeNames.length}）`);
+      }
+      refreshModal.style.display = "none";
+      await loadConfig();
+      renderManageLists();
+    } catch (e) {
+      const detail = e.error || e.message;
+      const message = addedBeforeFailure
+        ? `已增加 ${addedBeforeFailure} 个模型，但移除操作失败：${detail}` : detail;
+      $("refresh-meta").textContent = "保存失败：" + message;
+      setManageStatus(message);
+    }
+  }
+  $("sync-overwrite").addEventListener("click", () => quickSelectRefreshPreset("overwrite"));
+  $("sync-remove").addEventListener("click", () => quickSelectRefreshPreset("remove_stale"));
+  $("sync-add").addEventListener("click", () => quickSelectRefreshPreset("add_new"));
+  $("sync-remove-all").addEventListener("click", () => quickSelectRefreshPreset("remove_all"));
+  $("sync-save-selected").addEventListener("click", async () => {
+    const button = $("sync-save-selected");
+    if (button.disabled) return;
+    button.disabled = true;
+    await applySync();
+    if ($("refresh-modal").style.display !== "none") updateRefreshSelectionSummary();
+  });
+
+  $("model-test").addEventListener("click", () => {
+    if (!manageSelectedProviderId) return;
+    const list = modelsOf(manageSelectedProviderId);
+    const box = $("test-list");
+    box.replaceChildren();
+    for (const m of list) {
+      const label = document.createElement("label");
+      label.className = "test-item";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = m.id;
+      cb.checked = true;
+      const span = document.createElement("span");
+      span.className = "test-dot " + statusDot(m.test_status);
+      span.title = m.test_status;
+      const name = document.createElement("span");
+      name.textContent = m.name;
+      label.append(cb, span, name);
+      box.appendChild(label);
+    }
+    testModal.style.display = "flex";
+  });
+  $("test-close").addEventListener("click", () => { testModal.style.display = "none"; });
+  $("test-all").addEventListener("click", () => {
+    document.querySelectorAll("#test-list input").forEach(x => { x.checked = true; });
+  });
+  $("test-none").addEventListener("click", () => {
+    document.querySelectorAll("#test-list input").forEach(x => { x.checked = false; });
+  });
+  $("test-run").addEventListener("click", async () => {
+    const ids = [...document.querySelectorAll("#test-list input:checked")].map(x => x.value);
+    if (!ids.length) { setManageStatus("请选择要测试的模型"); return; }
+    testModal.style.display = "none";
+    setManageStatus(`测试中 0/${ids.length}`);
+    let ok = 0, fail = 0;
+    for (let i = 0; i < ids.length; i++) {
+      // 先标橙色
+      const model = modelById(ids[i]);
+      if (model) model.test_status = "testing";
+      renderManageLists();
+      try {
+        const r = await api("POST", `/api/models/${ids[i]}/test`);
+        if (r.ok) ok++; else fail++;
+        if (r.model) {
+          const idx = modelsCache.findIndex(x => x.id === r.model.id);
+          if (idx >= 0) modelsCache[idx] = r.model;
+        }
+      } catch (e) { fail++; }
+      setManageStatus(`测试中 ${i + 1}/${ids.length} · 成功 ${ok} · 失败 ${fail}`);
+      renderManageLists();
+    }
+    setManageStatus(`测试完成：成功 ${ok} · 失败 ${fail}`);
+    await loadConfig();
+    renderManageLists();
+  });
+
   // ---------- 初始化 ----------
   function init() {
     checkConn();
     loadConfig();
-    loadCookieState();
+    loadCookieState().then(() => {
+      if ($("cookie-method").value === "qr") refreshQrCode();
+    });
     refreshStats();
+    refreshOrganizationReadiness();
     refreshTree();
     loadFolderMerge();
     connectEvents();
     setInterval(checkConn, 10000);   // 仅更新连接指示灯，不写日志
-    log("系统就绪。请先扫码登录（或填 Cookie）→ 扫描 → 分析 → 定案 → 执行。");
+    log("系统就绪。请先扫码登录（或手动输入 Cookie）→ 扫描 → 分析 → 定案 → 执行。");
   }
   init();
 })();

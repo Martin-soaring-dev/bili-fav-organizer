@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>B站收藏夹整理</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=20260925-6">
 </head>
 <body>
 <div id="app">
@@ -29,6 +29,7 @@
       <span>视频 <b id="st-videos">-</b></span>
       <span>已分析 <b id="st-analyzed">-</b></span>
       <span>已定案 <b id="st-planned">-</b></span>
+      <button id="load-stats" class="mini" type="button" title="重新读取本地数据库中的统计计数">刷新计数</button>
     </div>
   </header>
 
@@ -42,70 +43,98 @@
     <!-- 右：操作面板 -->
     <main class="panels">
       <!-- 步骤 0：配置 -->
-      <section class="card">
-        <h2>⓿ 连接配置</h2>
-        <div class="grid2">
-          <label>浏览器
-            <select id="cfg-browser">
-              <option value="chrome">Chrome</option>
-              <option value="edge">Edge</option>
-              <option value="firefox">Firefox</option>
-            </select>
-          </label>
-          <label>模型接口 base_url
-            <input id="cfg-base-url" placeholder="https://api.deepseek.com/v1">
-          </label>
-          <label>模型名
-            <input id="cfg-model" placeholder="qwen3-8b">
-          </label>
-          <label>API Key
-            <input id="cfg-key" type="password" placeholder="(可留空若本地模型)">
-          </label>
-        </div>
-        <div class="hint">cookie 会自动从所选浏览器读取，需该浏览器已登录 bilibili.com。保存配置后即可开始。</div>
-        <div class="cookierow">
-          <label>Cookie 字符串（新版 Chrome 无法自动读取时，请在此粘贴）
-            <textarea id="cfg-cookie" rows="3" placeholder="SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx; ..."></textarea>
-          </label>
-          <div class="hint">
-            获取方法：Chrome 打开 bilibili.com 并登录 → 按 F12 → <b>Application/应用</b> → 左侧 <b>Cookies</b> →
-            选中 <b>https://www.bilibili.com</b> → 复制右侧所有 cookie 的「名称=值」，或用控制台执行
-            <code>document.cookie</code>（可只取 SESSDATA / bili_jct / DedeUserID 三项）。
+      <section class="card conn-card">
+        <h2>🔌 连接配置</h2>
+        <div class="conn-sections">
+          <div class="conn-section">
+            <h3>登录信息</h3>
+            <label class="cookie-method-pick">Cookie 获取方式
+              <select id="cookie-method">
+                <option value="qr" selected>二维码登录（推荐）</option>
+                <option value="manual">手动输入 Cookie</option>
+              </select>
+            </label>
+            <div id="cookie-qr-panel" class="cookie-method-panel">
+              <div class="row">
+                <button id="qr-btn" class="btn ghost" type="button">刷新二维码</button>
+                <button id="test-cookie-qr" class="btn ghost" type="button">测试 Cookie</button>
+                <span class="muted" id="qr-status">正在获取登录二维码…</span>
+              </div>
+              <div id="qr-box" class="qr-box" style="display:none">
+                <img id="qr-img" alt="登录二维码">
+                <div class="qr-tip">请用 <b>手机 B站 App</b> 扫描二维码并确认登录</div>
+              </div>
+            </div>
+            <div id="cookie-manual-panel" class="cookie-method-panel" hidden>
+              <div class="cookierow">
+                <label>Cookie 字符串
+                  <textarea id="cfg-cookie" rows="2" placeholder="SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx; ..."></textarea>
+                </label>
+                <div class="hint">
+                  获取方法：Chrome 打开 bilibili.com 并登录 → 按 F12 → <b>Application/应用</b> → 左侧 <b>Cookies</b> →
+                  选中 <b>https://www.bilibili.com</b> → 复制右侧所有 cookie 的「名称=值」，或用控制台执行
+                  <code>document.cookie</code>（可只取 SESSDATA / bili_jct / DedeUserID 三项）。
+                </div>
+                <div class="row">
+                  <button id="save-cookie" class="btn">保存 Cookie</button>
+                  <button id="test-cookie-manual" class="btn ghost">测试 Cookie</button>
+                  <span id="cookie-state" class="muted"></span>
+                </div>
+              </div>
+            </div>
           </div>
-          <button id="save-cookie" class="btn">保存 Cookie</button>
-        </div>
-        <div class="row">
-          <button id="save-config" class="btn">保存配置</button>
-          <button id="test-cookie" class="btn ghost">测试 Cookie 读取</button>
-          <button id="test-llm" class="btn ghost">测试模型连接</button>
-          <button id="load-stats" class="btn ghost">刷新统计</button>
-        </div>
-      </section>
 
-      <!-- 扫码登录 -->
-      <section class="card">
-        <h2>🔑 获取 Cookie（扫码登录）</h2>
-        <p class="desc">用手机 B站 App 扫码登录，工具自动保存 Cookie。不涉及浏览器加密，无需手动复制。</p>
-        <div class="row">
-          <button id="qr-btn" class="btn primary">显示登录二维码</button>
-          <span class="muted" id="qr-status"></span>
-        </div>
-        <div id="qr-box" class="qr-box" style="display:none">
-          <img id="qr-img" alt="登录二维码">
-          <div class="qr-tip">请用 <b>手机 B站 App</b> 扫描二维码并确认登录</div>
+          <div class="conn-section">
+            <h3>模型配置</h3>
+            <div class="row model-pick-row">
+              <label class="model-pick">供应商
+                <select id="cfg-provider"><option value="">（无供应商）</option></select>
+              </label>
+              <label class="model-pick">模型
+                <select id="cfg-model"><option value="">（无模型）</option></select>
+              </label>
+              <button id="manage-models-btn" class="btn ghost" type="button">管理模型</button>
+              <button id="save-config" class="btn">保存配置</button>
+              <button id="test-llm" class="btn ghost">测试模型连接</button>
+            </div>
+            <div id="active-model-info" class="model-static-info">选择供应商与模型后显示地址与参数。</div>
+            <div class="grid2" style="margin-top:8px">
+              <label>最大输出 (tokens)
+                <input id="analyze-max-tokens" type="number" min="256" max="131072"
+                       step="1024" value="32768" class="num-input">
+              </label>
+              <label>模型上下文窗口 (tokens)
+                <input id="model-context-tokens" type="number" min="4096" max="1000000"
+                       step="1024" value="32768" class="num-input">
+              </label>
+              <label>模型 TPM 上限 (tokens/分钟)
+                <input id="model-tpm-limit" type="number" min="1000" max="10000000"
+                       step="1000" value="20000" class="num-input">
+              </label>
+              <label>画像请求间隔 (秒)
+                <input id="profile-request-interval" type="number" min="0.5" max="60"
+                       step="0.5" value="2" class="num-input">
+              </label>
+            </div>
+            <div class="hint">最大输出是每次回复的上限；画像任务按 TPM 分配分批预算，内容归类会在发送前按上下文窗口和输出上限预检并自动拆分。部分模型的思考也消耗输出预算。上下文窗口与 TPM 优先使用激活模型的属性；画像请求间隔用于控制发送频率。规格来源未知时，这里的数字只是运行回退预算，不代表供应商返回的真实模型上限；请按官方规格手动填写。</div>
+          </div>
         </div>
       </section>
 
       <!-- 步骤 1：扫描 -->
       <section class="card">
-        <h2>❶ 获取收藏明细</h2>
-        <p class="desc">读取全部收藏夹与视频（标题/简介/UP主）。<b>每页 20 条（B站接口上限，不可调）</b>。请求间隔可在右侧调整以避免风控；按收藏夹断点续扫，中途停止不会丢进度。</p>
+        <h2>🔍 获取收藏明细</h2>
+        <p class="desc">先同步收藏夹目录；已建索引的内容优先本地复用，缺失元数据再按接口能力读取。小收藏夹使用 ID 清单核对，较大的夹使用分页明细。完整快照提交后会清理已取消收藏的夹内关系。</p>
         <div class="row">
           <button id="scan-btn" class="btn primary">开始扫描</button>
           <button id="scan-stop" class="btn danger">停止</button>
           <button id="folder-refresh" class="btn ghost">刷新收藏夹目录</button>
           <button id="scan-tree-btn" class="btn ghost">选择扫描范围</button>
+          <button id="library-view-btn" class="btn ghost">查看本地内容</button>
           <span class="muted" id="scan-selection-summary">未加载目录</span>
+          <label class="inline-label">扫描方式
+            <select id="scan-mode"><option value="resume">继续未完成/变化的夹</option><option value="rebuild">重扫所选夹</option></select>
+          </label>
           <label class="inline-label">请求间隔
             <select id="scan-interval">
               <option value="2">2 秒</option>
@@ -129,16 +158,19 @@
         </div>
       </section>
 
-      <div class="route-tabs">
-        <button class="route-tab active" data-route="content-route">内容整理</button>
-        <button class="route-tab" data-route="folder-route">收藏夹整理</button>
-      </div>
+      <div class="route-stack">
+        <div class="route-tabs">
+          <button class="route-tab active" data-route="content-route">内容整理</button>
+          <button class="route-tab" data-route="folder-route">收藏夹整理</button>
+          <button class="route-tab" data-route="profile-route">收藏夹画像</button>
+        </div>
 
-      <div id="folder-route" class="route-panel" style="display:none">
+        <div id="folder-route" class="route-panel" style="display:none">
       <!-- 收藏夹整理 -->
       <section class="card">
         <h2>🗂 合并组草稿</h2>
-        <p class="desc">可由 AI 根据收藏夹目录和代表内容生成候选合并组，然后在表格中编辑确认。</p>
+        <p class="desc">根据收藏夹画像和代表内容生成候选合并组，然后在表格中编辑确认。所有有内容的 active 收藏夹都必须有当前完整画像。</p>
+        <div id="merge-profile-readiness" class="profile-gate-status" role="status"></div>
         <div class="row">
           <button id="merge-ai" class="btn primary">生成 AI 合并建议</button>
           <button id="merge-add" class="btn ghost">添加空白合并组</button>
@@ -167,11 +199,33 @@
       </section>
       </div>
 
+      <div id="profile-route" class="route-panel" style="display:none">
+        <section class="card">
+          <h2>🧭 收藏夹画像生成 / 重建</h2>
+          <p class="desc">对本地已扫描的全部内容按上下文窗口分批压缩，再综合生成简介、主题、适合收纳范围和明显范围外内容。收藏夹名称只作弱提示；只有扫描完整的收藏夹可生成画像。</p>
+          <div class="row">
+            <button id="profile-refresh" class="btn ghost">刷新列表</button>
+            <button id="profile-select-all" class="btn ghost">全选 active</button>
+            <button id="profile-select-none" class="btn ghost">清空选择</button>
+            <button id="profile-generate" class="btn primary">生成缺失 / 过期画像</button>
+            <button id="profile-rebuild" class="btn ghost">重建所选画像</button>
+            <button id="profile-stop" class="btn danger">停止</button>
+            <span id="profile-status" class="muted"></span>
+          </div>
+          <div class="progress" id="profile-progress" style="display:none">
+            <div class="bar"><div class="fill" id="profile-fill"></div></div>
+            <span class="prog-text" id="profile-text"></span>
+          </div>
+          <div id="folder-profile-list" class="folder-profile-list"></div>
+        </section>
+      </div>
+
       <div id="content-route" class="route-panel">
       <!-- 步骤 2：LLM 分析 -->
       <section class="card">
         <h2>❷ LLM 归类分析</h2>
-        <p class="desc">批量调用已配置模型（<b>一次请求带多条视频</b>），为每个视频推断应归属收藏夹。支持断点续跑、可随时停止。<b>批大小 / 并发</b>只影响模型请求，不涉及 B站接口。</p>
+        <p class="desc">批量调用已配置模型，为每个视频推断应归属收藏夹。分类依据是收藏夹的当前画像；只有所有有内容的 active 收藏夹都已完成扫描并生成最新画像后才能分析。批大小是单批上限，发送前会按上下文预算自动拆分。</p>
+        <div id="content-profile-readiness" class="profile-gate-status" role="status"></div>
         <div class="row">
           <button id="analyze-start" class="btn primary">开始分析</button>
           <button id="analyze-stop" class="btn danger">停止</button>
@@ -186,6 +240,9 @@
               <option value="20">20</option>
               <option value="50">50</option>
               <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
             </select>
           </label>
           <label class="inline-label">并发
@@ -195,10 +252,6 @@
               <option value="3">3</option>
               <option value="4">4</option>
             </select>
-          </label>
-          <label class="inline-label">最大输出(tokens)
-            <input id="analyze-max-tokens" type="number" min="256" max="131072"
-                   step="1024" value="32768" class="num-input">
           </label>
         </div>
         <div class="progress" id="analyze-progress" style="display:none">
@@ -257,11 +310,149 @@
         </div>
       </section>
       </div>
+      </div><!-- /route-stack -->
     </main>
   </div>
 </div>
 
+<!-- 管理供应商 / 模型 -->
+<div id="manage-modal" class="modal" style="display:none">
+  <div class="modal-box manage-modal-box">
+    <div class="modal-head">
+      <span>⚙ 管理模型</span>
+      <button id="manage-close" class="mini">关闭</button>
+    </div>
+    <div class="manage-toolbar">
+      <button id="provider-add-btn" class="btn ghost">新增供应商</button>
+      <span class="muted" id="manage-status"></span>
+    </div>
+    <div class="manage-layout">
+      <section class="manage-pane manage-provider-pane">
+        <div class="manage-pane-title">供应商</div>
+        <div id="provider-list" class="manage-scroll"></div>
+        <div id="provider-form" class="manage-form" hidden>
+          <label>名称<input id="pf-name" placeholder="SiliconFlow"></label>
+          <label>base_url<input id="pf-url" placeholder="https://api.siliconflow.cn/v1"></label>
+          <label>API Key<input id="pf-key" type="password" autocomplete="off" placeholder="sk-…（保密）"></label>
+          <label id="pf-clear-key-wrap" hidden><input id="pf-clear-key" type="checkbox"> 清除已保存的 API Key</label>
+          <div class="row">
+            <button id="pf-save" class="btn primary">保存</button>
+            <button id="pf-cancel" class="btn ghost">取消</button>
+          </div>
+        </div>
+        <div id="preset-box" class="preset-box">
+          <div class="manage-pane-title">快速添加预设</div>
+          <div class="row preset-picker">
+            <select id="preset-select" aria-label="选择供应商预设"><option value="custom" selected>其他</option></select>
+            <button id="preset-add-btn" class="btn ghost" type="button">添加</button>
+          </div>
+        </div>
+      </section>
+      <section class="manage-pane manage-model-pane">
+        <div class="manage-pane-title">模型</div>
+        <div class="row manage-model-actions">
+          <button id="model-refresh" class="btn ghost" disabled>刷新</button>
+          <button id="model-test" class="btn ghost" disabled>测试</button>
+          <button id="model-add-btn" class="btn ghost" disabled>新增模型</button>
+          <span class="muted" id="model-pane-status"></span>
+        </div>
+        <div id="model-list" class="manage-scroll"></div>
+        <div id="model-form" class="manage-form" hidden>
+          <label>名称<input id="mf-name" placeholder="deepseek-ai/DeepSeek-V4-Flash"></label>
+          <div class="grid2">
+            <label>上下文 (tokens)<input id="mf-ctx" type="number" min="0" step="1024" placeholder="API 未提供时留空"></label>
+            <label>最大输出 (tokens)<input id="mf-out" type="number" min="0" step="256" placeholder="API 未提供时留空"></label>
+          </div>
+          <label>思考强度
+            <select id="mf-think">
+              <option value="">默认</option>
+              <option value="off">关闭思考</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              <option value="max">max</option>
+            </select>
+          </label>
+          <div class="row">
+            <button id="mf-save" class="btn primary">保存</button>
+            <button id="mf-cancel" class="btn ghost">取消</button>
+            <button id="mf-activate" class="btn ghost" type="button" hidden>激活</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="modal-foot">
+      <button id="manage-done" class="btn primary">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 刷新模型对比 -->
+<div id="refresh-modal" class="modal" style="display:none">
+  <div class="modal-box compact-modal">
+    <div class="modal-head"><span>刷新模型列表</span><button id="refresh-close" class="mini">关闭</button></div>
+    <div class="modal-meta" id="refresh-meta">正在从供应商读取模型…</div>
+    <div class="modal-body">
+      <div class="diff-legend">
+        <span class="diff-chip new">新增（远程有）</span>
+        <span class="diff-chip removed">失效（本地有）</span>
+        <span class="diff-chip common">共有</span>
+      </div>
+      <div class="hint">能力参数按接口实际返回显示为“API”；接口未返回时显示“本地”。新模型没有这些参数时需手动核实并编辑。</div>
+      <div class="hint">点击色块可手动选择：绿色新增项表示待增加，红色失效项或“共有”项表示待移除；选中后底色会加深。下方按钮只快速选择，不会立即修改模型列表；快速选择后手动改动会转为手动增删。选完后点击“保存所选”。</div>
+      <div id="refresh-diff" class="refresh-diff"></div>
+    </div>
+    <div class="modal-foot">
+      <button id="sync-remove-all" class="btn ghost" title="快速选择该供应商下全部本地模型以移除">全选移除</button>
+      <button id="sync-overwrite" class="btn ghost" title="快速选择覆盖为完整远程模型列表">覆盖列表</button>
+      <button id="sync-remove" class="btn ghost" title="快速选择全部失效模型">选失效</button>
+      <button id="sync-add" class="btn ghost" title="快速选择全部新增模型">选新增</button>
+      <button id="sync-save-selected" class="btn primary">保存所选</button>
+    </div>
+  </div>
+</div>
+
+<!-- 测试模型选择 -->
+<div id="test-modal" class="modal" style="display:none">
+  <div class="modal-box compact-modal">
+    <div class="modal-head"><span>测试模型</span><button id="test-close" class="mini">关闭</button></div>
+    <div class="modal-meta">选择要测试的模型，或点选全部。</div>
+    <div class="modal-body">
+      <div class="row" style="margin-bottom:8px">
+        <button id="test-all" class="btn ghost">全部测试</button>
+        <button id="test-none" class="btn ghost">全不选</button>
+      </div>
+      <div id="test-list" class="test-list"></div>
+    </div>
+    <div class="modal-foot">
+      <button id="test-run" class="btn primary">开始测试</button>
+    </div>
+  </div>
+</div>
+
 <!-- 清除数据弹窗 -->
+<div id="profile-intro-modal" class="modal" style="display:none">
+  <div class="modal-box compact-modal profile-intro-modal-box">
+    <div class="modal-head">
+      <span id="profile-intro-title">同步收藏夹简介</span>
+      <button id="profile-intro-close" class="mini">关闭</button>
+    </div>
+    <div class="modal-meta" id="profile-intro-status">读取 B 站当前简介…</div>
+    <div class="modal-body profile-intro-body">
+      <label for="profile-intro-remote">B 站当前简介</label>
+      <textarea id="profile-intro-remote" rows="4" readonly></textarea>
+      <label for="profile-intro-edit">准备上传的简介（可编辑，最多 200 字）</label>
+      <textarea id="profile-intro-edit" rows="5"></textarea>
+      <div id="profile-intro-count" class="muted profile-intro-count">0 / 200</div>
+      <p class="muted profile-intro-hint">上传会覆盖 B 站当前简介；名称、公开状态和封面会保留。这里只修改 B 站简介，不会改动本地生成的画像。</p>
+    </div>
+    <div class="modal-foot">
+      <button id="profile-intro-cancel" class="btn ghost">取消</button>
+      <button id="profile-intro-publish" class="btn primary" disabled>确认上传简介</button>
+    </div>
+  </div>
+</div>
+
 <div id="clear-modal" class="modal" style="display:none">
   <div class="modal-box compact-modal">
     <div class="modal-head"><span>选择要清除的数据</span><button id="clear-close" class="mini">关闭</button></div>
@@ -270,6 +461,7 @@
       <label><input type="checkbox" value="analysis"> LLM 内容分析结果</label>
       <label><input type="checkbox" value="plan"> 内容整理方案与执行进度</label>
       <label><input type="checkbox" value="folder_merge"> 收藏夹合并草稿、任务与执行进度</label>
+      <label><input type="checkbox" value="folder_profile"> 收藏夹画像数据</label>
     </div>
     <div class="modal-foot"><button id="clear-all" class="btn ghost">全选</button><button id="clear-none" class="btn ghost">全不选</button><button id="clear-confirm" class="btn danger">确认清除</button></div>
   </div>
@@ -304,6 +496,49 @@
   </div>
 </div>
 
+<!-- 本地收藏内容浏览弹窗 -->
+<div id="library-modal" class="modal" style="display:none">
+  <div class="modal-box library-modal-box">
+    <div class="modal-head">
+      <span>📚 本地收藏内容</span>
+      <button id="library-close" class="mini">关闭</button>
+    </div>
+    <div class="modal-meta" id="library-meta">加载本地收藏夹…</div>
+    <div id="library-folder-info" class="library-folder-info">选择收藏夹查看数量、扫描状态和画像状态。</div>
+    <div class="library-layout">
+      <section class="library-pane library-folder-pane">
+        <div class="library-pane-title">收藏夹</div>
+        <div class="library-sort-controls">
+          <select id="library-sort-mode" aria-label="收藏夹排序方式">
+            <option value="bili">B 站顺序</option>
+            <option value="count">内容数量</option>
+            <option value="name">名称（A–Z / 数字自然序）</option>
+          </select>
+          <select id="library-sort-direction" aria-label="收藏夹排序方向">
+            <option value="asc">升序</option>
+            <option value="desc">降序</option>
+          </select>
+        </div>
+        <div id="library-folders" class="library-scroll" role="tree"></div>
+      </section>
+      <section class="library-pane library-items-pane">
+        <div class="library-pane-title" id="library-items-title">内容</div>
+        <input id="library-search" class="library-search" type="search" placeholder="搜索标题、UP 主或简介">
+        <div id="library-items" class="library-scroll" aria-live="polite"></div>
+        <div class="library-pager">
+          <button id="library-prev" class="btn ghost" disabled>上一页</button>
+          <span id="library-page-label" class="muted">—</span>
+          <button id="library-next" class="btn ghost" disabled>下一页</button>
+        </div>
+      </section>
+      <section class="library-pane library-detail-pane">
+        <div class="library-pane-title" id="library-detail-title">收藏夹信息</div>
+        <div id="library-detail" class="library-scroll library-detail-content">选择一条内容查看详情</div>
+      </section>
+    </div>
+  </div>
+</div>
+
 <!-- 归类方案详情弹窗 -->
 <div id="plan-modal" class="modal" style="display:none">
   <div class="modal-box">
@@ -320,6 +555,6 @@
   </div>
 </div>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=20260925-6"></script>
 </body>
 </html>

@@ -30,6 +30,8 @@ REQUEST_TIMEOUT = 15          # 单次请求超时(秒)
 BATCH_WRITE_TIMEOUT = 30      # 批量写请求超时；超时后远端结果不确定
 BATCH_LIMIT = 1000            # 实测硬上限：1000 成功，1001 返回 -400
 PAGE_SIZE = 20                # 收藏夹视频每页条数
+FAV_BULK_CANDIDATE_LIMIT = 1000  # resource/ids 历史实测可能在 1000 条截断，仅作为尝试阈值
+MAX_SCAN_PAGES = 50000        # 防止异常 has_more 响应导致无限请求
 READ_INTERVAL = 10            # 相邻两次收藏夹请求的最小间隔(秒)，全局生效
 PAGE_INTERVAL = READ_INTERVAL  # 兼容旧名
 HTTP_412_BACKOFF = 300        # 遇 HTTP 412 的退避等待(秒)
@@ -258,6 +260,10 @@ class BiliSession:
         attempts = RETRY_READ if allow_retry else 1
         for i in range(attempts):
             try:
+                if method.upper() == "GET":
+                    self._throttle_read(should_stop=should_stop)
+                    if should_stop and should_stop():
+                        raise RateLimitedError("已手动停止（请求间隔等待期间）")
                 resp = self.session.request(
                     method, url, params=params, headers=headers,
                     data=data, timeout=timeout,
@@ -418,6 +424,7 @@ class BiliSession:
         """获取当前登录用户 mid，同时缓存 nav 数据供 WBI 签名复用（只发一次请求）。"""
         if self._mid:
             return self._mid
+        self._throttle_read()
         data = self._request("GET", f"{self._wapi}/x/web-interface/nav")
         self._nav_data = data
         try:
@@ -430,6 +437,7 @@ class BiliSession:
     def list_folders(self) -> list[dict]:
         """获取收藏夹列表，返回 [{media_id, title, count, ...}]。"""
         mid = self.get_mid()
+        self._throttle_read()
         data = self._request("GET", f"{self._wapi}/x/v3/fav/folder/created/list-all",
                              params={"up_mid": mid})
         folders = []
@@ -442,6 +450,15 @@ class BiliSession:
             })
         return folders
 
+    def get_folder_info(self, media_id: str) -> dict:
+        """读取单个收藏夹元数据（包括当前简介、标题、封面和属性位）。"""
+        self._throttle_read()
+        data = self._request("GET", f"{self._wapi}/x/v3/fav/folder/info",
+                             params={"media_id": str(media_id)})
+        if not isinstance(data, dict):
+            raise BiliApiError("B站没有返回有效的收藏夹信息")
+        return data
+
     def iter_folder_videos(self, media_id: str, total: int,
                            should_stop=None, on_event=None):
         """逐页产出收藏夹 video 记录。每页 PAGE_SIZE 条。带 WBI 签名。
@@ -451,7 +468,9 @@ class BiliSession:
         """
         pn = 1
         total_pages = max(1, (int(total) + PAGE_SIZE - 1) // PAGE_SIZE)
-        while (pn - 1) * PAGE_SIZE < total:
+        while True:
+            if pn > MAX_SCAN_PAGES:
+                raise BiliApiError(f"收藏夹分页超过安全上限 {MAX_SCAN_PAGES}")
             if should_stop and should_stop():
                 return
             # 全局节流：与上次收藏夹请求间隔 >= read_interval 秒（跨收藏夹也生效）
@@ -490,15 +509,179 @@ class BiliSession:
                 break
             pn += 1
 
+    def get_folder_resource_ids(self, media_id: str, total: int,
+                                should_stop=None, on_event=None) -> list[dict]:
+        """获取小收藏夹的资源 ID 清单；超过实测候选边界时拒绝，交由分页扫描。"""
+        total = int(total or 0)
+        if total < 0 or total > FAV_BULK_CANDIDATE_LIMIT:
+            raise BiliApiError(f"收藏夹数量 {total} 超过 resource/ids 候选边界")
+        if total == 0:
+            return []
+        if should_stop and should_stop():
+            return []
+        self._throttle_read(should_stop=should_stop)
+        if should_stop and should_stop():
+            return []
+        if on_event:
+            on_event({"type": "bulk_req", "media_id": media_id, "step": "ids"})
+        ids = self._request("GET", f"{self._wapi}/x/v3/fav/resource/ids",
+                            params={"media_id": media_id, "platform": "web"},
+                            should_stop=should_stop) or []
+        if not isinstance(ids, list) or len(ids) != total:
+            raise BiliApiError(f"ID 清单数量不匹配：目录 {total}，接口返回 {len(ids) if isinstance(ids, list) else '非列表'}")
+        normalized = []
+        keys = set()
+        for item in ids:
+            if not isinstance(item, dict) or item.get("id") is None or item.get("type") is None:
+                raise BiliApiError("ID 清单包含缺少 id/type 的条目")
+            try:
+                resource_type = int(item["type"])
+            except (TypeError, ValueError):
+                raise BiliApiError("ID 清单包含无效资源类型")
+            key = (resource_type, str(item["id"]))
+            if key in keys:
+                raise BiliApiError("ID 清单包含重复资源")
+            keys.add(key)
+            normalized.append({"id": str(item["id"]), "type": resource_type})
+        return normalized
+
+    def get_resource_infos_bulk(self, media_id: str, ids: list[dict],
+                                should_stop=None, on_event=None) -> list[dict]:
+        """批量取得指定资源的元数据，不重新读取完整收藏夹 ID 清单。"""
+        if not ids:
+            return []
+        if len(ids) > FAV_BULK_CANDIDATE_LIMIT:
+            raise BiliApiError(f"单次元数据请求超过 {FAV_BULK_CANDIDATE_LIMIT} 条候选边界")
+        resources = []
+        requested = []
+        for item in ids:
+            if not isinstance(item, dict) or item.get("id") is None or item.get("type") is None:
+                raise BiliApiError("待查资源 ID 清单格式无效")
+            key = (str(item["type"]), str(item["id"]))
+            requested.append(key)
+            resources.append(f"{item['id']}:{item['type']}")
+        if len(set(requested)) != len(requested):
+            raise BiliApiError("待查资源 ID 清单包含重复项")
+        self._throttle_read(should_stop=should_stop)
+        if should_stop and should_stop():
+            return []
+        if on_event:
+            on_event({"type": "bulk_req", "media_id": media_id, "step": "infos", "count": len(ids)})
+        infos = self._request("GET", f"{self._wapi}/x/v3/fav/resource/infos",
+                              params={"resources": ",".join(resources), "platform": "web"},
+                              should_stop=should_stop) or []
+        if not isinstance(infos, list):
+            raise BiliApiError("批量元数据接口返回格式不是列表")
+        info_by_key = {}
+        for item in infos:
+            if not isinstance(item, dict) or item.get("id") is None or item.get("type") is None:
+                continue
+            key = (str(item["type"]), str(item["id"]))
+            if key in info_by_key:
+                raise BiliApiError("批量元数据包含重复资源")
+            info_by_key[key] = item
+        missing = [key for key in requested if key not in info_by_key]
+        if missing or len(info_by_key) != len(requested):
+            raise BiliApiError(f"批量元数据不完整：缺少 {len(missing)} 条")
+        result = []
+        for item, key in zip(ids, requested):
+            raw = info_by_key[key]
+            video = self._normalize_video(raw, media_id)
+            video["id"] = str(item["id"])
+            video["type"] = int(item["type"])
+            video["attr"] = raw.get("attr", 0)
+            video["resource_key"] = f"{item['type']}:{item['id']}"
+            result.append(video)
+        return result
+
+    def get_folder_videos_bulk(self, media_id: str, total: int,
+                               should_stop=None, on_event=None) -> list[dict]:
+        """尝试用 resource/ids + resource/infos 一次取得小收藏夹的全部元数据。
+
+        只接受数量和资源键均可核对的完整结果。调用者应在失败后回退 resource/list。
+        该接口的 1000 项边界未被项目验证；此处限制尝试范围，不作为完整性保证。
+        """
+        total = int(total or 0)
+        if total < 0 or total > FAV_BULK_CANDIDATE_LIMIT:
+            raise BiliApiError(f"收藏夹数量 {total} 超过批量扫描候选范围")
+        if total == 0:
+            return []
+        if should_stop and should_stop():
+            return []
+
+        self._throttle_read(should_stop=should_stop)
+        if should_stop and should_stop():
+            return []
+        if on_event:
+            on_event({"type": "bulk_req", "media_id": media_id, "step": "ids"})
+        ids = self._request("GET", f"{self._wapi}/x/v3/fav/resource/ids",
+                            params={"media_id": media_id, "platform": "web"},
+                            should_stop=should_stop) or []
+        if not isinstance(ids, list) or len(ids) != total:
+            raise BiliApiError(f"ID 清单数量不匹配：目录 {total}，接口返回 {len(ids) if isinstance(ids, list) else '非列表'}")
+
+        keys = []
+        resources = []
+        for item in ids:
+            if not isinstance(item, dict) or item.get("id") is None or item.get("type") is None:
+                raise BiliApiError("ID 清单包含缺少 id/type 的条目")
+            key = (str(item["type"]), str(item["id"]))
+            keys.append(key)
+            resources.append(f"{item['id']}:{item['type']}")
+        if len(set(keys)) != len(keys):
+            raise BiliApiError("ID 清单包含重复资源")
+
+        self._throttle_read(should_stop=should_stop)
+        if should_stop and should_stop():
+            return []
+        if on_event:
+            on_event({"type": "bulk_req", "media_id": media_id, "step": "infos", "count": total})
+        infos = self._request(
+            "GET", f"{self._wapi}/x/v3/fav/resource/infos",
+            params={"resources": ",".join(resources), "platform": "web"},
+            should_stop=should_stop) or []
+        if not isinstance(infos, list):
+            raise BiliApiError("批量元数据接口返回格式不是列表")
+
+        info_by_key = {}
+        for item in infos:
+            if not isinstance(item, dict) or item.get("id") is None or item.get("type") is None:
+                continue
+            key = (str(item["type"]), str(item["id"]))
+            if key in info_by_key:
+                raise BiliApiError("批量元数据包含重复资源")
+            info_by_key[key] = item
+        missing = [key for key in keys if key not in info_by_key]
+        if missing or len(info_by_key) != len(keys):
+            raise BiliApiError(f"批量元数据不完整：缺少 {len(missing)} 条")
+
+        result = []
+        for item, key in zip(ids, keys):
+            raw = info_by_key[key]
+            video = self._normalize_video(raw, media_id)
+            video["id"] = str(item["id"])
+            video["type"] = int(item["type"])
+            video["attr"] = raw.get("attr", 0)
+            video["resource_key"] = f"{item['type']}:{item['id']}"
+            result.append(video)
+        if len(result) != total:
+            raise BiliApiError(f"批量元数据条数校验失败：目录 {total}，获得 {len(result)}")
+        return result
+
     @staticmethod
     def _normalize_video(m: dict, media_id: str) -> dict:
         """把收藏 API 返回的 medias 项规整成统一字段。"""
         bvid = m.get("bvid", "") or ""
         aid = m.get("id", 0) or m.get("aid", 0)
         upper = m.get("upper", {}) or {}
+        try:
+            aid = int(aid or 0)
+        except (TypeError, ValueError):
+            aid = 0
         return {
             "bvid": str(bvid),
-            "aid": int(aid),
+            "aid": aid,
+            "id": str(m.get("id") or aid or ""),
             "title": (m.get("title") or "").strip(),
             "desc": (m.get("intro") or m.get("desc") or "").strip(),
             "type": m.get("type", 0),
@@ -509,6 +692,7 @@ class BiliSession:
             "fav_time": m.get("fav_time", 0) or m.get("ctime", 0),
             "source_folder_id": str(media_id),
             "tags": m.get("tags", []) or [],   # 部分接口返回
+            "attr": m.get("attr", 0),
         }
 
     # ---------- 写操作 ----------
@@ -548,6 +732,43 @@ class BiliSession:
         except Exception as e:
             tag = "rename_folder_unknown" if isinstance(e, WriteUncertainError) else "rename_folder_failed"
             self._write_log(tag, {**payload, "error": str(e)})
+            raise
+
+    def update_folder_intro(self, media_id: str, folder_info: dict, intro: str,
+                            *, should_stop=None) -> dict:
+        """仅更新收藏夹简介，同时保留远端标题、公开状态和已有封面。"""
+        title = str(folder_info.get("title") or "").strip()
+        if not title:
+            raise BiliApiError("无法读取当前收藏夹名称，拒绝提交简介以免意外改名")
+        if "attr" not in folder_info:
+            raise BiliApiError("无法读取收藏夹公开状态，拒绝提交简介以免意外更改隐私设置")
+        try:
+            privacy = int(folder_info.get("attr") or 0) & 1
+        except (TypeError, ValueError) as exc:
+            raise BiliApiError("收藏夹公开状态无效，未提交简介") from exc
+        intro = str(intro or "")
+        if len(intro) > 200:
+            raise BiliApiError("收藏夹简介不能超过 200 字")
+        payload = {"action": "update_folder_intro", "media_id": str(media_id),
+                   "title": title, "intro_length": len(intro)}
+        self._write_log("update_folder_intro_sending", payload)
+        self._throttle_write(should_stop=should_stop)
+        data = {"media_id": str(media_id), "title": title, "intro": intro,
+                "privacy": privacy, "csrf": self.cookie.bili_jct}
+        cover = str(folder_info.get("cover") or "").strip()
+        if cover:
+            data["cover"] = cover
+        try:
+            result = self._request(
+                "POST", f"{self._wapi}/x/v3/fav/folder/edit",
+                data=data, allow_retry=False, timeout=BATCH_WRITE_TIMEOUT,
+                uncertain_on_transport=True, should_stop=should_stop,
+            )
+            self._write_log("update_folder_intro_done", payload)
+            return result if isinstance(result, dict) else {}
+        except Exception as exc:
+            tag = "update_folder_intro_unknown" if isinstance(exc, WriteUncertainError) else "update_folder_intro_failed"
+            self._write_log(tag, {**payload, "error": str(exc)})
             raise
 
     def delete_folder(self, media_id: str, *, should_stop=None) -> None:
