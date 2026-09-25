@@ -130,7 +130,7 @@ try {
 
     Write-Host "正在打开应用：http://127.0.0.1:8080"
     Start-Process "http://127.0.0.1:8080"
-    & $venvPython $serverScript --port 8080
+    & $venvPython $serverScript --port 8080 --no-browser
     exit $LASTEXITCODE
 } catch {
     Write-Host "启动失败：$($_.Exception.Message)" -ForegroundColor Red

@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sqlite3
+import sys
 import threading
 import time
 import uuid
@@ -13,7 +14,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-LEGACY_DATA_DIR = HERE / "data"
+LEGACY_APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else HERE
+LEGACY_DATA_DIR = LEGACY_APP_DIR / "data"
 _configured_data_dir = os.environ.get("BILI_FAV_ORGANIZER_DATA_DIR", "").strip()
 if _configured_data_dir:
     DATA_DIR = Path(_configured_data_dir).expanduser()

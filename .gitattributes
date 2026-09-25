@@ -3,5 +3,5 @@
 
 # Keep Windows batch files CRLF in the Git blob so GitHub source archives can
 # be launched by cmd.exe without mangling commands or UTF-8 output.
-*.bat -text
-*.cmd -text
+*.bat -text whitespace=cr-at-eol
+*.cmd -text whitespace=cr-at-eol

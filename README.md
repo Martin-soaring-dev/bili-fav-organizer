@@ -17,9 +17,15 @@
 
 ## 如何启动
 
-Windows 用户双击 `启动.bat`。首次启动时会检查 Python；如未安装，会从 python.org 下载并安装官方 Python 3.13 和 pip。随后在用户目录创建独立虚拟环境，并安装 `requirements.txt` 中的依赖。以后启动时会检查依赖清单和必要模块，只有清单变化或发现依赖缺失时才重新安装。
+### Windows 便携版（普通用户推荐）
 
-启动脚本不依赖单独的 `pip` 命令，因此不需要手动配置 PATH。自动安装需要 Windows 网络连接；Python 安装程序来自 python.org，会验证数字签名并安装到当前用户目录，不需要管理员权限。安装失败时会显示真实的安装器退出码和日志位置。
+在 GitHub 的 **Releases** 下载 `BiliFavOrganizer-Windows-x64.zip`，解压后双击 `启动.bat`（或 `BiliFavOrganizer.exe`）。便携包已集成 Python 运行环境和应用依赖，不需要用户安装 Python 或 pip。首次启动需要等待一会；服务运行期间保留控制台窗口，关闭窗口即可停止服务；浏览器会自动打开本地页面。
+
+请下载 Release 附件 `BiliFavOrganizer-Windows-x64.zip`，不要下载 GitHub 自动生成的 `Source code.zip`；后者是源代码，不含便携运行环境。
+
+### 从源码运行（开发）
+
+Windows 用户双击源码目录中的 `启动.bat`。首次启动时会检查 Python；如未安装，会从 python.org 下载并安装官方 Python 3.13 和 pip，再自动安装 `requirements.txt` 中的依赖。也可以手动安装依赖后，在项目目录运行 `python server.py`。
 
 服务启动后浏览器会打开 **http://127.0.0.1:8080**（默认端口 8080，可用 `--port 8090` 改）。关闭服务窗口即可停止服务。
 
@@ -99,7 +105,7 @@ Windows 用户双击 `启动.bat`。首次启动时会检查 Python；如未安�
 
 ## 数据存储
 
-SQLite 主库默认保存在当前 Windows 用户的 `%LOCALAPPDATA%\BiliFavOrganizer\data\library.sqlite3`，不随项目目录移动或更新；可通过环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 指定其他持久路径。旧版项目 `data/library.sqlite3` 首次启动时会用 SQLite 在线备份方式复制过去，校验成功后保留项目内原库作为回滚副本。若没有旧 SQLite，则从项目内旧 JSON 导入。
+应用配置、Cookie、日志和 SQLite 主库默认保存在当前 Windows 用户的 `%LOCALAPPDATA%\BiliFavOrganizer\`（主库位于 `data/library.sqlite3`），不随程序目录移动或更新。首次启动会把程序目录中已有的 `config.json` 和 `secrets.json` 复制到用户数据目录，不覆盖已存在的用户设置；旧版项目 `data/library.sqlite3` 首次启动时会用 SQLite 在线备份方式复制过去，校验成功后保留原库作为回滚副本。若没有旧 SQLite，则从项目内旧 JSON 导入。可通过环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 指定数据库路径。
 
 数据库将收藏夹记录标记为 `active` 或 `archived`。目录同步按 ID 更新名称/数量；消失的收藏夹转为 archived 并清除它的 `folder_items` 关系，但保留视频元数据索引。完整重扫时会替换该夹的成员关系，因此取消收藏的内容关系直接删除。视频索引采用按资源 ID 增量 upsert，多个收藏夹共享一份视频元数据。
 
