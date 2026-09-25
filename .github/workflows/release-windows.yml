@@ -29,6 +29,7 @@ jobs:
         run: pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 
       - name: Create portable ZIP
+        id: package
         shell: pwsh
         run: |
           $releaseDir = "dist/BiliFavOrganizer"
@@ -38,20 +39,26 @@ jobs:
           }
           Copy-Item "启动.bat" "$releaseDir/启动.bat"
           Copy-Item "packaging/使用说明.txt" "$releaseDir/使用说明.txt"
-          $zip = "BiliFavOrganizer-Windows-x64.zip"
+          $version = $env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]', '-'
+          $zip = "BiliFavOrganizer-Windows-x64-$version.zip"
+          $checksum = "$zip.sha256"
           Compress-Archive -Path "$releaseDir/*" -DestinationPath $zip -CompressionLevel Optimal
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  $zip" | Set-Content "$zip.sha256" -Encoding ascii
+          "$hash  $zip" | Set-Content $checksum -Encoding ascii
+          "asset_name=$zip" >> $env:GITHUB_OUTPUT
+          "checksum_name=$checksum" >> $env:GITHUB_OUTPUT
 
       - name: Publish release assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET_NAME: ${{ steps.package.outputs.asset_name }}
+          CHECKSUM_NAME: ${{ steps.package.outputs.checksum_name }}
         run: |
           $tag = $env:GITHUB_REF_NAME
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag "BiliFavOrganizer-Windows-x64.zip" "BiliFavOrganizer-Windows-x64.zip.sha256" --clobber
+            gh release upload $tag $env:ASSET_NAME $env:CHECKSUM_NAME --clobber
           } else {
-            gh release create $tag "BiliFavOrganizer-Windows-x64.zip" "BiliFavOrganizer-Windows-x64.zip.sha256" --generate-notes
+            gh release create $tag $env:ASSET_NAME $env:CHECKSUM_NAME --generate-notes
           }

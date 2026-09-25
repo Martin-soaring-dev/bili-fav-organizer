@@ -19,9 +19,9 @@
 
 ### Windows 便携版（普通用户推荐）
 
-在 GitHub 的 **Releases** 下载 `BiliFavOrganizer-Windows-x64.zip`，解压后双击 `启动.bat`（或 `BiliFavOrganizer.exe`）。便携包已集成 Python 运行环境和应用依赖，不需要用户安装 Python 或 pip。首次启动需要等待一会；服务运行期间保留控制台窗口，关闭窗口即可停止服务；浏览器会自动打开本地页面。
+在 GitHub 的 **Releases** 下载 `BiliFavOrganizer-Windows-x64-<版本标签>.zip`（例如 `BiliFavOrganizer-Windows-x64-v0.106.zip`），解压后双击 `启动.bat`（或 `BiliFavOrganizer.exe`）。便携包已集成 Python 运行环境和应用依赖，不需要用户安装 Python 或 pip。首次启动需要等待一会；服务运行期间保留控制台窗口，关闭窗口即可停止服务；浏览器会自动打开本地页面。
 
-请下载 Release 附件 `BiliFavOrganizer-Windows-x64.zip`，不要下载 GitHub 自动生成的 `Source code.zip`；后者是源代码，不含便携运行环境。
+请下载文件名带有当前版本标签的 Release 附件（`BiliFavOrganizer-Windows-x64-<版本标签>.zip`），不要下载 GitHub 自动生成的 `Source code.zip`；后者是源代码，不含便携运行环境。
 
 ### 从源码运行（开发）
 
