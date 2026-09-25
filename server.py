@@ -19,14 +19,10 @@ import argparse
 import asyncio
 import json
 import logging
-import os
-import shutil
-import sys
 import threading
 import time
 import traceback
 import uuid
-import webbrowser
 from pathlib import Path
 from typing import Optional
 
@@ -42,13 +38,8 @@ import llm_analyzer
 import store
 
 HERE = Path(__file__).resolve().parent
-APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else HERE
-if os.environ.get("LOCALAPPDATA"):
-    USER_DATA_DIR = Path(os.environ["LOCALAPPDATA"]) / "BiliFavOrganizer"
-else:
-    USER_DATA_DIR = Path.home() / ".local" / "share" / "BiliFavOrganizer"
-CONFIG_FILE = USER_DATA_DIR / "config.json"
-SECRETS_FILE = USER_DATA_DIR / "secrets.json"  # 凭据单独存放（api_key / cookie_string）
+CONFIG_FILE = HERE / "config.json"
+SECRETS_FILE = HERE / "secrets.json"      # 凭据单独存放（api_key / cookie_string）
 SECRET_KEYS = ("api_key", "cookie_string")
 STATIC_DIR = HERE / "static"
 
@@ -88,7 +79,7 @@ def emit(level: str, text: str, **extra):
 
 # 把事件钩子注入 bili_api，让长等待(412 退避等)提示也能推到前端
 bili_api.EVENT_HOOK = lambda level, text: emit(level, text)
-bili_api.WRITE_LOG_PATH = store.DATA_DIR / "write_operations.jsonl"
+bili_api.WRITE_LOG_PATH = HERE / "data" / "write_operations.jsonl"
 
 
 DEFAULT_CONFIG = {
@@ -164,20 +155,6 @@ def _read_json_file(path: Path):
         return {}, str(e)
 
 
-def _migrate_legacy_settings():
-    """首次启动时把程序目录中的旧配置复制到用户数据目录，不覆盖已有配置。"""
-    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    for name in ("config.json", "secrets.json"):
-        legacy = APP_DIR / name
-        destination = USER_DATA_DIR / name
-        if not destination.exists() and legacy.is_file():
-            try:
-                shutil.copy2(legacy, destination)
-                log.info("已迁移旧设置文件到用户数据目录：%s", destination)
-            except Exception as e:
-                log.warning("无法迁移旧设置文件 %s：%s", legacy, e)
-
-
 def _mask(v: str) -> str:
     """凭据脱敏：只保留尾 4 位。"""
     v = v or ""
@@ -189,7 +166,6 @@ def load_config() -> dict:
 
     解析失败不再静默回退默认值，而是打日志并置 _config_broken 标记。
     """
-    _migrate_legacy_settings()
     cfg = dict(DEFAULT_CONFIG)
     cdata, cerr = _read_json_file(CONFIG_FILE)
     sdata, serr = _read_json_file(SECRETS_FILE)
@@ -222,7 +198,6 @@ def save_config(cur: dict):
            if k not in SECRET_KEYS and not k.startswith("_")}
     # API Key 归 SQLite providers 表管理；secrets.json 只保留 B 站 Cookie。
     sec = {"cookie_string": cur["cookie_string"]} if cur.get("cookie_string") else {}
-    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
     _atomic_write(CONFIG_FILE, pub)
     prev, _ = _read_json_file(SECRETS_FILE)
     if store.list_providers():
@@ -3194,15 +3169,12 @@ def main():
     parser = argparse.ArgumentParser(description="B站收藏夹整理")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--log-file", default="server.log",
-                        help="服务日志文件（默认保存在用户数据目录，可指定其它名字）")
-    parser.add_argument("--no-browser", action="store_true",
-                        help="启动服务后不自动打开浏览器")
+                        help="服务日志文件（默认 server.log，可指定其它名字）")
     args = parser.parse_args()
 
     log_path = Path(args.log_file)
     if not log_path.is_absolute():
-        log_path = USER_DATA_DIR / log_path
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path = HERE / log_path
 
     # 先把 uvicorn 的日志配置建好，再建自己的 handler：
     # uvicorn.Config 内部会 dictConfig，而 dictConfig 会关掉此前创建的所有 handler
@@ -3230,8 +3202,6 @@ def main():
     except Exception as e:
         log.warning("无法写入日志文件 %s：%s", log_path, e)
 
-    if not args.no_browser:
-        threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
     uvicorn.Server(config).run()
 
 
