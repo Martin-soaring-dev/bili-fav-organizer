@@ -49,45 +49,46 @@ try {
     $python = Find-Python
 
     if (-not $python) {
-        Write-Host "未检测到 Python 3.10 或更新版本，正在准备 Python 运行环境..."
-        $winget = Get-Command winget -CommandType Application -ErrorAction SilentlyContinue
-        if ($winget) {
-            Write-Host "正在通过 Windows 包管理器安装官方 Python 安装管理器..."
-            & $winget.Source install 9NQ7512CXL7T -e --accept-package-agreements --disable-interactivity
-            if ($LASTEXITCODE -eq 0) {
-                $windowsApps = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
-                if (Test-Path -LiteralPath $windowsApps) { $env:Path = "$windowsApps;$env:Path" }
-                $manager = Get-Command pymanager -CommandType Application -ErrorAction SilentlyContinue
-                $managerPath = if ($manager) { $manager.Source } else { Join-Path $windowsApps "pymanager.exe" }
-                if (Test-Path -LiteralPath $managerPath -PathType Leaf) {
-                    Write-Host "正在安装 Python 3.13..."
-                    & $managerPath install 3.13
-                    if ($LASTEXITCODE -eq 0) { $python = Find-Python }
-                }
-            }
+        Write-Host "未检测到 Python 3.10 或更新版本，正在从 python.org 准备 Python 运行环境..."
+        $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+        $installerName = switch ($architecture.ToUpperInvariant()) {
+            "AMD64" { "python-3.13.15-amd64.exe"; break }
+            "ARM64" { "python-3.13.15-arm64.exe"; break }
+            { $_ -in @("X86", "I386") } { "python-3.13.15.exe"; break }
+            default { throw "当前系统架构 $architecture 暂不支持自动安装。请从 https://www.python.org/downloads/windows/ 安装 Python 3.13，然后重试。" }
+        }
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $installerUrl = "https://www.python.org/ftp/python/3.13.15/$installerName"
+        $installerPath = Join-Path $env:TEMP $installerName
+        Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+        $signature = Get-AuthenticodeSignature -LiteralPath $installerPath
+        if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "Python Software Foundation") {
+            throw "Python 安装程序签名验证失败（状态：$($signature.Status)），已停止安装。"
         }
 
-        if (-not $python) {
-            Write-Host "正在从 python.org 下载并安装 Python 3.13.15..."
-            $architecture = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
-            $installerName = switch ($architecture.ToUpperInvariant()) {
-                "AMD64" { "python-3.13.15-amd64.exe"; break }
-                "ARM64" { "python-3.13.15-arm64.exe"; break }
-                default { throw "当前系统架构 $architecture 暂不支持自动安装。请从 https://www.python.org/downloads/windows/ 安装 Python 3.13，然后重试。" }
-            }
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            $installerUrl = "https://www.python.org/ftp/python/3.13.15/$installerName"
-            $installerPath = Join-Path $env:TEMP $installerName
-            Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
-            $signature = Get-AuthenticodeSignature -LiteralPath $installerPath
-            if ($signature.Status -ne "Valid") { throw "Python 安装程序签名验证失败，已停止安装。" }
-
-            $pythonHome = Join-Path $venvRoot "python313"
-            Write-Host "正在安装 Python 和 pip（当前用户，不需要管理员权限）..."
-            & $installerPath /quiet "InstallAllUsers=0" "TargetDir=$pythonHome" "Include_pip=1" "Include_launcher=0" "Include_test=0" "PrependPath=0" "AssociateFiles=0" "Shortcuts=0"
-            if ($LASTEXITCODE -ne 0) { throw "Python 安装失败，安装程序退出代码：$LASTEXITCODE" }
-            $python = Join-Path $pythonHome "python.exe"
-            if (-not (Test-Path -LiteralPath $python -PathType Leaf)) { throw "Python 安装结束，但未找到 python.exe。" }
+        $pythonHome = Join-Path $venvRoot "python313"
+        $installerLog = Join-Path $env:TEMP "BiliFavOrganizer-python-install.log"
+        Write-Host "正在安装 Python 和 pip（当前用户，不需要管理员权限）..."
+        $installerArgs = @(
+            "/quiet",
+            "InstallAllUsers=0",
+            "TargetDir=`"$pythonHome`"",
+            "Include_pip=1",
+            "Include_launcher=0",
+            "Include_test=0",
+            "PrependPath=0",
+            "AssociateFiles=0",
+            "Shortcuts=0",
+            "/log",
+            "`"$installerLog`""
+        )
+        $installerProcess = Start-Process -FilePath $installerPath -ArgumentList $installerArgs -Wait -PassThru
+        if ($installerProcess.ExitCode -ne 0) {
+            throw "Python 安装失败，安装程序退出代码：$($installerProcess.ExitCode)。安装日志：$installerLog"
+        }
+        $python = Join-Path $pythonHome "python.exe"
+        if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw "Python 安装程序报告成功，但未找到 python.exe。安装日志：$installerLog"
         }
     }
 
