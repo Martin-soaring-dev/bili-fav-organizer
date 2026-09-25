@@ -78,6 +78,10 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Windows release build output (portable package is uploaded as a Release asset)
+/build/
+/dist/
+
 # 备份 / 临时
 *.tmp
 *.bak
