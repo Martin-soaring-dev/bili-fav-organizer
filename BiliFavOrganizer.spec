@@ -11,7 +11,7 @@ binaries = []
 hiddenimports = []
 
 # These packages load some implementation modules dynamically at runtime.
-for package in ("browsercookie", "qrcode"):
+for package in ("browsercookie", "qrcode", "PIL"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
     datas += package_datas
     binaries += package_binaries
