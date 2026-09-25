@@ -5,6 +5,6 @@ fastapi
 uvicorn
 requests
 pydantic
-qrcode              # 扫码登录生成二维码
+qrcode[pil]         # 扫码登录生成 PNG 二维码（安装 Pillow 图像后端）
 browsercookie       # （可选）从浏览器自动读 cookie；新版 Chrome 的 ABE 加密会失败，可退化用扫码登录
 pycryptodomex       # browsercookie 的依赖
