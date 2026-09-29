@@ -265,7 +265,7 @@
     const v = parseInt($("write-interval").value, 10);
     try {
       await api("POST", "/api/config", { write_interval: v });
-      log(`写操作间隔已设为 ≥${v} 秒（另加 0~1.5 秒随机抖动）`);
+      log(`写操作间隔已设为 ${v} 秒`);
     } catch (e) { log("保存写操作间隔失败: " + (e.error || e.message), "err"); }
   });
   $("merge-interval").addEventListener("change", async () => {

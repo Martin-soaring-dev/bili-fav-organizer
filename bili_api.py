@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import hashlib
 import logging
-import random
 import time
 import urllib.parse
 from dataclasses import dataclass, field, asdict
@@ -32,14 +31,13 @@ BATCH_LIMIT = 1000            # 实测硬上限：1000 成功，1001 返回 -400
 PAGE_SIZE = 20                # 收藏夹视频每页条数
 FAV_BULK_CANDIDATE_LIMIT = 1000  # resource/ids 历史实测可能在 1000 条截断，仅作为尝试阈值
 MAX_SCAN_PAGES = 50000        # 防止异常 has_more 响应导致无限请求
-READ_INTERVAL = 10            # 相邻两次收藏夹请求的最小间隔(秒)，全局生效
+READ_INTERVAL = 2             # 相邻两次收藏夹请求的最小间隔(秒)，全局生效
 PAGE_INTERVAL = READ_INTERVAL  # 兼容旧名
 HTTP_412_BACKOFF = 300        # 遇 HTTP 412 的退避等待(秒)
 RETRY_READ = 4                # 读操作重试次数
-MIN_INTERVAL_WRITE = 1.0      # 写操作最小间隔(秒) —— 旧常量，保留兜底
-MAX_INTERVAL_WRITE = 3.0      # 写操作最大间隔(秒) —— 旧常量，保留兜底
-WRITE_INTERVAL = 2.0          # 写操作基准间隔(秒)：距上次写操作至少这么久，可由 server 调整
-WRITE_JITTER = 1.5            # 写操作随机抖动上限(秒)：避免完全等间隔被识别为脚本
+MIN_INTERVAL_WRITE = 2.0      # 写操作最小间隔(秒) —— 旧常量，保留兜底
+MAX_INTERVAL_WRITE = 2.0      # 写操作最大间隔(秒) —— 旧常量，保留兜底
+WRITE_INTERVAL = 2.0          # 写操作固定间隔(秒)：距上次写操作至少这么久，可由 server 调整
 WRITE_LOG_PATH = None         # 由 server 设置，用于写操作断点记录
 EVENT_HOOK = None             # 由 server 注入：fn(level, text)，用于把长等待提示推到前端
 
@@ -334,8 +332,8 @@ class BiliSession:
         raise BiliApiError(f"请求失败：{url} ({last_exc})")
 
     def _throttle_write(self, should_stop=None):
-        """写操作限速：距上次写操作至少 write_interval 秒（另加随机抖动）。"""
-        gap = self.write_interval + random.uniform(0, WRITE_JITTER)
+        """写操作限速：距上次写操作至少 write_interval 秒（固定间隔，无随机抖动）。"""
+        gap = float(self.write_interval or WRITE_INTERVAL)
         while True:
             wait = self._last_write_at + gap - time.monotonic()
             if wait <= 0:

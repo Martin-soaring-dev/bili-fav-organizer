@@ -409,7 +409,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .inline-label select { padding: 6px 8px; }
 .num-input { width: 96px; padding: 6px 8px; }
 
-/* 画像请求间隔：与按钮同高、底端对齐 */
+/* 画像请求间隔：与按钮同高、单行底端对齐 */
 .profile-tools-row { align-items: flex-end; }
 .profile-interval-label {
   display: inline-flex;
@@ -418,15 +418,19 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   gap: 6px;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
   align-self: flex-end;
-  line-height: 1;
+  margin: 0;
 }
 .profile-interval-label .num-input {
   box-sizing: border-box;
+  width: 64px;
   height: 35px;
-  padding: 8px 8px;
+  padding: 8px 6px;
   font-family: var(--mono);
   font-size: 13px;
+  line-height: 1;
+  vertical-align: middle;
 }
 
 /* 模式设置 / 快速模式 */
