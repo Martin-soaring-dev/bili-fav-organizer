@@ -5,7 +5,7 @@ cd /d "%~dp0"
 REM Release ZIP contains a self-contained application; source archives use Python bootstrap.
 if exist "%~dp0BiliFavOrganizer.exe" goto run_portable
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0启动.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0BiliFavOrganizer.ps1"
 if errorlevel 1 (
   echo.
   echo 启动失败，请查看上方错误信息。

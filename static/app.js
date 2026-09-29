@@ -961,7 +961,358 @@
     modal.style.display = "none";
   });
 
-  // ---------- 三路线标签（内容整理 / 收藏夹整理 / 收藏夹画像） ----------
+  // ---------- 模式设置 / 快速模式 ----------
+  const fastRun = {
+    running: false,
+    stop: false,
+    biz: null,
+    stepIndex: 0,
+    steps: [],
+  };
+
+  function getFastBiz() {
+    const el = document.querySelector('input[name="fast-biz"]:checked');
+    return el ? el.value : "";
+  }
+
+  function setMode(mode) {
+    const isFast = mode === "fast";
+    $("mode-fast").classList.toggle("active", isFast);
+    $("mode-manual").classList.toggle("active", !isFast);
+    $("mode-fast").setAttribute("aria-selected", isFast ? "true" : "false");
+    $("mode-manual").setAttribute("aria-selected", isFast ? "false" : "true");
+    $("fast-mode-panel").hidden = !isFast;
+    $("manual-mode-panel").hidden = isFast;
+  }
+
+  function updateFastRunButton() {
+    const btn = $("fast-run");
+    const biz = getFastBiz();
+    btn.disabled = fastRun.running || !biz;
+    btn.setAttribute("aria-pressed", fastRun.running ? "true" : "false");
+    btn.classList.toggle("busy", fastRun.running);
+    btn.textContent = fastRun.running
+      ? `自动整理中… ${fastRun.stepIndex + 1}/${fastRun.steps.length}`
+      : "开始自动整理";
+    $("fast-stop").hidden = !fastRun.running;
+  }
+
+  function renderFastSteps() {
+    const box = $("fast-steps");
+    if (!fastRun.steps.length) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    box.hidden = false;
+    box.innerHTML = "";
+    fastRun.steps.forEach((step, i) => {
+      const li = document.createElement("li");
+      li.textContent = step.label;
+      if (step.state === "done") li.classList.add("step-done");
+      else if (step.state === "fail") li.classList.add("step-fail");
+      else if (step.state === "skip") li.classList.add("step-skip");
+      else if (i === fastRun.stepIndex && fastRun.running) li.classList.add("step-active");
+      box.appendChild(li);
+    });
+    updateFastRunButton();
+  }
+
+  function setFastStep(i, state) {
+    if (fastRun.steps[i]) fastRun.steps[i].state = state;
+    if (state === "active" || state === undefined) fastRun.stepIndex = i;
+    renderFastSteps();
+    $("fast-status").textContent = fastRun.steps[i]
+      ? `${fastRun.steps[i].label}${state === "done" ? " · 已完成" : state === "fail" ? " · 失败" : ""}`
+      : "";
+  }
+
+  function switchRoute(routeId) {
+    document.querySelectorAll(".route-tab").forEach(x =>
+      x.classList.toggle("active", x.dataset.route === routeId));
+    document.querySelectorAll(".route-panel").forEach(x => {
+      x.style.display = x.id === routeId ? "block" : "none";
+    });
+  }
+
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function waitUntil(check, label) {
+    const started = Date.now();
+    while (true) {
+      if (fastRun.stop) throw new Error("已停止快速模式");
+      if (Date.now() - started > 6 * 60 * 60 * 1000) throw new Error(`${label}超时`);
+      let ok = false;
+      try { ok = await check(); } catch (_) { ok = false; }
+      if (ok) return;
+      await sleep(1500);
+    }
+  }
+
+  async function waitJobIdle(statusUrl, label, extraFailCheck) {
+    await waitUntil(async () => {
+      const st = await api("GET", statusUrl);
+      if (fastRun.stop) throw new Error("已停止快速模式");
+      if (st && st.error) throw new Error(`${label}失败：${st.error}`);
+      if (extraFailCheck) {
+        const failMsg = extraFailCheck(st);
+        if (failMsg) throw new Error(failMsg);
+      }
+      return st && st.running === false;
+    }, label);
+  }
+
+  async function waitScanDone() {
+    await waitUntil(async () => {
+      const st = await api("GET", "/api/scan/status");
+      if (fastRun.stop) throw new Error("已停止快速模式");
+      if (!st || st.running !== false) return false;
+      const err = String(st.error || "");
+      if (err.includes("风控") || err.includes("出错") || err.includes("异常")) {
+        throw new Error(`扫描失败：${err}`);
+      }
+      if (err.includes("停止")) throw new Error(`扫描已停止：${err}`);
+      if (err) log(`扫描结束但有告警：${err}`, "warn");
+      return true;
+    }, "扫描");
+  }
+
+  async function waitMergeAiDone() {
+    await waitUntil(async () => {
+      const r = await api("GET", "/api/folder-organize");
+      if (fastRun.stop) throw new Error("已停止快速模式");
+      const ai = (r && r.ai_run) || {};
+      if (ai.error) throw new Error(`AI 合并建议失败：${ai.error}`);
+      return ai.running === false;
+    }, "AI 合并建议");
+  }
+
+  function showFastDone(title, text) {
+    $("fast-done-title").textContent = title;
+    $("fast-done-text").textContent = text;
+    $("fast-done-modal").style.display = "flex";
+  }
+
+  function closeFastDone() {
+    $("fast-done-modal").style.display = "none";
+    fastRun.running = false;
+    fastRun.stop = false;
+    updateFastRunButton();
+  }
+
+  async function stopFastCurrentJob() {
+    const step = fastRun.steps[fastRun.stepIndex] || {};
+    const label = step.label || "";
+    try {
+      if (label.includes("扫描")) await api("POST", "/api/scan/stop");
+      else if (label.includes("画像")) await api("POST", "/api/folder-profiles/stop");
+      else if (label.includes("归类") || label.includes("分析")) await api("POST", "/api/analyze/stop");
+      else if (label.includes("合并")) await api("POST", "/api/folder-organize/stop");
+    } catch (_) { /* stop 尽力而为 */ }
+  }
+
+  async function runFastMode() {
+    if (fastRun.running) return;
+    const biz = getFastBiz();
+    if (!biz) { log("请先选择快速模式业务：内容整理或收藏夹整理", "warn"); return; }
+
+    // 前置检查
+    try {
+      const login = await api("GET", "/api/login/status");
+      if (!login || !login.configured) {
+        log("快速模式需要先登录 B 站（扫码或手动 Cookie）", "err");
+        return;
+      }
+      const cfg = await api("GET", "/api/config");
+      if (!cfg || !cfg.active_model_id) {
+        log("快速模式需要先在模型配置中激活一个模型", "err");
+        return;
+      }
+      const st = await api("GET", "/api/status");
+      const runs = st || {};
+      let busy = Boolean(
+        (runs.scan && runs.scan.running) ||
+        (runs.analyze && runs.analyze.running) ||
+        (runs.apply && runs.apply.running)
+      );
+      if (!busy) {
+        try {
+          const prof = await api("GET", "/api/folder-profiles/status");
+          if (prof && prof.running) busy = true;
+        } catch (_) { /* 忽略 */ }
+      }
+      if (!busy) {
+        try {
+          const org = await api("GET", "/api/folder-organize");
+          if ((org && org.ai_run && org.ai_run.running) ||
+              (org && org.run && org.run.running)) busy = true;
+        } catch (_) { /* 忽略 */ }
+      }
+      if (busy) {
+        log("已有整理任务在运行，请先停止或等待完成", "warn");
+        return;
+      }
+    } catch (e) {
+      log("快速模式前置检查失败: " + (e.error || e.message || e), "err");
+      return;
+    }
+
+    const isContent = biz === "content";
+    const steps = [
+      { label: "刷新收藏夹目录", state: "pending", run: async () => {
+        const r = await api("POST", "/api/folders/refresh");
+        if (!r || r.ok === false) throw new Error((r && r.error) || "刷新目录失败");
+        await refreshTree();
+        await loadFolderProfiles();
+      }},
+      { label: "勾选全部收藏夹", state: "pending", run: async () => {
+        const directory = await api("GET", "/api/folders");
+        const ids = (directory.folders || []).map(f => String(f.media_id));
+        if (!ids.length) throw new Error("收藏夹目录为空");
+        await api("PUT", "/api/scan/selection", { folder_ids: ids });
+        $("scan-selection-summary").textContent = `已选 ${ids.length} / ${ids.length} 个`;
+      }},
+      { label: "开始扫描（补齐未完成/变化）", state: "pending", run: async () => {
+        switchRoute("content-route");
+        const directory = await api("GET", "/api/folders");
+        await api("POST", "/api/scan", {
+          folder_ids: directory.selected_ids || [],
+          mode: "resume",
+        });
+      }},
+      { label: "等待扫描完成", state: "pending", run: async () => {
+        await waitScanDone();
+      }},
+      { label: "生成缺失 / 过期画像", state: "pending", run: async () => {
+        switchRoute("profile-route");
+        await loadFolderProfiles();
+        // 全选 active（默认夹是收件箱，后端也会拒绝，这里先排除）
+        document.querySelectorAll(".folder-profile-pick:not(:disabled)").forEach(x => {
+          const card = x.closest(".folder-profile-card");
+          const isDefault = card && card.classList.contains("is-default");
+          if (!isDefault) x.checked = true;
+        });
+        await startFolderProfileGeneration(false);
+      }},
+      { label: "等待画像完成", state: "pending", run: async () => {
+        await waitJobIdle("/api/folder-profiles/status", "画像生成");
+        await refreshOrganizationReadiness();
+      }},
+    ];
+
+    if (isContent) {
+      steps.push(
+        { label: "LLM 归类分析开始", state: "pending", run: async () => {
+          switchRoute("content-route");
+          const r = await api("POST", "/api/analyze/start", {
+            continuous: false,
+            rebuild: $("analyze-rebuild").value || "incremental",
+          });
+          if (r && r.error) throw new Error(r.error);
+          log(`快速模式分析已启动：候选 ${r.total || 0} 条`);
+        }},
+        { label: "等待分析完成", state: "pending", run: async () => {
+          await waitJobIdle("/api/analyze/status", "LLM 归类分析", (st) => {
+            if (st && st.stopped && (st.done || 0) < (st.total || 0)) {
+              return "分析被中断";
+            }
+            return null;
+          });
+        }},
+        { label: "加载分析结果", state: "pending", run: async () => {
+          await loadPlan();
+        }},
+      );
+    } else {
+      steps.push(
+        { label: "生成 AI 合并建议", state: "pending", run: async () => {
+          switchRoute("folder-route");
+          await loadFolderMerge();
+          await api("POST", "/api/folder-organize/suggest");
+          log("快速模式：已开始 AI 收藏夹合并分析");
+        }},
+        { label: "等待合并建议完成", state: "pending", run: async () => {
+          await waitMergeAiDone();
+          await loadFolderMerge();
+        }},
+      );
+    }
+
+    fastRun.running = true;
+    fastRun.stop = false;
+    fastRun.biz = biz;
+    fastRun.steps = steps;
+    fastRun.stepIndex = 0;
+    renderFastSteps();
+    log(`快速模式已启动：${isContent ? "内容整理" : "收藏夹整理"}`);
+
+    try {
+      for (let i = 0; i < steps.length; i++) {
+        if (fastRun.stop) throw new Error("已停止快速模式");
+        setFastStep(i, "active");
+        await steps[i].run();
+        if (fastRun.stop) throw new Error("已停止快速模式");
+        setFastStep(i, "done");
+      }
+      setFastStep(steps.length - 1, "done");
+      $("fast-status").textContent = "自动步骤已完成，等待人工复核";
+      if (isContent) {
+        showFastDone(
+          "快速模式 · 内容整理完成",
+          "已完成：刷新目录 → 扫描 → 生成画像 → LLM 归类分析 → 加载分析结果。\n\n" +
+          "请到「内容整理」查看预归类方案，逐条确认后提交方案，再手动点击「开始执行」。"
+        );
+        log("快速模式内容整理完成，请复核预归类方案后手动执行", "ok");
+      } else {
+        showFastDone(
+          "快速模式 · 收藏夹整理完成",
+          "已完成：刷新目录 → 扫描 → 生成画像 → 生成 AI 合并建议。\n\n" +
+          "请到「收藏夹整理」查看合并组草稿，人工复核后提交合并任务，再手动执行。"
+        );
+        log("快速模式收藏夹整理完成，请复核合并建议后手动执行", "ok");
+      }
+    } catch (e) {
+      const msg = e && (e.error || e.message || String(e));
+      if (String(msg).includes("停止")) {
+        setFastStep(fastRun.stepIndex, "fail");
+        $("fast-status").textContent = "已停止";
+        log("快速模式已停止", "warn");
+      } else {
+        setFastStep(fastRun.stepIndex, "fail");
+        $("fast-status").textContent = "失败：" + msg;
+        log("快速模式中断: " + msg, "err");
+        showFastDone("快速模式已中断", `在「${(fastRun.steps[fastRun.stepIndex] || {}).label || "未知步骤"}」失败：\n${msg}\n\n可切换到手动模式继续处理，或修复后重新运行。`);
+      }
+    } finally {
+      if ($("fast-done-modal").style.display !== "flex") {
+        fastRun.running = false;
+        fastRun.stop = false;
+        updateFastRunButton();
+      }
+    }
+  }
+
+  $("mode-fast").addEventListener("click", () => setMode("fast"));
+  $("mode-manual").addEventListener("click", () => setMode("manual"));
+  document.querySelectorAll('input[name="fast-biz"]').forEach(el => {
+    el.addEventListener("change", updateFastRunButton);
+  });
+  $("fast-run").addEventListener("click", () => {
+    if (fastRun.running) return;
+    runFastMode();
+  });
+  $("fast-stop").addEventListener("click", async () => {
+    if (!fastRun.running) return;
+    fastRun.stop = true;
+    $("fast-status").textContent = "正在停止…";
+    await stopFastCurrentJob();
+  });
+  $("fast-done-ok").addEventListener("click", closeFastDone);
+  $("fast-done-close").addEventListener("click", closeFastDone);
+
+  // ---------- 三路线标签（收藏夹画像 / 内容整理 / 收藏夹整理） ----------
   document.querySelectorAll(".route-tab").forEach(tab => tab.addEventListener("click", () => {
     document.querySelectorAll(".route-tab").forEach(x => x.classList.toggle("active", x === tab));
     document.querySelectorAll(".route-panel").forEach(x => {
@@ -1208,15 +1559,22 @@
     const folderIds = [...document.querySelectorAll(".folder-profile-pick:checked")]
       .map(input => input.value)
       .filter(id => !defaultIds.has(String(id)));
-    if (!folderIds.length) { log("请先选择 active 收藏夹（默认收藏夹是收件箱，不生成画像）", "warn"); return; }
+    if (!folderIds.length) {
+      const msg = "请先选择 active 收藏夹（默认收藏夹是收件箱，不生成画像）";
+      log(msg, "warn");
+      throw new Error(msg);
+    }
     try {
       const result = await api("POST", "/api/folder-profiles/generate", { folder_ids: folderIds, rebuild });
       $("profile-status").textContent = "画像任务已启动，共 " + result.total + " 个收藏夹";
       $("profile-progress").style.display = "flex";
       setProgress($("profile-progress"), "profile", 0, result.total || 0);
       $("profile-text").textContent = "等待开始 0/" + (result.total || 0);
+      return result;
     } catch (e) {
-      log("启动画像任务失败: " + (e.error || e.message), "err");
+      const msg = (e && (e.error || e.message)) || String(e);
+      log("启动画像任务失败: " + msg, "err");
+      throw e instanceof Error ? e : new Error(msg);
     }
   }
 
@@ -1225,8 +1583,12 @@
     document.querySelectorAll(".folder-profile-pick:not(:disabled)").forEach(x => { x.checked = true; }));
   $("profile-select-none").addEventListener("click", () =>
     document.querySelectorAll(".folder-profile-pick").forEach(x => { x.checked = false; }));
-  $("profile-generate").addEventListener("click", () => startFolderProfileGeneration(false));
-  $("profile-rebuild").addEventListener("click", () => startFolderProfileGeneration(true));
+  $("profile-generate").addEventListener("click", () => {
+    startFolderProfileGeneration(false).catch(() => {});
+  });
+  $("profile-rebuild").addEventListener("click", () => {
+    startFolderProfileGeneration(true).catch(() => {});
+  });
   $("profile-stop").addEventListener("click", async () => {
     try { await api("POST", "/api/folder-profiles/stop"); log("正在停止画像任务…", "warn"); }
     catch (e) { log("停止画像任务失败: " + e.message, "err"); }
@@ -2955,6 +3317,7 @@
     refreshOrganizationReadiness();
     refreshTree();
     loadFolderMerge();
+    loadFolderProfiles();
     connectEvents();
     setInterval(checkConn, 10000);   // 仅更新连接指示灯，不写日志
     log("系统就绪。请先扫码登录（或手动输入 Cookie）→ 扫描 → 分析 → 定案 → 执行。");

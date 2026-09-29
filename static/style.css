@@ -409,6 +409,91 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .inline-label select { padding: 6px 8px; }
 .num-input { width: 96px; padding: 6px 8px; }
 
+/* 画像请求间隔：与按钮同高、底端对齐 */
+.profile-tools-row { align-items: flex-end; }
+.profile-interval-label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  align-self: flex-end;
+  line-height: 1;
+}
+.profile-interval-label .num-input {
+  box-sizing: border-box;
+  height: 35px;
+  padding: 8px 8px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/* 模式设置 / 快速模式 */
+.mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.mode-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 8px 18px;
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+}
+.mode-btn.active {
+  background: var(--accent);
+  color: var(--primary-text);
+  font-weight: 700;
+}
+.mode-btn:not(.active):hover {
+  background: var(--button-hover);
+  color: var(--text);
+}
+.mode-panel { margin-top: 12px; }
+.fast-biz-row { align-items: center; gap: 14px; }
+.fast-biz {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.fast-steps {
+  margin: 12px 0 0;
+  padding: 12px 14px 12px 28px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 13px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.fast-steps li { list-style: decimal; }
+.fast-steps li.step-active {
+  color: var(--text);
+  font-weight: 700;
+}
+.fast-steps li.step-active::marker { color: var(--accent); }
+.fast-steps li.step-done { color: var(--accent); }
+.fast-steps li.step-fail { color: var(--danger); font-weight: 700; }
+.fast-steps li.step-skip { opacity: .55; }
+#fast-run[aria-pressed="true"] {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,.18);
+  filter: brightness(0.95);
+  cursor: progress;
+}
+#fast-run[aria-pressed="true"]:hover {
+  transform: translateY(1px);
+  filter: brightness(0.95);
+}
+
 /* 方案统计摘要 */
 .plan-summary { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
 .plan-stat { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }

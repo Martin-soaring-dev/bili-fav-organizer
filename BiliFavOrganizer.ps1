@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $requirements = Join-Path $projectDir "requirements.txt"
@@ -122,7 +122,7 @@ try {
         & $venvPython -m pip install --disable-pip-version-check --upgrade pip
         if ($LASTEXITCODE -ne 0) { throw "pip 准备失败。请检查网络连接或代理设置。" }
         & $venvPython -m pip install --disable-pip-version-check -r $requirements
-        if ($LASTEXITCODE -ne 0) { throw "依赖安装失败。请检查网络连接或代理设置，然后重新运行启动.bat。" }
+        if ($LASTEXITCODE -ne 0) { throw "依赖安装失败。请检查网络连接或代理设置，然后重新运行 BiliFavOrganizer.bat。" }
         Set-Content -LiteralPath $marker -Value $hash -Encoding ascii
     } else {
         Write-Host "Python 和应用依赖已就绪。"

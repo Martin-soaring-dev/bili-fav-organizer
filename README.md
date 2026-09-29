@@ -1,75 +1,114 @@
 # B站收藏夹智能整理
 
-一个本地运行的 Web 工具，用 **LLM** 帮你把 B 站收藏夹里的视频按内容自动归类到你想要的收藏夹。
+<p align="center">
+  <img src="docs/images/hero.svg" alt="B站收藏夹智能整理" width="680">
+</p>
+
+一个本地运行的 Web 工具：用 **LLM** 按**内容**把 B 站收藏夹里的视频自动归类到合适的收藏夹，并提供收藏夹画像与合并整理能力。
+
+**核心原则**：归类方案必须人工复核后才执行；执行时先加入目标夹、成功后再从原夹删除；默认收藏夹是「未分拣收件箱」，只出不进。
+
+---
 
 ## 它能做什么
 
-| 阶段 | 说明 |
+| 能力 | 说明 |
 |------|------|
-| ❶ 获取收藏明细 | 使用扫码登录或手动输入的 Cookie，拉取收藏夹和视频（标题/简介/UP主） |
-| ❷ LLM 归类 | 批量调用你配置的模型，依据收藏夹画像推断每个视频的归属并说明理由 |
-| ❸ 预归类方案 | 可视化展示建议，逐条可改（移入现有夹 / 新建夹 / 跳过），确认后进入执行 |
-| ❹ 确认执行 | 按来源夹/目标夹分组，使用 B 站批量 `move`；失效视频批量删除 |
+| ❶ 获取收藏明细 | 扫码登录 / 手动 Cookie，拉取收藏夹与视频元数据，支持断点续扫 |
+| 🧭 收藏夹画像 | 按完整扫描快照生成简介、主题、收纳范围；可预览后上传到 B 站简介 |
+| ❷ LLM 归类分析 | 依据画像批量推断每个视频的归属，并给出偏离提示 |
+| ❸ 预归类方案 | 可视化统计 + 逐条修改（移入 / 新建 / 跳过） |
+| ❹ 确认执行 | B 站批量 `move` / 失效视频批量删除；风控时立即停 |
+| 🗂 收藏夹整理 | AI 合并建议 + 可编辑草稿 + 人工复核后提交执行 |
+| ⚡ 快速模式 | 自动串起「目录 → 扫描 → 画像 → 分析 / 合并建议」，停在人工复核前 |
 
-另外提供 **收藏夹整理** 和 **收藏夹画像** 两个工作栏：前者编辑合并草稿，后者从完整本地快照生成或重建收藏夹简介与主题范围。
+---
 
-内容归类与收藏夹合并依赖当前完整画像：所有有内容的 active 收藏夹都必须完成扫描并生成匹配当前快照的画像。空收藏夹不作为整理目标。**默认收藏夹是「未分拣收件箱」，不生成画像、也永远不是移入目标**：它里面的内容按其余收藏夹的画像判定归属，只有确实无处可去时才跳过保留原位。归类方案仍需人工复核后才会执行。
+## 快速开始
 
-## 如何启动
+### Windows 便携版（推荐）
 
-### Windows 便携版（普通用户推荐）
+1. 打开 [Releases](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases)，下载 `BiliFavOrganizer-Windows-x64-<版本标签>.zip`
+2. 解压后双击 **`BiliFavOrganizer.exe`**（或 `BiliFavOrganizer.bat`）
+3. 浏览器自动打开 **http://127.0.0.1:8080**
 
-在 GitHub 的 **Releases** 下载 `BiliFavOrganizer-Windows-x64-<版本标签>.zip`（例如 `BiliFavOrganizer-Windows-x64-v0.106.zip`），解压后双击 `启动.bat`（或 `BiliFavOrganizer.exe`）。便携包已集成 Python 运行环境和应用依赖，不需要用户安装 Python 或 pip。首次启动需要等待一会；服务运行期间保留控制台窗口，关闭窗口即可停止服务；浏览器会自动打开本地页面。
+便携包已集成 Python 运行环境，无需另装 Python / pip。服务运行期间请保留控制台窗口，关闭窗口即停止。
 
-请下载文件名带有当前版本标签的 Release 附件（`BiliFavOrganizer-Windows-x64-<版本标签>.zip`），不要下载 GitHub 自动生成的 `Source code.zip`；后者是源代码，不含便携运行环境。
+> 请下载带版本标签的 Release 附件，不要下载 GitHub 自动打包的 `Source code.zip`（那是源码，不含运行环境）。
 
 ### 从源码运行（开发）
 
-Windows 用户双击源码目录中的 `启动.bat`。首次启动时会检查 Python；如未安装，会从 python.org 下载并安装官方 Python 3.13 和 pip，再自动安装 `requirements.txt` 中的依赖。也可以手动安装依赖后，在项目目录运行 `python server.py`。
+```bash
+pip install -r requirements.txt
+python server.py            # 默认 8080，可加 --port 8090
+```
 
-服务启动后浏览器会打开 **http://127.0.0.1:8080**（默认端口 8080，可用 `--port 8090` 改）。关闭服务窗口即可停止服务。
+Windows 也可双击 **`BiliFavOrganizer.bat`**：首次会检查并安装 Python 3.13 与依赖，然后启动服务。
 
-> ⚠️ **凭据安全**：SQLite 主库保存供应商 API Key，`secrets.json` 保存 B 站 Cookie；它们与 `config.json`、`data/` 都含本地数据，
-> **请勿分享本目录或以任何方式提交到网上**；`.gitignore` 已默认忽略它们。
-> 页面上的 `/api/config` 接口只回显凭据的**尾 4 位**，不会回显完整值。
+---
 
-## 使用流程（照这个顺序点）
+## 使用流程
+
+**详细步骤**（手动模式；快速模式会自动跑到「人工复核」前）：
 
 1. **⓿ 连接配置**
-   - Cookie 获取方式默认二维码登录；也可切换为手动输入，保存后用「测试 Cookie」确认登录态
-   - 在「模型配置」选供应商和模型；首次使用时点「管理模型」添加预设或自定义供应商，在供应商设置中填写 API Key
-   - [AMD Radeon Cloud Token Factory](https://developer.amd.com.cn/radeon/tokenfactory) 可直接选择预设并粘贴平台生成的 API Key。截至 2026-09-26，当前活动参考额度约为每天 10 美元；AMD 公开页面没有承诺统一固定金额，额度、模型和限速可能调整，实际以登录后的 AMD Usage 页面为准，不视为永久额度。
-   - 「管理模型」默认打开当前激活模型并进入编辑；点选其他模型只打开编辑，保存后需点「激活」才会切换。供应商预设从下拉菜单添加
-   - 需要时可以刷新模型列表、测试模型，或手动编辑模型上下文与输出参数；主界面点「保存配置」也会激活当前选中的模型
+   - Cookie：默认二维码登录，可切换手动输入；保存后点「测试 Cookie」
+   - 模型：点「管理模型」添加供应商 / 填 API Key，保存并「激活」
+   - [AMD Radeon Cloud Token Factory](https://developer.amd.com.cn/radeon/tokenfactory) 可用预设 + 平台 API Key
 
-2. **❶ 获取收藏明细** → 点「刷新收藏夹目录」同步 active 收藏夹，再选扫描范围与请求间隔 → 点「开始扫描」
-   - 间隔越小越快、风控风险越高（建议 ≥5 秒；默认 10 秒最稳）
-   - 目录按收藏夹 ID 同步：改名会更新；B 站目录中消失的 ID 会归档；本地浏览器只列 active 夹
-   - 小收藏夹先用资源 ID 查独立索引，已命中的元数据不重复请求；未命中才取元数据。大夹受 B 站 ID 接口边界影响，使用分页读取
+2. **⚡ 模式设置**
+   - **快速模式**：选「内容整理」或「收藏夹整理」→ 点「开始自动整理」
+   - **手动模式**：按下方各栏逐步自行操作
 
-3. **❷ LLM 归类分析** → 设置「批大小 / 并发 / 最大输出」→ 点「开始分析」，可随时「停止」
-   - **批大小**：逻辑批次上限（默认 20，可设到 1000）；发送前会按模型上下文预算拆分；**并发**：同时几个请求（默认 1，1~4）
-   - **最大输出**：默认 32768；推理模型给太小会返回空正文导致失败
-   - 开始前要求所有有内容的 active 收藏夹都有当前完整画像；画像不完整时先扫描并生成画像
-   - 每个请求发送前估算输入、输出预算和上下文安全余量；模型返回 `finish_reason=length` 时不会采纳截断结果
+3. **❶ 获取收藏明细** → 「刷新收藏夹目录」→ 选扫描范围 → 「开始扫描」
+   - 扫描方式默认「继续未完成/变化的夹」（补齐式）
+   - 请求间隔建议 ≥5 秒（默认 10 秒最稳）
 
-4. **❸ 预归类方案** → 点「加载分析结果」查看统计 → 点「查看详情」逐条修改 → 「确认方案」
+4. **🧭 收藏夹画像** → 「全选 active」→ 「生成缺失 / 过期画像」
+   - 默认收藏夹（未分拣收件箱）不生成画像，也不是移入目标
+   - 画像是归类与合并的主要依据，收藏夹名称只是弱提示
 
-5. **❹ 确认执行** → 可点「查看 / 修改方案」（与❸同一个弹窗，显示的是**你已提交的方案**）
-   → 设置「写操作间隔 / 单批条数」→ 点「开始执行」
-   - 执行清单 = 方案中除 `done` / `unknown` 外的条目；已完成和待人工复核的不自动重发
-   - 单批最多 1000 条；明确失败会记录后继续，风控时停止
-   - 超时/无响应的批次标记为 `unknown` 并停止，需人工复核后再移回待操作
+5. **❷ LLM 归类分析** → 设批大小 / 并发 → 「开始分析」
+   - 开始前要求所有**有内容**的 active 夹都有当前完整画像
+   - 发送前按上下文预算自动拆批；截断结果不采纳
 
-6. **收藏夹画像** → 选中 active 收藏夹 → 「生成缺失 / 过期画像」或「重建所选画像」
-   - **默认收藏夹不出现在可勾选范围**（勾选框禁用）：它是未分拣收件箱，不生成画像
-   - 画像卡片右上角的 🗑 按钮可删除该收藏夹的本地画像（不改动 B 站简介），删除后可重新生成
-   - 画像使用完整扫描快照中的全部本地条目，必要时分批压缩，再合并生成简介、主题、适合范围和范围外提示
-   - 扫描数据变化、收藏夹改名或快照过期后，画像显示为过期；不完整快照不会生成新画像
-   - 当前画像是后续预归类和合并建议的主要依据，收藏夹名称只作弱提示；本地内容与画像明显不符时，会在本地内容详情和预归类方案中标出。旧画像过期后，旧的不符判断不再作为当前结论
-   - 合并组草稿会保存画像依据；画像变旧或改动目标/来源/合并名称后会提示或清除原依据
+6. **❸ 预归类方案** → 「加载分析结果」→「查看详情」逐条确认
 
-收藏夹画像简介默认保存在本地 SQLite，不会自动覆盖 B 站简介。画像卡片提供「上传简介到 B 站」入口：打开后读取并展示 B 站当前简介与本地画像简介，用户确认后才写回；目录刷新和扫描本身不抓取收藏夹简介。
+7. **❹ 确认执行** → 确认方案 → 设写操作间隔 → 「开始执行」
+   - 明确失败会记录后继续；风控或结果不确定（`unknown`）时停止，需人工复核
+
+---
+
+## 系统架构
+
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="系统架构" width="680">
+</p>
+
+| 模块 | 职责 |
+|------|------|
+| `server.py` | FastAPI 主程序：REST API、后台任务、SSE 事件 |
+| `bili_api.py` | B 站接口：WBI 签名、节流、批量读写 |
+| `llm_analyzer.py` | 归类 / 画像 / 合并建议；上下文预算与 TPM 限流 |
+| `store.py` | SQLite：目录、视频索引、画像、方案、供应商模型 |
+| `static/` | 原生 HTML / CSS / JS 单页 UI |
+
+---
+
+## 业务流水线与安全规则
+
+<p align="center">
+  <img src="docs/images/pipeline.svg" alt="业务流水线" width="680">
+</p>
+
+| 规则 | 说明 |
+|------|------|
+| 默认夹 = 收件箱 | 只移出、不移入；不生成画像 |
+| 画像门槛 | 有内容的 active 夹必须有当前完整画像才能归类 / 合并 |
+| 先加后删 | 先进目标夹，成功后再从原夹删除 |
+| 快速模式 | 自动到「人工复核」为止，不自动提交方案、不自动写回 |
+
+---
 
 ## 配置说明（config.json）
 
@@ -87,55 +126,104 @@ Windows 用户双击源码目录中的 `启动.bat`。首次启动时会检查 P
 }
 ```
 
-> **供应商 API Key 存在 SQLite 主库的 `providers` 表中；B站 `cookie_string` 保存在 `secrets.json`。**
-> 首次启动会将旧配置中的 API Key 迁移到 SQLite。请勿分享主库、Cookie 文件或项目数据。
+| 字段 | 含义 |
+|------|------|
+| `base_url` | OpenAI 兼容接口地址（填到 `/v1`） |
+| `active_model_id` | 当前激活模型的 SQLite ID（供应商 / Key / 规格在「管理模型」中管理） |
+| `scan_interval` | 收藏夹请求最小间隔（秒），全局生效 |
+| `scan_scope` | `all` 全部 / `default` 仅默认夹 |
+| `write_interval` | 执行阶段写操作最小间隔（秒）+ 0~1.5s 抖动 |
+| `analyze_batch` | 归类逻辑批大小上限（1~1000，默认 20） |
+| `analyze_concurrency` | 同时 LLM 请求数（1~4，默认 1） |
+| `analyze_max_tokens` / `model_context_tokens` | 以激活模型规格为准，此处仅兜底 |
+| `model_tpm_limit` | 本地 TPM 预算（tokens/分钟），用于画像分批 |
+| `profile_request_interval` | 画像请求最小间隔（秒） |
 
-- `base_url`：OpenAI 兼容接口地址（**填到 `/v1` 即可**，代码会自动拼 `/chat/completions`）
-- `active_model_id`：当前激活模型的 SQLite ID；供应商地址、API Key、模型名与模型参数在 SQLite 的供应商/模型表中管理
-- `scan_interval`：收藏夹请求最小间隔（秒），全局生效（跨收藏夹）
-- `scan_scope`：`all`=全部收藏夹 / `default`=仅默认收藏夹
-- `write_interval`：执行阶段"加夹/删夹"之间的**最小**间隔（秒），实际再加 0~1.5s 随机抖动
-- `analyze_batch`：内容归类的逻辑批大小上限（1~1000，默认 20）；上下文预检可在发送前进一步拆小
-- `analyze_concurrency`：同时进行的 LLM 请求数（1~4，默认 1）
-- `analyze_max_tokens` / `model_context_tokens`：**不再由界面单独设置**。单次输出上限与上下文窗口
-  直接读取**激活模型**在「管理模型」里保存的规格（`models.max_output_tokens` / `models.context_tokens`）；
-  这两个配置项只作为模型规格缺失时的兜底。**推理模型**会把 token 花在思考上，输出上限给太小会导致正文为空 → 分析失败。
-- `model_tpm_limit`：模型 TPM 上限（tokens/分钟），在「测试模型连接」旁设置。收藏夹画像会按它分配每批输入与
-  输出预算，接口返回实际用量后修正本地限流占额。它是本地限流预算，不代表供应商真实限速。
-- `profile_request_interval`：画像请求最小间隔（秒），在「收藏夹画像」区设置，用于控制发送频率。
+> **供应商 API Key 存在 SQLite `providers` 表；B 站 Cookie 在 `secrets.json`。**  
+> `/api/config` 只回显 API Key **尾 4 位**。请勿分享主库、Cookie 或项目数据目录。
 
-> 分析阶段采用**批处理**（一次请求多条视频，收藏夹画像清单只发一次），
-> 并对上下文预算、`finish_reason=length` 和缺失结果做发送前拆分或只重试缺失的容错。
+---
 
 ## 数据存储
 
-Windows 下，应用数据默认保存在**当前 Windows 用户**的 `%LOCALAPPDATA%\BiliFavOrganizer\`，通常是 `C:\Users\<用户名>\AppData\Local\BiliFavOrganizer\`。打开文件夹：按 **Win+R**，输入 `%LOCALAPPDATA%\BiliFavOrganizer`，再按 Enter。
+<p align="center">
+  <img src="docs/images/data-storage.svg" alt="数据落盘" width="680">
+</p>
 
-| 文件/目录 | 内容 |
-| --- | --- |
+Windows 默认目录：`%LOCALAPPDATA%\BiliFavOrganizer\`（Win+R 输入该路径回车即可打开）。
+
+| 文件 | 内容 |
+|------|------|
 | `config.json` | 应用设置 |
 | `secrets.json` | B 站 Cookie |
-| `data\library.sqlite3` | 收藏夹、视频元数据索引、画像、分析方案，以及供应商 API Key 和模型配置 |
+| `data\library.sqlite3` | 收藏夹、视频索引、画像、方案、供应商 API Key |
 | `server.log` | 最近一次运行日志 |
 
-这些数据与程序 ZIP 分开保存；升级或移动程序目录不会清除它们。另一个 Windows 账户或另一台电脑会使用自己的数据目录，所以不会自动带上原电脑的 Cookie、API Key 或本地索引。首次启动还会把程序目录中已有的旧 `config.json` 和 `secrets.json` 复制到用户数据目录，不覆盖已存在的设置；旧版项目 `data/library.sqlite3` 会通过 SQLite 在线备份迁移并校验，旧库保留作为回滚副本。可通过环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 指定数据库目录。
+- 程序 ZIP 与数据目录分离；升级 / 移动程序不会清除数据
+- 首次启动会把项目目录中的旧配置 / 旧 SQLite 迁移到用户数据目录（旧库保留可回滚）
+- 可用环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 覆盖数据目录
+- **换电脑**：页面「导出项目数据」→ 新电脑「读取项目数据」（不含 Cookie / API Key）；完整搬迁请私下复制整个数据目录
+- 清理数据请用页面上的清除功能，不要手删文件
 
-换电脑时，可在旧电脑使用页面顶部的「导出项目数据」，再在新电脑点「读取项目数据」导入收藏夹、视频索引、画像和整理数据。导出文件不含 Cookie 或 API Key；供应商/模型设置也需在新电脑重新配置。若要完整搬迁现有配置和凭据，可在两台电脑都关闭程序后，私下安全地复制整个 `BiliFavOrganizer` 数据目录；该目录含登录凭据，**不要上传到 GitHub、发到群聊或交给他人**。如果新电脑已运行过程序，先备份它已有的数据目录再替换。
+---
 
-数据库将收藏夹记录标记为 `active` 或 `archived`。目录同步按 ID 更新名称/数量；消失的收藏夹转为 archived 并清除它的 `folder_items` 关系，但保留视频元数据索引。完整重扫时会替换该夹的成员关系，因此取消收藏的内容关系直接删除。视频索引采用按资源 ID 增量 upsert，多个收藏夹共享一份视频元数据。
+## 风控与中断
 
-收藏夹画像保存在 SQLite `folder_profiles` 表中，并绑定源快照时间；扫描快照或名称发生变化时需要重建。画像页面只列 active 收藏夹。
+- 扫描默认 10 秒/页，写操作 1~3 秒 + 随机抖动
+- 遇风控（`-101` / `-658` / `-352` / `412` 等）立即停止
+- **可随时停止，再从断点继续**，不会白跑
+- 同一视频在多个夹时，只保留首次扫描到的来源做删除
 
-画像不直接改动收藏关系。归类与合并要求所有有内容的 active 收藏夹都有当前完整画像；偏离判断会记录收藏夹 ID 和简短依据，供本地内容和预归类方案人工复核。合并建议同时参考代表条目、重复关系和最新画像。画像完整性状态也会在内容整理和收藏夹整理页显示。详情见 [持久视频索引与收藏夹画像](docs/design/persistent-index-folder-profiles.md)。
+---
 
-网页上的「导出项目数据」会导出兼容 JSON bundle，包含 active/archived 收藏夹及画像；导入会覆盖当前收藏和整理数据，并先自动备份，但不会导出或覆盖 Cookie、API Key、供应商和模型配置。SQLite 内的数据表结构与扫描状态说明见 [实施方案](docs/design/scan-sqlite-migration-plan.md)。
+## 项目结构
 
-要清理数据，请使用页面上的数据清除功能；不要手动删除 JSON 或 SQLite 文件。
+```
+bili-fav-organizer/
+├── server.py                 # FastAPI 主程序
+├── bili_api.py               # B 站接口封装
+├── llm_analyzer.py           # LLM 归类 / 画像 / 合并
+├── store.py                  # SQLite 数据层
+├── static/                   # 前端单页
+├── tests/                    # 单元测试
+├── docs/
+│   ├── images/               # README 图示
+│   ├── design/               # 实施方案
+│   └── …/                    # B 站接口离线文档
+├── packaging/使用说明.txt
+├── BiliFavOrganizer.bat/.ps1 # Windows 启动脚本
+├── BiliFavOrganizer.spec     # PyInstaller 配置
+└── requirements.txt
+```
 
-## 重要注意事项
+---
 
-- **Cookie**：扫码登录获取，只在**本机**保存于 `secrets.json`，不会外传。供应商 API Key 保存在本机 SQLite 主库中。
-- **风控**：扫描内置全局节流（默认 10 秒/页，可在界面调小，越小风险越高）；
-  写操作间隔 1~3 秒随机。**可随时停止，再从断点继续**，不会白跑。
-- **先加后删**：执行时先把视频加入目标收藏夹，成功后才从原收藏夹删除，避免丢失。
-- **同视频多夹**：同一视频在多个收藏夹时，只保留首次扫描到的来源做删除。
+## 设计文档
+
+| 文档 | 内容 |
+|------|------|
+| [docs/design/scan-sqlite-migration-plan.md](docs/design/scan-sqlite-migration-plan.md) | 扫描策略状态机、SQLite 迁移 |
+| [docs/design/persistent-index-folder-profiles.md](docs/design/persistent-index-folder-profiles.md) | 持久索引、画像门槛、默认夹规则 |
+| [docs/design/provider-api-compatibility.md](docs/design/provider-api-compatibility.md) | 供应商 API 差异与模型规格来源 |
+| [docs/project-overview.md](docs/project-overview.md) | 项目全景梳理 |
+| [docs/README.md](docs/README.md) | B 站接口离线文档对照 |
+
+---
+
+## 开发
+
+```bash
+# 测试
+python -m unittest discover -s tests -v
+
+# Windows 便携打包（CI 在 tag v* 时自动执行）
+pyinstaller --noconfirm --clean BiliFavOrganizer.spec
+```
+
+发布产物：`BiliFavOrganizer-Windows-x64-<tag>.zip` + SHA256。
+
+---
+
+## 许可
+
+见 [LICENSE](LICENSE)。

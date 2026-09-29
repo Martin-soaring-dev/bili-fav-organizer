@@ -2,7 +2,7 @@
 
 启动
 1. 将此 ZIP 解压到一个有写入权限的文件夹。
-2. 双击“启动.bat”或“BiliFavOrganizer.exe”。
+2. 双击“BiliFavOrganizer.exe”或“BiliFavOrganizer.bat”。
 3. 浏览器会自动打开本地页面。服务运行期间请保持黑色控制台窗口打开；关闭窗口即可停止服务。
 
 本便携包已包含运行环境，无需另外安装 Python 或执行 pip。
