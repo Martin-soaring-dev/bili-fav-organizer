@@ -89,3 +89,4 @@ __pycache__/
 *.orig
 *.old
 bili_ck_profile/
+.playwright-cli/
