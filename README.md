@@ -228,11 +228,13 @@ pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 
 本项目的开发过程得到了以下工具与模型的协助，在此表示感谢：
 
-- **小米 MiMo**
-- **Qwen Code**
-- **ChatGPT**
+| 项目 | 简介 | 链接 |
+|------|------|------|
+| **小米 MiMo** | 小米大模型团队开源的系列大语言模型与智能体能力，可用于代码理解、生成与工程协作 | [GitHub · XiaomiMiMo](https://github.com/XiaomiMiMo) |
+| **Qwen Code** | 阿里云通义千问团队的编程智能体 CLI，擅长仓库级代码阅读、修改与终端任务 | [GitHub · QwenLM/qwen-code](https://github.com/QwenLM/qwen-code) · [Qwen 官网](https://qwen.ai) |
+| **ChatGPT** | OpenAI 的对话式 AI 助手，在方案讨论、文案与代码协作方面提供了帮助 | [chatgpt.com](https://chatgpt.com) · [OpenAI](https://openai.com) |
 
-同时也感谢 [bilibili-API-collect](https://github.com/pskdje/bilibili-API-collect) 社区整理的接口文档。
+同时也感谢 [bilibili-API-collect](https://github.com/pskdje/bilibili-API-collect) 社区整理的 B 站接口文档（离线副本见 [docs/README.md](docs/README.md)）。
 
 ---
 
