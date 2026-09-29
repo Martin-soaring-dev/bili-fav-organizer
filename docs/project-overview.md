@@ -136,8 +136,8 @@ flowchart TB
 **扫描策略**（见 design/scan-sqlite-migration-plan.md）：
 
 ```
-media_count ≤ 1000  →  resource/ids + resource/infos 批量元数据
-media_count > 1000  →  resource/list 分页（ps=20，has_more）
+media_count ≤ 1000  →  ID 清单 + 批量元数据接口
+media_count > 1000  →  分页明细接口（每页 20 条）
 任一路径不完整      →  回退分页明细，完成性校验通过才标 complete
 ```
 
