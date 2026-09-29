@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $requirements = Join-Path $projectDir "requirements.txt"
@@ -92,7 +92,7 @@ try {
         }
     }
 
-    $versionTag = & $python -c "import sys; print('py%d%d' % sys.version_info[:2])"
+    $versionTag = & $python -c "import sys; print('py{0}{1}'.format(*sys.version_info[:2]))"
     if ($LASTEXITCODE -ne 0) { throw "无法读取 Python 版本。" }
     $venv = Join-Path $venvRoot $versionTag.Trim()
     $venvPython = Join-Path $venv "Scripts\python.exe"
