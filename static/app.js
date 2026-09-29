@@ -235,8 +235,6 @@
       if (c.apply_batch) $("apply-batch").value = String(c.apply_batch);
       if (c.analyze_concurrency) $("analyze-concurrency").value = String(c.analyze_concurrency);
       if (c.analyze_batch) $("analyze-batch").value = String(c.analyze_batch);
-      if (c.analyze_max_tokens) $("analyze-max-tokens").value = String(c.analyze_max_tokens);
-      if (c.model_context_tokens) $("model-context-tokens").value = String(c.model_context_tokens);
       if (c.model_tpm_limit) $("model-tpm-limit").value = String(c.model_tpm_limit);
       if (c.profile_request_interval) $("profile-request-interval").value = String(c.profile_request_interval);
       renderManageLists();
@@ -303,25 +301,7 @@
     } catch (e) { log("保存批大小失败: " + (e.error || e.message), "err"); }
   });
 
-  // 最大输出改动即时保存
-  $("analyze-max-tokens").addEventListener("change", async () => {
-    const v = parseInt($("analyze-max-tokens").value, 10);
-    if (!v || v < 256) { log("最大输出无效（需 ≥ 256）", "warn"); return; }
-    try {
-      await api("POST", "/api/config", { analyze_max_tokens: v });
-      log(`最大输出已设为 ${v} tokens`);
-    } catch (e) { log("保存最大输出失败: " + (e.error || e.message), "err"); }
-  });
-
-  $("model-context-tokens").addEventListener("change", async () => {
-    const v = parseInt($("model-context-tokens").value, 10);
-    if (!v || v < 4096) { log("模型上下文窗口无效（需 ≥ 4096）", "warn"); return; }
-    try {
-      await api("POST", "/api/config", { model_context_tokens: v });
-      log(`模型上下文窗口已设为 ${v} tokens`);
-    } catch (e) { log("保存上下文窗口失败: " + (e.error || e.message), "err"); }
-  });
-
+  // 上下文窗口与最大输出由「管理模型」里的模型规格决定，这里不再单独保存。
   $("profile-request-interval").addEventListener("change", async () => {
     const v = parseFloat($("profile-request-interval").value);
     if (!Number.isFinite(v) || v < 0.5) { log("画像请求间隔无效（需 ≥ 0.5 秒）", "warn"); return; }
@@ -391,6 +371,14 @@
   });
 
   $("folder-refresh").addEventListener("click", async () => {
+    const btn = $("folder-refresh");
+    if (btn.disabled) return;
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add("busy");
+    btn.setAttribute("aria-busy", "true");
+    btn.textContent = "已发送请求，刷新中…";
+    log("正在同步收藏夹目录…");
     try {
       const r = await api("POST", "/api/folders/refresh");
       log(`收藏夹目录已刷新，共 ${r.folders.length} 个`, "ok");
@@ -399,6 +387,12 @@
       if (folderProfileListLoaded) await loadFolderProfiles();
       await refreshOrganizationReadiness();
     } catch (e) { log("刷新目录失败: " + (e.error || e.message), "err"); }
+    finally {
+      btn.disabled = false;
+      btn.classList.remove("busy");
+      btn.removeAttribute("aria-busy");
+      btn.textContent = label;
+    }
   });
 
   $("scan-stop").addEventListener("click", async () => {
@@ -1080,6 +1074,7 @@
   });
 
   function profileStateLabel(row) {
+    if (row.is_default) return "未分拣收件箱";
     if (!row.scan_complete) return "扫描未完成";
     if (row.profile_state === "current") return "画像最新";
     if (row.profile_state === "stale") return "画像过期";
@@ -1110,8 +1105,9 @@
       return;
     }
     folderProfileRows.forEach(row => {
+      const isDefault = Boolean(row.is_default);
       const card = document.createElement("article");
-      card.className = "folder-profile-card";
+      card.className = "folder-profile-card" + (isDefault ? " is-default" : "");
       const head = document.createElement("div");
       head.className = "folder-profile-head";
       const pick = document.createElement("input");
@@ -1121,13 +1117,28 @@
       const title = document.createElement("strong");
       title.textContent = row.title || "未命名收藏夹";
       const state = document.createElement("span");
-      state.className = "folder-profile-state-badge " + (row.profile_state || "missing");
+      state.className = "folder-profile-state-badge " + (isDefault ? "inbox" : (row.profile_state || "missing"));
       state.textContent = profileStateLabel(row);
       const count = document.createElement("span");
       count.className = "muted";
-      count.textContent = "内容 " + Number(row.local_count || 0).toLocaleString("zh-CN") +
-        " / " + Number(row.count || 0).toLocaleString("zh-CN");
-      head.append(pick, title, state, count);
+      const localN = Number(row.local_count || 0);
+      const remoteN = Number(row.count || 0);
+      let countText = "内容 " + localN.toLocaleString("zh-CN") + " / " + remoteN.toLocaleString("zh-CN");
+      if (localN !== remoteN) countText += "（目录待刷新）";
+      count.textContent = countText;
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "folder-profile-del";
+      del.textContent = "🗑";
+      del.disabled = !row.profile;
+      del.title = "删除该收藏夹的本地画像（不改动 B 站简介）";
+      del.addEventListener("click", () => deleteFolderProfile(row));
+      if (isDefault) {
+        pick.disabled = true;
+        pick.title = "默认收藏夹是未分拣收件箱，不生成画像";
+        del.title = "删除默认收藏夹的本地画像（它不参与归类）";
+      }
+      head.append(pick, title, state, count, del);
       card.appendChild(head);
 
       const profile = row.profile;
@@ -1166,16 +1177,38 @@
       } else {
         const empty = document.createElement("p");
         empty.className = "muted folder-profile-empty";
-        empty.textContent = row.scan_complete ? "尚未生成画像。" : "先完成该收藏夹的扫描，再生成画像。";
+        if (isDefault) {
+          empty.textContent = "未分拣收件箱，不生成画像。里面的内容按其余收藏夹的画像判定归属。";
+        } else {
+          empty.textContent = row.scan_complete ? "尚未生成画像。" : "先完成该收藏夹的扫描，再生成画像。";
+        }
         card.appendChild(empty);
       }
       box.appendChild(card);
     });
   }
 
+  async function deleteFolderProfile(row) {
+    const name = row.title || "未命名收藏夹";
+    const ok = window.confirm(
+      "确认删除「" + name + "」的本地画像？\n\n" +
+      "只删除本地保存的画像，不会改动 B 站收藏夹简介。\n" +
+      "删除后如需恢复，请重新生成画像。");
+    if (!ok) return;
+    try {
+      await api("DELETE", "/api/folder-profiles/" + encodeURIComponent(String(row.media_id)));
+      log("已删除「" + name + "」的收藏夹画像", "warn");
+      await loadFolderProfiles();
+      await refreshOrganizationReadiness();
+    } catch (e) { log("删除画像失败: " + (e.error || e.message), "err"); }
+  }
+
   async function startFolderProfileGeneration(rebuild) {
-    const folderIds = [...document.querySelectorAll(".folder-profile-pick:checked")].map(input => input.value);
-    if (!folderIds.length) { log("请先选择 active 收藏夹", "warn"); return; }
+    const defaultIds = new Set(folderProfileRows.filter(r => r.is_default).map(r => String(r.media_id)));
+    const folderIds = [...document.querySelectorAll(".folder-profile-pick:checked")]
+      .map(input => input.value)
+      .filter(id => !defaultIds.has(String(id)));
+    if (!folderIds.length) { log("请先选择 active 收藏夹（默认收藏夹是收件箱，不生成画像）", "warn"); return; }
     try {
       const result = await api("POST", "/api/folder-profiles/generate", { folder_ids: folderIds, rebuild });
       $("profile-status").textContent = "画像任务已启动，共 " + result.total + " 个收藏夹";
@@ -1189,7 +1222,7 @@
 
   $("profile-refresh").addEventListener("click", loadFolderProfiles);
   $("profile-select-all").addEventListener("click", () =>
-    document.querySelectorAll(".folder-profile-pick").forEach(x => { x.checked = true; }));
+    document.querySelectorAll(".folder-profile-pick:not(:disabled)").forEach(x => { x.checked = true; }));
   $("profile-select-none").addEventListener("click", () =>
     document.querySelectorAll(".folder-profile-pick").forEach(x => { x.checked = false; }));
   $("profile-generate").addEventListener("click", () => startFolderProfileGeneration(false));
@@ -1396,9 +1429,14 @@
   // ---------- 步骤2 分析 ----------
   $("analyze-start").addEventListener("click", async () => {
     try {
-      const r = await api("POST", "/api/analyze/start", { continuous: $("analyze-continuous").checked });
+      const rebuild = $("analyze-rebuild").value || "incremental";
+      const r = await api("POST", "/api/analyze/start", {
+        continuous: $("analyze-continuous").checked,
+        rebuild,
+      });
       setAnalyzeProgress(0, 0, r.total || 0);
-      log(`分析已启动，共 ${r.total || 0} 条`);
+      log(`分析已启动：候选 ${r.total || 0} 条` +
+          (typeof r.pending === "number" ? `，待发送 ${r.pending} 条` : ""));
     } catch (e) {
       log("启动分析失败: " + (e.error || e.message), "err");
     }
@@ -1417,6 +1455,7 @@
   let foldersMap = {};     // title -> analysis
 
   let planFolders = [];
+  let inboxNames = new Set();   // 未分拣收件箱（默认收藏夹）的名称，永远不是移入目标
   let planPage = 1;          // 当前页
   let planTab = "pending";   // pending | done
   let planFilter = { cur: "", target: "", action: "" };
@@ -1427,6 +1466,7 @@
     try {
       const p = await api("GET", "/api/plan");
       planFolders = (p.existing_folders || []).map(f => f.title);
+      inboxNames = new Set((p.inbox_folder_names || []).map(String));
       const idToTitle = {};
       (p.existing_folders || []).forEach(f => { idToTitle[String(f.media_id)] = f.title; });
       const currentProfileIds = new Set((p.profile_current_ids || []).map(String));
@@ -1500,7 +1540,7 @@
       const invCount = p.invalid_count || 0;
       $("invalid-info").textContent = `已失效视频：${invCount} 条`;
       $("mark-invalid").disabled = (invCount === 0);
-      // ❹ 卡片概览（已提交方案 / 待操作 / 已完成）
+      // 确认执行卡片概览（已提交方案 / 待操作 / 已完成）
       const nP = planRows.filter(r => r._status !== "done").length;
       const nD = planRows.filter(r => r._status === "done").length;
       const planned = Object.keys(planMap).length;
@@ -1516,10 +1556,10 @@
   // 一键标记失效视频为删除（防火墙：仅标题恰为「已失效视频」的条目）
   $("mark-invalid").addEventListener("click", async () => {
     if (!confirm("把所有标题为「已失效视频」的视频标记为删除？\n\n" +
-                 "标记后需到阶段❹点「开始执行」才会真正删除。")) return;
+                 "标记后需到「确认执行」点「开始执行」才会真正删除。")) return;
     try {
       const r = await api("POST", "/api/plan/mark_invalid");
-      log(`已标记 ${r.count} 条失效视频为删除（到阶段❹点「开始执行」生效）`, "warn");
+      log(`已标记 ${r.count} 条失效视频为删除（到「确认执行」点「开始执行」生效）`, "warn");
     } catch (e) { log("标记失败: " + (e.error || e.message), "err"); }
   });
 
@@ -1528,19 +1568,21 @@
     const wrap = $("plan-summary");
     wrap.innerHTML = "";
     if (!planRows.length) {
-      wrap.innerHTML = '<div class="muted">暂无分析结果，请先执行阶段❷「开始分析」。</div>';
+      wrap.innerHTML = '<div class="muted">暂无分析结果，请先点「LLM 归类分析」中的「开始分析」。</div>';
       $("plan-meta").textContent = "";
       return;
     }
+    // 只统计待操作（未完成）条目，避免与「已完成」混在一起造成误会
+    const pendingRows = planRows.filter(r => r._status !== "done");
     let nKeep = 0, nExisting = 0, nNew = 0, nSkip = 0;
     const byTarget = new Map();
-    planRows.forEach(r => {
+    pendingRows.forEach(r => {
       const rec = (r.recommended || "").trim();
       const isExisting = planFolders.includes(rec);
       let mode;
       if (!rec || r.action === "skip") mode = "skip";
       else if (r._cur && rec === r._cur) mode = "keep";      // 已在目标夹 → 无需移动
-      else if (rec === "默认收藏夹") mode = "skip";          // 默认夹不可作为移入目标
+      else if (inboxNames.has(rec)) mode = "skip";          // 默认夹不可作为移入目标
       else if (isExisting) mode = "existing";
       else mode = "new";
       if (mode === "keep") nKeep++;
@@ -1554,11 +1596,12 @@
       }
     });
     $("plan-meta").textContent =
-      `共 ${planRows.length} 条 · ${planFolders.length} 个现有收藏夹`;
+      `待操作 ${pendingRows.length} 条 · ${planFolders.length} 个现有收藏夹`;
 
     const stat = document.createElement("div");
     stat.className = "plan-stat";
     stat.innerHTML =
+      `<span class="muted">待操作：</span>` +
       `<span class="s-keep">无需移动 <b>${nKeep}</b></span>` +
       `<span>移入现有收藏夹 <b>${nExisting}</b></span>` +
       `<span class="s-new">建议新建 <b>${nNew}</b></span>` +
@@ -1568,7 +1611,7 @@
     const top = [...byTarget.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
     const tops = document.createElement("div");
     tops.className = "plan-top";
-    tops.appendChild(document.createTextNode("Top 目标（仅实际移动/新建）："));
+    tops.appendChild(document.createTextNode("Top 目标（待操作中实际移动/新建）："));
     if (!top.length) {
       const empty = document.createElement("span");
       empty.className = "muted";
@@ -1584,7 +1627,7 @@
     wrap.appendChild(tops);
   }
 
-  // 方案详情弹窗（❸ 与 ❹ 共用同一个）
+  // 方案详情弹窗（预归类方案 与 确认执行 共用同一个）
   const planModal = $("plan-modal");
   async function openPlanModal() {
     planModal.style.display = "flex";
@@ -1626,7 +1669,7 @@
     // 失效视频：默认不动（不自动移动也不自动删除），删除需显式选择
     if ((row._title || "").trim() === "已失效视频") return { mode: "skip" };
     if (!rec || row.action === "skip") return { mode: "skip" };
-    if (rec === "默认收藏夹" && row._cur !== "默认收藏夹") return { mode: "skip" };
+    if (inboxNames.has(rec) && !inboxNames.has(row._cur)) return { mode: "skip" };
     if (folders.includes(rec)) return { mode: "existing", name: rec };
     return { mode: "new", name: rec };
   }
@@ -1949,7 +1992,7 @@
     const o0 = document.createElement("option");
     o0.value = ""; o0.textContent = "目标收藏夹...";
     fsel.appendChild(o0);
-    planFolders.filter(f => f !== "默认收藏夹").forEach(f => {
+    planFolders.filter(f => !inboxNames.has(f)).forEach(f => {
       const o = document.createElement("option"); o.value = f; o.textContent = f;
       fsel.appendChild(o);
     });
@@ -2158,6 +2201,7 @@
         const inflight = Number(ev.inflight || 0);
         setAnalyzeProgress(ev.done, inflight, ev.total || 0);
         const parts = [`已完成 ${ev.done}/${ev.total}`];
+        if (typeof ev.pending === "number") parts.push(`待发送 ${ev.pending}`);
         if (inflight) parts.push(`等待响应 ${inflight}`);
         if (ev.waiting) parts.push("等待新扫描内容");
         if (typeof ev.failed === "number" && ev.failed) parts.push(`失败 ${ev.failed}`);
@@ -2198,7 +2242,13 @@
         setProgress(b, "apply", ev.done, ev.total || 0);
         refreshStats();
       }
-      if (ev.kind === "apply_end") $("apply-progress").style.display = "none";
+      if (ev.kind === "apply_end") {
+        $("apply-progress").style.display = "none";
+        refreshStats();
+        // 执行完成后服务端会自动刷新收藏夹目录，这里同步重载画像列表与就绪状态
+        if (folderProfileListLoaded) loadFolderProfiles();
+        refreshOrganizationReadiness();
+      }
     };
     es.onerror = () => {
       es.close();

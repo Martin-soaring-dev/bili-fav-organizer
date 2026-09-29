@@ -435,7 +435,11 @@ class BiliSession:
         return self._mid
 
     def list_folders(self) -> list[dict]:
-        """获取收藏夹列表，返回 [{media_id, title, count, ...}]。"""
+        """获取收藏夹列表，返回 [{media_id, title, count, attr, ...}]。
+
+        attr 是属性位域：bit0=是否私有，bit1=0 表示默认收藏夹。
+        保留它供服务端可靠识别默认收藏夹（不依赖标题文字）。
+        """
         mid = self.get_mid()
         self._throttle_read()
         data = self._request("GET", f"{self._wapi}/x/v3/fav/folder/created/list-all",
@@ -447,6 +451,7 @@ class BiliSession:
                 "title": f.get("title", ""),
                 "count": f.get("media_count", 0) or 0,
                 "cover": f.get("cover", ""),
+                "attr": f.get("attr"),
             })
         return folders
 

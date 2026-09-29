@@ -185,6 +185,9 @@ button.btn.danger { background: var(--danger); border-color: var(--danger); colo
 button.btn.danger:hover { background: var(--danger); filter: brightness(.88); }
 button.btn.ghost { background: transparent; }
 button.btn.ghost.danger { background: var(--danger); color: #fff; }
+/* 请求进行中：按钮保持被按下、不可再点的视觉状态 */
+button.btn.busy { opacity: .85; cursor: progress; transform: translateY(1px); box-shadow: inset 0 2px 4px rgba(0,0,0,.18); }
+button.btn.busy:hover { transform: translateY(1px); filter: none; }
 button.mini { margin-left: auto; background: transparent; border: 1px solid var(--border); color: var(--muted); font-size: 11px; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
 
 /* 所有按钮的统一交互反馈 */
@@ -682,6 +685,12 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .folder-profile-notes { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .folder-profile-meta, .folder-profile-empty { margin-top: 6px; font-size: 10px; }
 .folder-profile-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+/* 卡片右上角的删除画像按钮 */
+.folder-profile-del { margin-left: auto; background: transparent; border: 1px solid var(--border); color: var(--danger); border-radius: 5px; padding: 3px 9px; font-size: 13px; cursor: pointer; line-height: 1.2; }
+.folder-profile-del:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+.folder-profile-del:disabled { opacity: .4; cursor: not-allowed; }
+.folder-profile-state-badge.inbox { color: var(--accent2); border-color: var(--accent2); border-style: dashed; }
+.folder-profile-card.is-default { border-style: dashed; opacity: .85; }
 .profile-intro-modal-box { width: min(620px, 92vw); }
 .profile-intro-body { display: grid; gap: 7px; }
 .profile-intro-body label { display: block; margin-top: 4px; color: var(--text); font-size: 12px; }
