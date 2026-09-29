@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" role="img" aria-label="系统架构">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9" fill="none" stroke="#0F766E" stroke-width="1.2" stroke-linecap="round"/>
+    </marker>
+    <style>
+      .t-h { font: 600 13px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #0F3D3A; }
+      .t-b { font: 400 11px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #1E293B; }
+      .t-m { font: 400 11px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #64748B; }
+      .t-cap { font: 500 11px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #0F766E; }
+    </style>
+  </defs>
+
+  <rect width="680" height="340" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+
+  <!-- 标题 -->
+  <text x="28" y="32" class="t-h">系统架构 · 本地 Web 应用</text>
+  <text x="28" y="50" class="t-m">浏览器 ←→ FastAPI ←→ B站接口 / OpenAI 兼容 LLM / SQLite</text>
+
+  <!-- 浏览器 -->
+  <rect x="36" y="78" width="160" height="220" rx="10" fill="#F0FDFA" stroke="#5EEAD4"/>
+  <text x="116" y="102" text-anchor="middle" class="t-cap">浏览器 UI</text>
+  <rect x="52" y="118" width="128" height="32" rx="6" fill="#FFFFFF" stroke="#99F6E4"/>
+  <text x="116" y="138" text-anchor="middle" class="t-b">连接配置 / 模式设置</text>
+  <rect x="52" y="158" width="128" height="32" rx="6" fill="#FFFFFF" stroke="#99F6E4"/>
+  <text x="116" y="178" text-anchor="middle" class="t-b">扫描 · 画像 · 归类</text>
+  <rect x="52" y="198" width="128" height="32" rx="6" fill="#FFFFFF" stroke="#99F6E4"/>
+  <text x="116" y="218" text-anchor="middle" class="t-b">预归类方案 · 合并</text>
+  <rect x="52" y="238" width="128" height="32" rx="6" fill="#FFFFFF" stroke="#99F6E4"/>
+  <text x="116" y="258" text-anchor="middle" class="t-b">确认执行 · 日志 SSE</text>
+  <text x="116" y="286" text-anchor="middle" class="t-m">static/ 原生 HTML/JS</text>
+
+  <!-- 箭头 浏览器 <-> 服务 -->
+  <path d="M204 150 H248" stroke="#0F766E" stroke-width="1.2" marker-end="url(#arr)"/>
+  <path d="M248 178 H204" stroke="#0F766E" stroke-width="1.2" marker-end="url(#arr)"/>
+  <text x="226" y="142" text-anchor="middle" class="t-m">fetch / SSE</text>
+
+  <!-- 服务端 -->
+  <rect x="256" y="78" width="180" height="220" rx="10" fill="#F8FAFC" stroke="#94A3B8"/>
+  <text x="346" y="102" text-anchor="middle" class="t-cap">server.py · FastAPI</text>
+  <rect x="272" y="118" width="148" height="36" rx="6" fill="#CCFBF1" stroke="#5EEAD4"/>
+  <text x="346" y="132" text-anchor="middle" class="t-b">REST API /api/*</text>
+  <text x="346" y="146" text-anchor="middle" class="t-m">登录 · 扫描 · 画像 · 归类</text>
+  <rect x="272" y="162" width="148" height="36" rx="6" fill="#CCFBF1" stroke="#5EEAD4"/>
+  <text x="346" y="176" text-anchor="middle" class="t-b">后台任务</text>
+  <text x="346" y="190" text-anchor="middle" class="t-m">可中断 · 断点续跑</text>
+  <rect x="272" y="206" width="148" height="36" rx="6" fill="#CCFBF1" stroke="#5EEAD4"/>
+  <text x="346" y="220" text-anchor="middle" class="t-b">事件总线 emit()</text>
+  <text x="346" y="234" text-anchor="middle" class="t-m">进度 · 日志 · 状态</text>
+  <rect x="272" y="250" width="148" height="28" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="346" y="268" text-anchor="middle" class="t-m">凭据隔离 secrets.json</text>
+
+  <!-- 箭头 服务 <-> 右侧 -->
+  <path d="M444 140 H488" stroke="#0F766E" stroke-width="1.2" marker-end="url(#arr)"/>
+  <path d="M488 180 H444" stroke="#0F766E" stroke-width="1.2" marker-end="url(#arr)"/>
+  <path d="M444 230 H488" stroke="#0F766E" stroke-width="1.2" marker-end="url(#arr)"/>
+  <path d="M488 250 H444" stroke="#0F766E" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- 右侧模块 -->
+  <rect x="496" y="78" width="150" height="64" rx="10" fill="#F0FDFA" stroke="#14B8A6"/>
+  <text x="571" y="104" text-anchor="middle" class="t-cap">bili_api.py</text>
+  <text x="571" y="122" text-anchor="middle" class="t-b">WBI · 节流 · 批量读写</text>
+
+  <rect x="496" y="156" width="150" height="64" rx="10" fill="#F0FDFA" stroke="#14B8A6"/>
+  <text x="571" y="182" text-anchor="middle" class="t-cap">llm_analyzer.py</text>
+  <text x="571" y="200" text-anchor="middle" class="t-b">批处理 · 上下文预算</text>
+
+  <rect x="496" y="234" width="150" height="64" rx="10" fill="#F0FDFA" stroke="#14B8A6"/>
+  <text x="571" y="260" text-anchor="middle" class="t-cap">store.py · SQLite</text>
+  <text x="571" y="278" text-anchor="middle" class="t-b">索引 · 画像 · 供应商</text>
+
+  <!-- 底部外部 -->
+  <rect x="36" y="312" width="160" height="20" rx="6" fill="#E2E8F0"/>
+  <text x="116" y="326" text-anchor="middle" class="t-m">B 站网页 API</text>
+  <rect x="256" y="312" width="180" height="20" rx="6" fill="#E2E8F0"/>
+  <text x="346" y="326" text-anchor="middle" class="t-m">OpenAI 兼容 Chat Completions</text>
+  <rect x="496" y="312" width="150" height="20" rx="6" fill="#E2E8F0"/>
+  <text x="571" y="326" text-anchor="middle" class="t-m">用户数据目录</text>
+</svg>

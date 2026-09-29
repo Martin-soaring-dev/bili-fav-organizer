@@ -56,8 +56,8 @@
             </label>
             <div id="cookie-qr-panel" class="cookie-method-panel">
               <div class="row">
-                <button id="qr-btn" class="btn ghost" type="button">刷新二维码</button>
                 <button id="test-cookie-qr" class="btn ghost" type="button">测试 Cookie</button>
+                <button id="qr-btn" class="btn ghost" type="button">刷新二维码</button>
                 <span class="muted" id="qr-status">正在获取登录二维码…</span>
               </div>
               <div id="qr-box" class="qr-box" style="display:none">
@@ -76,8 +76,8 @@
                   <code>document.cookie</code>（可只取 SESSDATA / bili_jct / DedeUserID 三项）。
                 </div>
                 <div class="row">
-                  <button id="save-cookie" class="btn">保存 Cookie</button>
                   <button id="test-cookie-manual" class="btn ghost">测试 Cookie</button>
+                  <button id="save-cookie" class="btn">保存 Cookie</button>
                   <span id="cookie-state" class="muted"></span>
                 </div>
               </div>
@@ -93,9 +93,9 @@
               <label class="model-pick">模型
                 <select id="cfg-model"><option value="">（无模型）</option></select>
               </label>
+              <button id="test-llm" class="btn ghost">测试模型连接</button>
               <button id="manage-models-btn" class="btn ghost" type="button">管理模型</button>
               <button id="save-config" class="btn">保存配置</button>
-              <button id="test-llm" class="btn ghost">测试模型连接</button>
               <label class="model-pick">模型 TPM 上限 (tokens/分钟)
                 <input id="model-tpm-limit" type="number" min="1000" max="10000000"
                        step="1000" value="20000" class="num-input">
@@ -104,6 +104,32 @@
             <div id="active-model-info" class="model-static-info">选择供应商与模型后显示地址与参数。</div>
             <div class="hint">上下文窗口与最大输出直接读取激活模型的规格（在「管理模型」里修改），这里不再单独设置。画像任务按 TPM 上限分配分批预算，内容归类会在发送前按上下文窗口和输出上限预检并自动拆分；部分模型的思考也消耗输出预算。TPM 上限是本地限流预算，不代表供应商返回的真实限速；规格来源未知时请按官方规格手动填写。</div>
           </div>
+        </div>
+      </section>
+
+      <!-- 模式设置：快速 / 手动 -->
+      <section class="card mode-card">
+        <h2>⚡ 模式设置</h2>
+        <p class="desc">快速模式会自动串起「刷新目录 → 扫描 → 生成画像 → 分析 / 合并建议」，停在需要人工复核的节点；手动模式与原先一致，逐步自行操作。</p>
+        <div class="row mode-switch-row">
+          <div class="mode-switch" role="tablist" aria-label="操作模式">
+            <button id="mode-fast" class="mode-btn active" type="button" role="tab" aria-selected="true">快速模式</button>
+            <button id="mode-manual" class="mode-btn" type="button" role="tab" aria-selected="false">手动模式</button>
+          </div>
+        </div>
+        <div id="fast-mode-panel" class="mode-panel">
+          <div class="row fast-biz-row">
+            <span class="muted">业务</span>
+            <label class="fast-biz"><input type="radio" name="fast-biz" value="content"> 内容整理</label>
+            <label class="fast-biz"><input type="radio" name="fast-biz" value="folder"> 收藏夹整理</label>
+            <button id="fast-run" class="btn primary" type="button" disabled>开始自动整理</button>
+            <button id="fast-stop" class="btn danger" type="button" hidden>停止快速模式</button>
+            <span class="muted" id="fast-status"></span>
+          </div>
+          <ol id="fast-steps" class="fast-steps" hidden></ol>
+        </div>
+        <div id="manual-mode-panel" class="mode-panel" hidden>
+          <span class="muted">手动模式：请按下方「获取收藏明细 → 收藏夹画像 → 内容整理 / 收藏夹整理」自行逐步操作。</span>
         </div>
       </section>
 
@@ -146,9 +172,9 @@
 
       <div class="route-stack">
         <div class="route-tabs">
-          <button class="route-tab active" data-route="content-route">内容整理</button>
+          <button class="route-tab active" data-route="profile-route">收藏夹画像</button>
+          <button class="route-tab" data-route="content-route">内容整理</button>
           <button class="route-tab" data-route="folder-route">收藏夹整理</button>
-          <button class="route-tab" data-route="profile-route">收藏夹画像</button>
         </div>
 
         <div id="folder-route" class="route-panel" style="display:none">
@@ -185,18 +211,18 @@
       </section>
       </div>
 
-      <div id="profile-route" class="route-panel" style="display:none">
+      <div id="profile-route" class="route-panel">
         <section class="card">
           <h2>🧭 收藏夹画像生成 / 重建</h2>
           <p class="desc">对本地已扫描的全部内容按上下文窗口分批压缩，再综合生成简介、主题、适合收纳范围和明显范围外内容。收藏夹名称只作弱提示；只有扫描完整的收藏夹可生成画像。默认收藏夹是未分拣收件箱，不生成画像。</p>
-          <div class="row">
+          <div class="row profile-tools-row">
             <button id="profile-refresh" class="btn ghost">刷新列表</button>
             <button id="profile-select-all" class="btn ghost">全选 active</button>
             <button id="profile-select-none" class="btn ghost">清空选择</button>
             <button id="profile-generate" class="btn primary">生成缺失 / 过期画像</button>
             <button id="profile-rebuild" class="btn ghost">重建所选画像</button>
             <button id="profile-stop" class="btn danger">停止</button>
-            <label class="model-pick">画像请求间隔 (秒)
+            <label class="inline-label profile-interval-label">画像请求间隔 (秒)
               <input id="profile-request-interval" type="number" min="0.5" max="60"
                      step="0.5" value="2" class="num-input">
             </label>
@@ -210,7 +236,7 @@
         </section>
       </div>
 
-      <div id="content-route" class="route-panel">
+      <div id="content-route" class="route-panel" style="display:none">
       <!-- 步骤 2：LLM 分析 -->
       <section class="card">
         <h2>🤖 LLM 归类分析</h2>
@@ -424,6 +450,19 @@
     </div>
     <div class="modal-foot">
       <button id="test-run" class="btn primary">开始测试</button>
+    </div>
+  </div>
+</div>
+
+<!-- 快速模式完成提示 -->
+<div id="fast-done-modal" class="modal" style="display:none">
+  <div class="modal-box compact-modal">
+    <div class="modal-head"><span id="fast-done-title">快速模式已完成</span><button id="fast-done-close" class="mini">关闭</button></div>
+    <div class="modal-body">
+      <p id="fast-done-text"></p>
+    </div>
+    <div class="modal-foot">
+      <button id="fast-done-ok" class="btn primary">确定</button>
     </div>
   </div>
 </div>

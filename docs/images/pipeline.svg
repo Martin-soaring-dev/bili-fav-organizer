@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 420" role="img" aria-label="业务流水线">
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9" fill="none" stroke="#0F766E" stroke-width="1.2" stroke-linecap="round"/>
+    </marker>
+    <style>
+      .t-h { font: 600 13px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #0F3D3A; }
+      .t-b { font: 500 12px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #1E293B; }
+      .t-s { font: 400 11px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #64748B; }
+      .t-n { font: 600 12px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #FFFFFF; }
+      .t-r { font: 500 11px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #B45309; }
+    </style>
+  </defs>
+
+  <rect width="680" height="420" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="28" y="32" class="t-h">业务流水线 · 快速模式可自动跑到「人工复核」节点</text>
+  <text x="28" y="50" class="t-s">手动模式可逐步执行；两种模式最终写操作都必须人工确认</text>
+
+  <!-- 主干 -->
+  <rect x="40" y="78" width="200" height="44" rx="8" fill="#0F766E"/>
+  <text x="56" y="98" class="t-n">⓿ 连接配置</text>
+  <text x="56" y="114" class="t-s" fill="#CCFBF1">扫码 Cookie + 激活模型</text>
+
+  <path d="M140 122 V148" stroke="#0F766E" stroke-width="1.2" marker-end="url(#a2)"/>
+
+  <rect x="40" y="156" width="200" height="44" rx="8" fill="#14B8A6"/>
+  <text x="56" y="176" class="t-n">❶ 获取收藏明细</text>
+  <text x="56" y="192" class="t-s" fill="#CCFBF1">刷新目录 → 扫描（补齐式）</text>
+
+  <path d="M140 200 V226" stroke="#0F766E" stroke-width="1.2" marker-end="url(#a2)"/>
+
+  <rect x="40" y="234" width="200" height="44" rx="8" fill="#2DD4BF"/>
+  <text x="56" y="254" class="t-n" fill="#134E4A">🧭 收藏夹画像</text>
+  <text x="56" y="270" class="t-s">全选 → 生成缺失 / 过期画像</text>
+
+  <!-- 分支 -->
+  <path d="M140 278 V300" stroke="#0F766E" stroke-width="1.2"/>
+  <path d="M140 300 H320" stroke="#0F766E" stroke-width="1.2"/>
+  <path d="M140 300 H140 V318" stroke="#0F766E" stroke-width="1.2" marker-end="url(#a2)"/>
+  <path d="M320 300 V318" stroke="#0F766E" stroke-width="1.2" marker-end="url(#a2)"/>
+
+  <!-- 内容整理 -->
+  <rect x="40" y="326" width="200" height="52" rx="8" fill="#F0FDFA" stroke="#14B8A6"/>
+  <text x="56" y="346" class="t-b">❷ LLM 归类分析</text>
+  <text x="56" y="364" class="t-s">加载预归类方案 → 人工逐条复核</text>
+
+  <!-- 收藏夹整理 -->
+  <rect x="220" y="326" width="200" height="52" rx="8" fill="#F0FDFA" stroke="#14B8A6"/>
+  <text x="236" y="346" class="t-b">❷ 生成 AI 合并建议</text>
+  <text x="236" y="364" class="t-s">编辑合并组 → 人工复核后提交</text>
+
+  <!-- 右侧规则 -->
+  <rect x="450" y="78" width="200" height="300" rx="10" fill="#FFFBEB" stroke="#FCD34D"/>
+  <text x="550" y="104" text-anchor="middle" class="t-r">安全与规则</text>
+
+  <rect x="466" y="122" width="168" height="56" rx="8" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="550" y="142" text-anchor="middle" class="t-b">默认收藏夹 = 收件箱</text>
+  <text x="550" y="160" text-anchor="middle" class="t-s">只移出、不移入</text>
+  <text x="550" y="174" text-anchor="middle" class="t-s">不生成画像</text>
+
+  <rect x="466" y="190" width="168" height="56" rx="8" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="550" y="210" text-anchor="middle" class="t-b">画像完整性门槛</text>
+  <text x="550" y="228" text-anchor="middle" class="t-s">有内容的 active 夹</text>
+  <text x="550" y="242" text-anchor="middle" class="t-s">必须有当前完整画像</text>
+
+  <rect x="466" y="258" width="168" height="56" rx="8" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="550" y="278" text-anchor="middle" class="t-b">执行原则</text>
+  <text x="550" y="296" text-anchor="middle" class="t-s">先加入目标夹</text>
+  <text x="550" y="310" text-anchor="middle" class="t-s">成功后再从原夹删除</text>
+
+  <rect x="466" y="326" width="168" height="36" rx="8" fill="#FFFFFF" stroke="#FDE68A"/>
+  <text x="550" y="342" text-anchor="middle" class="t-b">快速模式停在复核前</text>
+  <text x="550" y="356" text-anchor="middle" class="t-s">不自动提交 / 不自动写回</text>
+</svg>

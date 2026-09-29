@@ -37,7 +37,7 @@ jobs:
           foreach ($name in @("config.json", "secrets.json", "data", "server.log", "write_operations.jsonl")) {
             if (Test-Path (Join-Path $releaseDir $name)) { throw "Refusing to package local/private data: $name" }
           }
-          Copy-Item "启动.bat" "$releaseDir/启动.bat"
+          Copy-Item "BiliFavOrganizer.bat" "$releaseDir/BiliFavOrganizer.bat"
           Copy-Item "packaging/使用说明.txt" "$releaseDir/使用说明.txt"
           $version = $env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]', '-'
           $zip = "BiliFavOrganizer-Windows-x64-$version.zip"

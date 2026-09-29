@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 220" role="img" aria-label="B站收藏夹智能整理">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9" fill="none" stroke="#0F766E" stroke-width="1.2" stroke-linecap="round"/>
+    </marker>
+    <style>
+      .t-title { font: 700 22px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #0F3D3A; }
+      .t-sub { font: 400 13px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #1E293B; }
+      .t-badge { font: 500 12px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #0F766E; }
+      .t-step { font: 600 11px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #FFFFFF; }
+      .t-step2 { font: 400 11px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #134E4A; }
+    </style>
+  </defs>
+
+  <rect width="680" height="220" rx="16" fill="#F0FDFA" stroke="#99F6E4" stroke-width="1"/>
+
+  <!-- 左上角装饰 -->
+  <circle cx="52" cy="42" r="18" fill="#CCFBF1"/>
+  <circle cx="78" cy="34" r="10" fill="#5EEAD4"/>
+  <path d="M42 58 C42 40, 70 40, 70 58" fill="#0F766E"/>
+
+  <text x="110" y="48" class="t-title">B站收藏夹智能整理</text>
+  <text x="110" y="72" class="t-sub">用 LLM 按内容归类收藏 · 本地运行 · 人工复核后才写回 B 站</text>
+
+  <!-- 四阶段徽章 -->
+  <g transform="translate(40, 110)">
+    <rect width="130" height="36" rx="8" fill="#0F766E"/>
+    <text x="65" y="17" text-anchor="middle" class="t-step">❶ 获取收藏明细</text>
+    <text x="65" y="30" text-anchor="middle" class="t-step">扫描 · 断点续扫</text>
+  </g>
+  <path d="M178 128 H198" stroke="#0F766E" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <g transform="translate(206, 110)">
+    <rect width="130" height="36" rx="8" fill="#14B8A6"/>
+    <text x="65" y="17" text-anchor="middle" class="t-step">❷ LLM 归类</text>
+    <text x="65" y="30" text-anchor="middle" class="t-step">画像驱动</text>
+  </g>
+  <path d="M344 128 H364" stroke="#0F766E" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <g transform="translate(372, 110)">
+    <rect width="130" height="36" rx="8" fill="#2DD4BF"/>
+    <text x="65" y="17" text-anchor="middle" class="t-step2">❸ 预归类方案</text>
+    <text x="65" y="30" text-anchor="middle" class="t-step2">逐条人工复核</text>
+  </g>
+  <path d="M510 128 H530" stroke="#0F766E" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <g transform="translate(538, 110)">
+    <rect width="110" height="36" rx="8" fill="#99F6E4"/>
+    <text x="55" y="17" text-anchor="middle" class="t-step2">❹ 确认执行</text>
+    <text x="55" y="30" text-anchor="middle" class="t-step2">先加后删</text>
+  </g>
+
+  <!-- 底部标签 -->
+  <rect x="40" y="168" width="100" height="26" rx="13" fill="#FFFFFF" stroke="#5EEAD4"/>
+  <text x="90" y="185" text-anchor="middle" class="t-badge">收藏夹画像</text>
+  <rect x="152" y="168" width="100" height="26" rx="13" fill="#FFFFFF" stroke="#5EEAD4"/>
+  <text x="202" y="185" text-anchor="middle" class="t-badge">快速模式</text>
+  <rect x="264" y="168" width="110" height="26" rx="13" fill="#FFFFFF" stroke="#5EEAD4"/>
+  <text x="319" y="185" text-anchor="middle" class="t-badge">默认夹收件箱</text>
+  <rect x="386" y="168" width="120" height="26" rx="13" fill="#FFFFFF" stroke="#5EEAD4"/>
+  <text x="446" y="185" text-anchor="middle" class="t-badge">本地 SQLite 索引</text>
+  <rect x="518" y="168" width="122" height="26" rx="13" fill="#FFFFFF" stroke="#5EEAD4"/>
+  <text x="579" y="185" text-anchor="middle" class="t-badge">Windows 便携版</text>
+</svg>
