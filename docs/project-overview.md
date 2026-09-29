@@ -37,9 +37,7 @@ bili-fav-organizer/
 │   └── style.css          # 样式（~32 KB）
 ├── tests/                 # 单元测试（unittest，26 个用例）
 ├── docs/
-│   ├── README.md          # 离线接口文档索引
 │   ├── design/            # 实施方案（扫描/SQLite、持久索引、供应商兼容）
-│   ├── fav/ login/ video/ misc/   # bilibili-API-collect 离线副本
 │   └── project-overview.md        # 本文档
 ├── packaging/使用说明.txt  # Windows 便携版说明
 ├── .github/workflows/release-windows.yml   # tag 触发 PyInstaller 打包
@@ -50,7 +48,7 @@ bili-fav-organizer/
 └── requirements.txt       # fastapi / uvicorn / requests / qrcode / browsercookie …
 ```
 
-**体量**：后端约 5700 行 Python，前端约 1700 行 JS + HTML/CSS，接口文档约 100 KB，测试约 350 行。
+**体量**：后端约 5700 行 Python，前端约 1700 行 JS + HTML/CSS，测试约 350 行。
 
 ---
 
@@ -286,7 +284,6 @@ tests/
 | `docs/design/scan-sqlite-migration-plan.md` | 扫描策略状态机、SQLite 迁移、完成性校验 |
 | `docs/design/persistent-index-folder-profiles.md` | 持久视频索引、夹生命周期、画像门槛、上下文预检、默认夹规则 |
 | `docs/design/provider-api-compatibility.md` | 供应商 API 差异（max_tokens / max_completion_tokens / 模型元数据来源） |
-| `docs/README.md` | bilibili-API-collect 离线接口文档对照表 |
 
 ---
 
@@ -309,7 +306,7 @@ tests/
 7. **`data/` 目录残留 JSON**（`analysis.json`、`folders.json` 等）：迁移后可能只是历史兼容，可确认后清理或在文档标注「仅迁移用」。
 8. **`server.log` 在仓库中**：建议加入 `.gitignore`（当前已有 `secrets.json`/`data/` 忽略规则，需确认 log）。
 9. **依赖版本未锁定**：`requirements.txt` 无版本号，便携版构建结果可能随上游漂移，CI 可考虑 `pip freeze` 产物或 `requirements.lock`。
-10. **文档语言混杂**：`provider-api-compatibility.md` 为英文，其余为中文；统一或双语皆可，但建议在 docs/README 标明。
+10. **文档语言混杂**：`provider-api-compatibility.md` 为英文，其余为中文；统一或双语皆可，建议在每篇文档开头标明语言。
 
 ---
 

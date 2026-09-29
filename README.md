@@ -88,7 +88,7 @@ Windows 也可双击 **`BiliFavOrganizer.bat`**：首次会检查并安装 Pytho
 | 模块 | 职责 |
 |------|------|
 | `server.py` | FastAPI 主程序：REST API、后台任务、SSE 事件 |
-| `bili_api.py` | B 站接口：WBI 签名、节流、批量读写 |
+| `bili_api.py` | B 站网页接口封装：会话、节流、批量读写 |
 | `llm_analyzer.py` | 归类 / 画像 / 合并建议；上下文预算与 TPM 限流 |
 | `store.py` | SQLite：目录、视频索引、画像、方案、供应商模型 |
 | `static/` | 原生 HTML / CSS / JS 单页 UI |
@@ -188,8 +188,7 @@ bili-fav-organizer/
 ├── tests/                    # 单元测试
 ├── docs/
 │   ├── images/               # README 图示
-│   ├── design/               # 实施方案
-│   └── …/                    # B 站接口离线文档
+│   └── design/               # 实施方案
 ├── packaging/使用说明.txt
 ├── BiliFavOrganizer.bat/.ps1 # Windows 启动脚本
 ├── BiliFavOrganizer.spec     # PyInstaller 配置
@@ -206,7 +205,6 @@ bili-fav-organizer/
 | [docs/design/persistent-index-folder-profiles.md](docs/design/persistent-index-folder-profiles.md) | 持久索引、画像门槛、默认夹规则 |
 | [docs/design/provider-api-compatibility.md](docs/design/provider-api-compatibility.md) | 供应商 API 差异与模型规格来源 |
 | [docs/project-overview.md](docs/project-overview.md) | 项目全景梳理 |
-| [docs/README.md](docs/README.md) | B 站接口离线文档对照 |
 
 ---
 
@@ -234,7 +232,15 @@ pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 | **Qwen Code** | 阿里云通义千问团队的编程智能体 CLI，擅长仓库级代码阅读、修改与终端任务 | [GitHub · QwenLM/qwen-code](https://github.com/QwenLM/qwen-code) · [Qwen 官网](https://qwen.ai) |
 | **ChatGPT** | OpenAI 的对话式 AI 助手，在方案讨论、文案与代码协作方面提供了帮助 | [chatgpt.com](https://chatgpt.com) · [OpenAI](https://openai.com) |
 
-同时也感谢 [bilibili-API-collect](https://github.com/pskdje/bilibili-API-collect) 社区整理的 B 站接口文档（离线副本见 [docs/README.md](docs/README.md)）。
+---
+
+## 免责声明
+
+- 本项目为**非官方**个人工具，与哔哩哔哩（bilibili）及其运营方**无任何关联**，亦未获其授权或认可。
+- 本项目仅供个人学习与研究，**请勿用于商业用途**。
+- 本项目仅在你本机运行、处理你自己的账号数据；请自行遵守哔哩哔哩用户协议及相关法律法规。
+- 使用本工具产生的一切后果（包括但不限于账号风控、数据变更）由使用者自行承担。
+- 本项目按「现状」提供，不附带任何明示或默示担保。
 
 ---
 

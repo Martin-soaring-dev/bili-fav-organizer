@@ -19,7 +19,7 @@ class DefaultFolderDetectionTests(unittest.TestCase):
         self.assertEqual({"默认收藏夹"}, server._default_folder_names(FOLDERS))
 
     def test_detected_by_attr_bit_when_renamed(self):
-        # B 站 attr 位域 bit1=0 表示默认收藏夹（docs/fav/info.md）
+        # B 站 attr 位域 bit1=0 表示默认收藏夹
         rows = [
             {"media_id": "9", "title": "改过名", "count": 2, "attr": 1},
             {"media_id": "2", "title": "硬件", "count": 3, "attr": 3},

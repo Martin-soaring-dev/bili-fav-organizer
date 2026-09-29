@@ -90,3 +90,11 @@ __pycache__/
 *.old
 bili_ck_profile/
 .playwright-cli/
+.playwright-mcp/
+
+# 第三方接口文档 —— 不在公开仓库再分发（备份见 master 分支）
+docs/fav/
+docs/misc/
+docs/login/
+docs/video/
+docs/README.md

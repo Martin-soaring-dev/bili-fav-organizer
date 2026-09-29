@@ -117,7 +117,7 @@ DEFAULT_FAVORITE_NAME = "默认收藏夹"
 def _folder_attr_is_default(folder: dict) -> bool | None:
     """attr 位域 bit1=0 表示默认收藏夹；没有 attr 时返回 None（未知）。
 
-    docs/fav/info.md：bit0=是否私有，bit1=0 默认收藏夹 / 1 非默认收藏夹。
+    位域约定：bit0=是否私有，bit1=0 默认收藏夹 / 1 非默认收藏夹。
     """
     attr = folder.get("attr") if isinstance(folder, dict) else None
     if attr is None:
