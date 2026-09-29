@@ -28,7 +28,7 @@
 ```
 bili-fav-organizer/
 ├── server.py              # FastAPI 主程序（~3530 行）· HTTP API + 后台任务编排
-├── bili_api.py            # B 站网页 API 封装（~960 行）· Cookie/WBI/收藏夹读写
+├── bili_api.py            # B 站网页 API 封装（~960 行）· 会话、节流、收藏夹读写
 ├── llm_analyzer.py        # LLM 归类与画像生成（~1200 行）· 批处理/上下文预算/限流
 ├── store.py               # SQLite 数据层（~1240 行）· 迁移/索引/画像/供应商模型
 ├── static/                # 前端（原生 HTML/CSS/JS，无构建）
@@ -67,7 +67,7 @@ flowchart TB
     end
 
     subgraph Core["核心模块"]
-        BA["bili_api.BiliSession<br/>WBI 签名 · 节流 · 写日志"]
+        BA["bili_api.BiliSession<br/>登录态与签名 · 节流 · 写日志"]
         LLM["llm_analyzer<br/>批处理 · 上下文预算 · TPM 限流"]
         ST["store.py<br/>SQLite · WAL"]
     end
@@ -128,7 +128,7 @@ flowchart TB
 
 ### 4.2 `bili_api.py` — B 站接口层
 
-- **认证**：Cookie 解析（手动/浏览器读取）、CSRF（bili_jct）、WBI 签名（`_wbi_sign`）
+- **认证**：Cookie 解析（手动/浏览器读取）、CSRF、请求签名
 - **读取**：`list_folders` / `get_folder_info` / `iter_folder_videos`（分页）/ `get_folder_resource_ids` / `get_resource_infos_bulk`
 - **写入**：`create_folder` / `rename_folder` / `update_folder_intro` / `delete_folder` / `clean_invalid_folder` / `add_to_folder` / `move_batch` / `batch_delete`
 - **安全**：读写全局节流、风控错误（`RateLimitedError`）立即停、不确定写（`WriteUncertainError`）标记 `unknown` 人工复核、写操作 JSONL 审计日志
