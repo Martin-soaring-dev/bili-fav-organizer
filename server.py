@@ -98,7 +98,7 @@ DEFAULT_CONFIG = {
     "api_key": "",
     "model": "qwen3-8b",
     "active_model_id": "",
-    "scan_interval": 10,        # 收藏夹请求最小间隔(秒)
+    "scan_interval": 2,         # 收藏夹请求最小间隔(秒)
     "analyze_concurrency": 1,   # LLM 分析并发数(仅影响模型请求)，1~4
     "analyze_batch": 20,        # 逻辑批大小上限，1~1000；发送前按上下文预算拆分
     "analyze_max_tokens": 32768,  # 单次输出上限；部分模型将思考计入此限制
@@ -106,7 +106,7 @@ DEFAULT_CONFIG = {
     "model_tpm_limit": 20000, # 模型每分钟 token 上限；用于画像分页和本地限流
     "profile_request_interval": 2.0, # 画像分批请求的最小间隔，减少模型接口限流
     "scan_scope": "all",        # 扫描范围: all=全部收藏夹 / default=仅默认收藏夹
-    "write_interval": 2,        # 执行阶段的写操作基准间隔(秒)，实际再加 0~1.5s 随机抖动
+    "write_interval": 2,        # 执行阶段的写操作固定间隔(秒)
     "folder_merge_interval": 2,
     "apply_batch": 1000,        # 批量 move / batch-del 的单批条数，硬上限 1000
 }
@@ -1211,7 +1211,7 @@ def scan(body: Optional[ScanIn] = None):
         try:
             cfg = load_config()
             session = bili_api.BiliSession(get_session_cookie())
-            session.read_interval = max(2, int(cfg.get("scan_interval", 10) or 10))
+            session.read_interval = max(2, int(cfg.get("scan_interval", 2) or 2))
             APP["session"] = session
             emit("info", f"开始扫描（请求间隔 ≥{session.read_interval} 秒）", kind="scan_start")
 
