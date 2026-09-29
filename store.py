@@ -39,11 +39,11 @@ FOLDER_MERGE_STATE_FILE = LEGACY_DATA_DIR / "folder_merge_state.json"
 FOLDER_MERGE_DRAFT_FILE = LEGACY_DATA_DIR / "folder_merge_draft.json"
 
 _lock = threading.RLock()
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 _DATASET_DEFAULTS = {
     "analysis": {}, "plan": {}, "apply_state": {}, "scan_done": [],
     "scan_selection": [], "folder_merge_plan": [], "folder_merge_draft": [],
-    "folder_merge_state": {},
+    "folder_merge_state": {}, "analysis_scope_key": "",
 }
 _LEGACY_FILES = {
     "folders": FOLDERS_FILE, "videos": VIDEOS_FILE,
@@ -201,7 +201,9 @@ def _initialize():
             );
             CREATE INDEX IF NOT EXISTS idx_folder_items_resource ON folder_items(resource_key);
             CREATE TABLE IF NOT EXISTS analyses (
-                resource_key TEXT PRIMARY KEY, record_json TEXT NOT NULL
+                resource_key TEXT PRIMARY KEY, record_json TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'stale',
+                dependent_ids TEXT NOT NULL DEFAULT '[]'
             );
             CREATE TABLE IF NOT EXISTS plans (
                 resource_key TEXT PRIMARY KEY, record_json TEXT NOT NULL
@@ -254,6 +256,15 @@ def _initialize():
             conn.execute("ALTER TABLE folders ADD COLUMN archived_at TEXT")
         if "directory_order" not in folder_columns:
             conn.execute("ALTER TABLE folders ADD COLUMN directory_order INTEGER NOT NULL DEFAULT 0")
+        # v6：分析结果的可查询状态位。status='stale' 表示所依赖的画像已变化，需要重算。
+        # dependent_ids 在分析落库时冻结，记录「这条结论当初参考了哪几个夹」，
+        # 之后内容挪动不会追溯性地把它判为过期，避免执行完方案就触发全量重算。
+        analysis_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(analyses)")}
+        if "status" not in analysis_columns:
+            conn.execute("ALTER TABLE analyses ADD COLUMN status TEXT NOT NULL DEFAULT 'stale'")
+        if "dependent_ids" not in analysis_columns:
+            conn.execute("ALTER TABLE analyses ADD COLUMN dependent_ids TEXT NOT NULL DEFAULT '[]'")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_analyses_status ON analyses(status)")
         row = conn.execute("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").fetchone()
         if row is None:
             has_data = any(conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
@@ -597,6 +608,12 @@ def save_folder_profile(media_id: str, profile: dict) -> None:
                      (str(media_id), _json(profile), time.strftime("%Y-%m-%d %H:%M:%S")))
 
 
+def delete_folder_profile(media_id: str) -> bool:
+    with _transaction() as conn:
+        cur = conn.execute("DELETE FROM folder_profiles WHERE media_id=?", (str(media_id),))
+        return cur.rowcount > 0
+
+
 def clear_videos():
     with _transaction() as conn:
         conn.execute("DELETE FROM videos")
@@ -737,12 +754,76 @@ def load_folder_item_counts() -> dict[str, int]:
             conn.close()
 
 
-def save_analysis(items: dict):
+def save_analysis(items: dict, meta: dict | None = None):
+    """写入 LLM 分析结果。
+
+    meta: {resource_key: {"status": str, "dependent_ids": list[str]}}
+    dependent_ids 记录这条结论当初参考了哪些收藏夹的画像，落库后冻结；
+    之后内容挪动不会追溯性地把它判为过期，避免执行完方案就触发全量重算。
+    """
+    meta = meta or {}
     with _transaction() as conn:
         for key, rec in (items or {}).items():
-            conn.execute("""INSERT INTO analyses(resource_key,record_json) VALUES(?,?)
-                          ON CONFLICT(resource_key) DO UPDATE SET record_json=excluded.record_json""",
-                         (str(key), _json(rec)))
+            row_meta = meta.get(str(key)) or {}
+            conn.execute(
+                """INSERT INTO analyses(resource_key,record_json,status,dependent_ids)
+                   VALUES(?,?,?,?)
+                   ON CONFLICT(resource_key) DO UPDATE SET
+                     record_json=excluded.record_json,
+                     status=excluded.status,
+                     dependent_ids=excluded.dependent_ids""",
+                (str(key), _json(rec), str(row_meta.get("status") or "current"),
+                 _json(sorted(row_meta.get("dependent_ids") or []))))
+
+
+def load_analysis_rows() -> dict:
+    """{resource_key: {"record": dict, "status": str, "dependent_ids": list}}"""
+    with _lock:
+        conn = _connect()
+        try:
+            return {str(r["resource_key"]): {
+                "record": json.loads(r["record_json"]),
+                "status": str(r["status"] or "stale"),
+                "dependent_ids": json.loads(r["dependent_ids"] or "[]"),
+            } for r in conn.execute(
+                "SELECT resource_key,record_json,status,dependent_ids FROM analyses")}
+        finally:
+            conn.close()
+
+
+def analysis_status_map() -> dict:
+    """{resource_key: status}，用于判断哪些条目还需要重算。"""
+    with _lock:
+        conn = _connect()
+        try:
+            return {str(r["resource_key"]): str(r["status"] or "stale") for r in conn.execute(
+                "SELECT resource_key,status FROM analyses")}
+        finally:
+            conn.close()
+
+
+def set_analysis_statuses(updates: dict):
+    """updates: {resource_key: (status, dependent_ids)}"""
+    with _transaction() as conn:
+        for key, (status, deps) in (updates or {}).items():
+            conn.execute("UPDATE analyses SET status=?,dependent_ids=? WHERE resource_key=?",
+                         (str(status), _json(sorted(deps or [])), str(key)))
+
+
+def mark_all_analyses_stale():
+    """候选收藏夹集合变了（新建/归档/删除）：所有结论的可选前提都变了，一律重算。"""
+    with _transaction() as conn:
+        conn.execute("UPDATE analyses SET status='stale' WHERE status<>'stale'")
+
+
+def analysis_status_counts() -> dict:
+    with _lock:
+        conn = _connect()
+        try:
+            return {str(r["status"]): int(r["c"]) for r in conn.execute(
+                "SELECT status,COUNT(*) c FROM analyses GROUP BY status")}
+        finally:
+            conn.close()
 
 
 def load_analysis_raw() -> dict:
@@ -812,6 +893,9 @@ def load_scan_done() -> list: return _get_dataset("scan_done")
 def clear_scan_done(): _set_dataset("scan_done", [])
 def save_scan_selection(folder_ids: list): _set_dataset("scan_selection", [str(x) for x in folder_ids])
 def load_scan_selection() -> list: return _get_dataset("scan_selection")
+# 候选收藏夹集合指纹：变了说明「可选去向」变了，需要让全部分析结论作废重算
+def save_analysis_scope_key(key: str): _set_dataset("analysis_scope_key", str(key or ""))
+def load_analysis_scope_key() -> str: return str(_get_dataset("analysis_scope_key") or "")
 def save_folder_merge_plan(groups: list): _set_dataset("folder_merge_plan", groups or [])
 def load_folder_merge_plan() -> list: return _get_dataset("folder_merge_plan")
 def save_folder_merge_draft(groups: list): _set_dataset("folder_merge_draft", groups or [])

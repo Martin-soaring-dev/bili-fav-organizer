@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import threading
@@ -33,7 +35,7 @@ from typing import Optional
 import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -112,15 +114,61 @@ DEFAULT_CONFIG = {
 DEFAULT_FAVORITE_NAME = "默认收藏夹"
 
 
+def _folder_attr_is_default(folder: dict) -> bool | None:
+    """attr 位域 bit1=0 表示默认收藏夹；没有 attr 时返回 None（未知）。
+
+    docs/fav/info.md：bit0=是否私有，bit1=0 默认收藏夹 / 1 非默认收藏夹。
+    """
+    attr = folder.get("attr") if isinstance(folder, dict) else None
+    if attr is None:
+        return None
+    try:
+        return (int(attr) & 2) == 0
+    except (TypeError, ValueError):
+        return None
+
+
+def _default_folder(folders: list | None = None) -> dict | None:
+    """找出唯一的「默认收藏夹」：优先标题，其次 attr 位域（bit1=0）。
+
+    只在能**明确**识别时返回，否则返回 None：既不会把所有收藏夹误判成默认夹，
+    也不会因为「目录里只有一个夹」就把它当成默认夹而拒绝往里移入内容。
+    """
+    rows = store.load_folders() if folders is None else folders
+    if not rows:
+        return None
+    for f in rows:
+        if (f.get("title") or "").strip() == DEFAULT_FAVORITE_NAME:
+            return f
+    flagged = [f for f in rows if _folder_attr_is_default(f) is True]
+    return flagged[0] if len(flagged) == 1 else None
+
+
+def _default_folder_ids(folders: list | None = None) -> set[str]:
+    row = _default_folder(folders)
+    return {str(row["media_id"])} if row else set()
+
+
+def _default_folder_names(folders: list | None = None) -> set[str]:
+    """默认收藏夹当前的名称，用作「禁止移入」的精确匹配串。
+
+    识别不出默认收藏夹时返回空集合：宁可不拦，也不要误拦正常的移入。
+    """
+    row = _default_folder(folders)
+    title = str((row or {}).get("title") or "").strip()
+    return {title} if title else set()
+
+
 def _default_folder_destination_error(items: list[dict]) -> str:
     """拒绝把内容移入或新建为默认收藏夹。"""
+    forbidden = _default_folder_names()
     for item in items:
         action = str(item.get("action", "skip"))
         target = str(item.get("target_folder", "")).strip()
         new_name = str(item.get("create_new_name") or target).strip()
-        if action == "move_to_existing" and target == DEFAULT_FAVORITE_NAME:
+        if action == "move_to_existing" and target in forbidden:
             return "默认收藏夹只能移出，不能作为内容整理的移入目标；请修改该条方案"
-        if action == "create_new" and new_name == DEFAULT_FAVORITE_NAME:
+        if action == "create_new" and new_name in forbidden:
             return "默认收藏夹只能移出，不能作为新建或移入目标；请修改该条方案"
     return ""
 
@@ -136,14 +184,6 @@ PROVIDER_PRESETS = [
     {"key": "amd_token_factory", "name": "AMD Token Factory", "base_url": "https://developer.amd.com.cn/radeon/api/v1"},
     {"key": "custom", "name": "其他", "base_url": ""},
 ]
-
-
-def _pick_default_folder(folders: list) -> dict | None:
-    """找出"默认收藏夹"：优先按标题，找不到则取列表第一个（B站把默认夹排在最前）。"""
-    for f in folders:
-        if (f.get("title") or "").strip() == "默认收藏夹":
-            return f
-    return folders[0] if folders else None
 
 
 # ============ 配置 ============
@@ -261,9 +301,12 @@ def resolved_llm_settings(cfg: dict | None = None) -> dict:
         out["model"] = model.get("name") or out.get("model") or ""
         out["_provider_id"] = provider.get("id")
         out["_provider_name"] = provider.get("name")
-        if model.get("context_tokens") and model.get("context_source") not in ("unknown", "legacy_unknown"):
+        # 模型记录的规格是权威来源：只要模型上写了值就采用，
+        # 不再按 context_source/output_source 的来源标记放行，避免界面兜底值
+        # 长期压过模型真实规格（例如把上下文抬到 1,000,000）。
+        if int(model.get("context_tokens") or 0) > 0:
             out["model_context_tokens"] = int(model["context_tokens"])
-        if model.get("max_output_tokens") and model.get("output_source") not in ("unknown", "legacy_unknown"):
+        if int(model.get("max_output_tokens") or 0) > 0:
             out["analyze_max_tokens"] = llm_analyzer.cap_completion_tokens(
                 provider.get("base_url") or "", model.get("name") or "",
                 int(model["max_output_tokens"]))
@@ -1111,6 +1154,21 @@ def _folder_view(folders: list) -> dict:
 @app.get("/api/folders")
 def folders_get():
     return _folder_view(store.load_folders())
+
+
+def _refresh_folder_directory() -> list | None:
+    """拉取 B 站收藏夹目录并落库。成功返回目录，失败返回 None（不抛到调用方）。"""
+    if APP.get("scan_run") and APP["scan_run"].get("running"):
+        return None
+    try:
+        session = APP.get("session") or bili_api.BiliSession(get_session_cookie())
+        folders = session.list_folders()
+        store.save_folders(folders)
+        APP["folders"] = folders
+        return folders
+    except Exception as e:
+        emit("warn", f"自动刷新收藏夹目录失败：{e}")
+        return None
 
 
 @app.post("/api/folders/refresh")
@@ -2028,12 +2086,17 @@ def _folder_profile_is_current(profile: dict | None, folder: dict, scan: dict, i
 def _current_folder_profile_contexts() -> list[dict]:
     """Profiles are useful to automation only when bound to the current complete snapshot."""
     folders = store.load_folders()
+    default_ids = _default_folder_ids(folders)
     profiles = store.load_folder_profiles()
     scans = store.load_folder_scan_states()
     item_counts = store.load_folder_item_counts()
     result = []
     for folder in folders:
         mid = str(folder["media_id"])
+        # 默认收藏夹是「未分拣收件箱」，不是归类目标：它不携带画像，
+        # 里面的内容要按其余收藏夹的画像去归属。
+        if mid in default_ids:
+            continue
         profile = profiles.get(mid)
         count = item_counts.get(mid, 0)
         scan = scans.get(mid, {})
@@ -2062,8 +2125,12 @@ def _current_folder_profile_contexts() -> list[dict]:
 
 
 def _organization_profile_readiness() -> dict:
-    """Require a complete current profile for every non-empty active folder."""
+    """Require a complete current profile for every non-empty active folder.
+
+    默认收藏夹是未分拣收件箱，不要求画像，也不算作归类目标。
+    """
     folders = store.load_folders()
+    default_ids = _default_folder_ids(folders)
     profiles = store.load_folder_profiles()
     scans = store.load_folder_scan_states()
     item_counts = store.load_folder_item_counts()
@@ -2071,11 +2138,15 @@ def _organization_profile_readiness() -> dict:
     missing = []
     current_versions = {}
     empty_count = 0
+    inbox_count = 0
     for folder in folders:
         mid = str(folder["media_id"])
         remote_count = int(folder.get("count", 0) or 0)
         if remote_count <= 0:
             empty_count += 1
+            continue
+        if mid in default_ids:
+            inbox_count += 1
             continue
         required.append(mid)
         scan = scans.get(mid, {})
@@ -2102,14 +2173,21 @@ def _organization_profile_readiness() -> dict:
                         "scan_complete": complete,
                         "profile_state": "stale" if profile else "missing",
                         "reason": reason})
-    ready = bool(required) and not missing
+    # 只有收件箱（默认收藏夹）有内容时也算就绪：LLM 仍可给出「新建收藏夹」建议，
+    # 不会因为缺少可移入的现成夹而完全无法整理。
+    ready = (not missing) and bool(required or inbox_count)
     return {"ready": ready, "required_count": len(required),
             "current_count": len(required) - len(missing),
-            "empty_count": empty_count, "missing": missing,
+            "empty_count": empty_count, "inbox_count": inbox_count,
+            "inbox_folder_ids": sorted(default_ids),
+            "missing": missing,
             "profile_versions": current_versions,
-            "message": ("所有有内容的 active 收藏夹均有当前完整画像。" if ready else
-                        ("没有可用于整理的非空 active 收藏夹。" if not required else
-                         "请先完成未扫描的收藏夹扫描，再生成或重建这些收藏夹的画像。"))}
+            "message": (("所有有内容的 active 收藏夹均有当前完整画像。默认收藏夹是未分拣收件箱，"
+                         "其中内容会按其余收藏夹的画像归类。") if ready else
+                        ("没有可整理的收藏夹内容。" if not (required or inbox_count) else
+                         ("默认收藏夹是未分拣收件箱，其中内容会按其余收藏夹的画像归类，"
+                          "如需调整去向请在预归类方案中修改。" if not required else
+                          "请先完成未扫描的收藏夹扫描，再生成或重建这些收藏夹的画像。")))}
 
 
 @app.get("/api/organization/readiness")
@@ -2120,6 +2198,7 @@ def organization_readiness_get():
 @app.get("/api/folder-profiles")
 def folder_profiles_get():
     folders = store.load_folders()
+    default_ids = _default_folder_ids(folders)
     profiles = store.load_folder_profiles()
     scans = store.load_folder_scan_states()
     item_counts = store.load_folder_item_counts()
@@ -2137,8 +2216,22 @@ def folder_profiles_get():
                      "scan_state": scan.get("status", "never"),
                      "scan_completed_at": scan.get("snapshot_completed_at"),
                      "profile": profile,
+                     "is_default": mid in default_ids,
                      "profile_state": "current" if current else ("stale" if profile else "missing")})
     return {"folders": rows, "run": APP.get("folder_profile_run") or {"running": False}}
+
+
+@app.delete("/api/folder-profiles/{media_id}")
+def folder_profile_delete(media_id: str):
+    """删除某个收藏夹的本地画像；不会改动 B 站收藏夹简介。"""
+    folders = store.load_folders()
+    folder = next((row for row in folders if str(row.get("media_id")) == str(media_id)), None)
+    if not folder:
+        return JSONResponse({"ok": False, "error": "收藏夹不存在或已归档"}, status_code=404)
+    if not store.delete_folder_profile(str(media_id)):
+        return JSONResponse({"ok": False, "error": "该收藏夹当前没有可删除的画像"}, status_code=404)
+    emit("warn", f"已删除「{folder.get('title')}」的收藏夹画像；如需恢复请重新生成")
+    return {"ok": True, "media_id": str(media_id), "title": folder.get("title", "")}
 
 
 class FolderIntroPublishIn(BaseModel):
@@ -2209,12 +2302,18 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
     current = APP.get("folder_profile_run") or {}
     if current.get("running"):
         return JSONResponse({"ok": False, "error": "收藏夹画像任务已在运行"}, status_code=409)
-    active = {str(folder["media_id"]): folder for folder in store.load_folders()}
+    folders = store.load_folders()
+    active = {str(folder["media_id"]): folder for folder in folders}
+    default_ids = _default_folder_ids(folders)
     requested = list(dict.fromkeys(str(mid) for mid in body.folder_ids))
     if not requested:
         return JSONResponse({"ok": False, "error": "请至少选择一个 active 收藏夹"}, status_code=400)
     if any(mid not in active for mid in requested):
         return JSONResponse({"ok": False, "error": "所选收藏夹不存在或已归档，请刷新列表"}, status_code=400)
+    if any(mid in default_ids for mid in requested):
+        return JSONResponse({"ok": False,
+                             "error": "默认收藏夹是未分拣收件箱，不生成画像；"
+                                      "请取消勾选默认收藏夹，只对目标收藏夹生成画像"}, status_code=400)
     cfg = load_config()
     llm_cfg = make_llm_config(cfg)
     context_tokens = int(resolved_llm_settings(cfg).get("model_context_tokens", 32768) or 32768)
@@ -2366,10 +2465,114 @@ def folder_profiles_stop():
 class AnalyzeIn(BaseModel):
     continuous: bool = False
     folder_ids: Optional[list[str]] = None
+    # incremental：只分析尚无结果的（有结果就跳过，不重复劳动）
+    # stale_too：额外重算画像已过期的结论
+    # force_all：忽略结果标记，全部重发 LLM
+    rebuild: str = "incremental"   # incremental / missing_only / stale_too / force_all
 
 
 class AnalyzeContinuousIn(BaseModel):
     enabled: bool
+
+
+# ---------- 分析结果状态：细粒度失效 ----------
+
+_ANALYSIS_STATUS_STAMP = {"key": ""}
+
+
+def _analysis_candidate_key(known_ids: set) -> str:
+    """候选收藏夹集合指纹（只含 ID，不含画像版本）。
+
+    集合变了（新建/归档/删除夹）意味着「可选去向」变了，所有结论都要重判；
+    某张画像内容变了则只影响**参考过它**的条目，由 dependent_ids 精确判定。
+    """
+    return hashlib.sha256("|".join(sorted(str(x) for x in known_ids)).encode("utf-8")).hexdigest()[:16]
+
+
+def _analysis_dependency_ids(video: dict, result: dict, known_ids: set, name_to_id: dict) -> list:
+    """这条结论参考了哪些收藏夹的画像：内容当时所在的夹 + 被推荐去的夹。"""
+    deps = {str(x) for x in (video.get("folder_ids") or [])}
+    if video.get("source_folder_id"):
+        deps.add(str(video["source_folder_id"]))
+    deps.intersection_update(str(x) for x in known_ids)
+    if str(result.get("action", "")) == "move_to_existing":
+        target = name_to_id.get(str(result.get("recommended", "")).strip())
+        if target:
+            deps.add(str(target))
+    return sorted(deps)
+
+
+def _analysis_scope_maps(known_ids: set) -> dict:
+    folders = store.load_folders()
+    return {
+        "known_ids": set(str(x) for x in known_ids),
+        "name_to_id": {str(f.get("title", "")): str(f["media_id"]) for f in folders},
+    }
+
+
+def refresh_analysis_statuses(force: bool = False) -> dict:
+    """重算并落库每条分析结果的 status（current / stale）。
+
+    判据：该条冻结的 dependent_ids 中，任一收藏夹的画像版本与当时记录的不一致
+    → stale。没有画像依赖的条目（例如只在收件箱里、建议新建）不会因为改画像而过期。
+    候选集合变化则整体置为 stale。结果按指纹缓存，重复调用很便宜。
+    """
+    readiness = _organization_profile_readiness()
+    revisions = {str(k): str(v) for k, v in readiness["profile_versions"].items()}
+    known_ids = set(revisions) | {str(x) for x in (readiness.get("inbox_folder_ids") or [])}
+    candidate_key = _analysis_candidate_key(known_ids)
+    revision_key = hashlib.sha256(
+        "|".join(f"{k}:{v}" for k, v in sorted(revisions.items())).encode("utf-8")).hexdigest()[:16]
+    stamp = f"{candidate_key}|{revision_key}"
+    scope = _analysis_scope_maps(known_ids)
+    counts = store.analysis_status_counts()
+    result = {"current": int(counts.get("current", 0)), "stale": int(counts.get("stale", 0)),
+              "candidate_key": candidate_key, "profile_ready": bool(readiness["ready"]),
+              "scope": scope}
+    if not force and _ANALYSIS_STATUS_STAMP["key"] == stamp:
+        result["cached"] = True
+        return result
+    if store.load_analysis_scope_key() != candidate_key:
+        # 可选去向变了：一律作废，下面的逐条判定会把无关的重新算回 current
+        store.mark_all_analyses_stale()
+        store.save_analysis_scope_key(candidate_key)
+    videos = {str(v.get("bvid")): v for v in store.load_videos() if v.get("bvid")}
+    updates = {}
+    for key, row in store.load_analysis_rows().items():
+        record = row["record"]
+        deps = list(row["dependent_ids"] or [])
+        if not deps:
+            # 旧数据没冻结依赖：按当前归属回填一次，此后不再随内容移动而改变
+            deps = _analysis_dependency_ids(
+                videos.get(str(record.get("bvid") or key), {}), record,
+                scope["known_ids"], scope["name_to_id"])
+        stored = {str(k): str(v) for k, v in
+                  (record.get("organization_profile_versions") or {}).items()}
+        status = "stale" if any(revisions.get(d) != stored.get(d) for d in deps) else "current"
+        if row["status"] != status or row["dependent_ids"] != deps:
+            updates[key] = (status, deps)
+    if updates:
+        store.set_analysis_statuses(updates)
+    _ANALYSIS_STATUS_STAMP["key"] = stamp
+    counts = store.analysis_status_counts()
+    return {"current": int(counts.get("current", 0)), "stale": int(counts.get("stale", 0)),
+            "candidate_key": candidate_key, "profile_ready": bool(readiness["ready"]),
+            "scope": scope, "rewritten": len(updates)}
+
+
+def _pending_analysis_ids(rebuild_mode: str, statuses: dict) -> set:
+    """按「重建索引」档位返回已视为完成、不必再发给 LLM 的 key 集合。
+
+    默认（incremental）与「有结果就跳过」一致：库里有分析结论就不再算，
+    只有真正新增（无记录）的才会发送。画像过期不会自动触发大规模重算。
+    """
+    if rebuild_mode == "force_all":
+        return set()
+    if rebuild_mode == "stale_too":
+        # 只跳过仍然有效的结论；过期的会重发
+        return {k for k, v in statuses.items() if v == "current"}
+    # incremental / missing_only：有记录就算完成，忽略过期
+    return set(statuses.keys())
 
 
 def _make_analyzer(folders: list[str], folder_profiles: list[dict] | None = None) -> llm_analyzer.LLMAnalyzer:
@@ -2377,9 +2580,14 @@ def _make_analyzer(folders: list[str], folder_profiles: list[dict] | None = None
         emit("warn", f"上下文保护正在拆分 {item_count} 条内容后重试"
                      f"（估算输入 {prompt_tokens} + 输出上限 {requested_output}，"
                      f"上下文 {context_tokens}）", phase="analyze")
+    folder_rows = store.load_folders()
+    default_folder = _default_folder(folder_rows)
+    inbox = ([{"id": str(default_folder["media_id"]),
+               "name": str(default_folder.get("title") or DEFAULT_FAVORITE_NAME)}]
+             if default_folder else [])
     return llm_analyzer.LLMAnalyzer(make_llm_config(),
         folders=folders, folder_profiles=folder_profiles,
-        on_context_split=report_context_split)
+        default_folders=inbox, on_context_split=report_context_split)
 
 
 @app.post("/api/analyze/start")
@@ -2398,6 +2606,10 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
     profile_versions = dict(readiness["profile_versions"])
     selected = {str(x) for x in (body.folder_ids or store.load_scan_selection())}
     profiled_folder_ids = {row["id"] for row in _current_folder_profile_contexts()}
+    # 默认收藏夹（未分拣收件箱）没有画像，但它的内容正是要被归类的对象，必须纳入候选。
+    inbox_folder_ids = set(readiness.get("inbox_folder_ids") or _default_folder_ids())
+    known_folder_ids = profiled_folder_ids | inbox_folder_ids
+
     def candidates():
         rows = store.load_videos()
         result = []
@@ -2405,7 +2617,7 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
             memberships = {str(x) for x in (video.get("folder_ids") or [])}
             if video.get("source_folder_id"):
                 memberships.add(str(video["source_folder_id"]))
-            memberships.intersection_update(profiled_folder_ids)
+            memberships.intersection_update(known_folder_ids)
             if (video.get("bvid") and memberships and
                     (not selected or bool(selected.intersection(memberships)))):
                 result.append(video)
@@ -2424,12 +2636,20 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
     cfg = load_config()
     concurrency = max(1, min(4, int(cfg.get("analyze_concurrency", 1) or 1)))
     batch_size = max(1, min(1000, int(cfg.get("analyze_batch", 20) or 20)))
+    rebuild_mode = str(body.rebuild or "incremental")
+    if rebuild_mode not in ("incremental", "missing_only", "stale_too", "force_all"):
+        rebuild_mode = "incremental"
+    # 启动时先算一遍待发送量，方便前端区分「候选总量」和「本次要跑几条」
+    done_ids0 = _pending_analysis_ids(rebuild_mode, store.analysis_status_map())
+    pending0 = sum(1 for v in videos if v.get("bvid")
+                   and v["bvid"] not in done_ids0 and not _is_invalid(v))
     state = APP["analyze_run"] = {"running": True, "done": 0, "total": len(videos),
+                                  "pending": pending0,
                                   "failed": 0, "stop": False, "error": None,
                                   "concurrency": concurrency, "batch": batch_size,
                                   "continuous": bool(body.continuous), "waiting": False,
                                   "round": 0, "selected_ids": sorted(selected),
-                                  "inflight": 0}
+                                  "rebuild": rebuild_mode, "inflight": 0}
 
     def run():
         from concurrent.futures import ThreadPoolExecutor
@@ -2447,29 +2667,41 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                 current_done = state["done"]
                 current_total = state["total"]
                 current_failed = state["failed"]
+                current_pending = state.get("pending", 0)
             # 请求已交给模型：立即推送浅色「等待响应」进度。
             emit("progress", "", phase="analyze", kind="analyze_progress",
                  done=current_done, total=current_total, failed=current_failed,
-                 inflight=inflight)
+                 inflight=inflight, pending=current_pending)
             err = ""
             try:
                 got = analyzer.analyze_batch(batch)
             except Exception as e:
                 got = {}
                 err = f"{type(e).__name__}: {e}"
-            okn = 0
+            # 落库时冻结「这条结论当初参考了哪几个夹」，之后内容挪动不会追溯性判它过期
+            scope = ctx["scope"]
+            batch_by_bvid = {str(v.get("bvid")): v for v in batch if v.get("bvid")}
+            records, meta = {}, {}
+            for bvid, res in (got or {}).items():
+                if not res:
+                    continue
+                stored = dict(res)
+                stored["organization_profile_versions"] = profile_versions
+                deps = _analysis_dependency_ids(batch_by_bvid.get(str(bvid), {}), stored,
+                                                scope["known_ids"], scope["name_to_id"])
+                records[str(bvid)] = stored
+                meta[str(bvid)] = {"status": "current", "dependent_ids": deps}
+            okn = len(records)
             with lock:
-                for bvid, res in (got or {}).items():
-                    if res:
-                        stored = dict(res)
-                        stored["organization_profile_versions"] = profile_versions
-                        store.save_analysis({bvid: stored})
-                        okn += 1
+                if records:
+                    store.save_analysis(records, meta)
                 state["failed"] += (len(batch) - okn)
                 state["inflight"] = max(0, state["inflight"] - len(batch))
+                state["pending"] = max(0, int(state.get("pending", 0)) - len(batch))
                 ctx["done"] += len(batch)
                 state["done"] = ctx["done"]
                 d, f, inflight = ctx["done"], state["failed"], state["inflight"]
+                pend = state.get("pending", 0)
                 if len(batch) and okn == 0:
                     fail_streak[0] += 1
                 else:
@@ -2479,10 +2711,10 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                     state["error"] = state.get("error") or err
             # 静默进度事件：前端只推进度条，不写日志
             emit("progress", "", phase="analyze", kind="analyze_progress",
-                 done=d, total=state["total"], failed=f, inflight=inflight)
+                 done=d, total=state["total"], failed=f, inflight=inflight, pending=pend)
             emit("ok" if okn == len(batch) else "warn",
                  f"批完成 +{okn}/{len(batch)} · 累计 {d}/{len(videos)}（失败 {f}）",
-                 phase="analyze", done=d, total=state["total"], inflight=inflight)
+                 phase="analyze", done=d, total=state["total"], inflight=inflight, pending=pend)
             if err:
                 emit("err", f"本批异常（{len(batch)} 条均失败）：{err}", phase="analyze")
             # 连续多批全失败 → 疑似配置/额度问题，自动停止
@@ -2492,26 +2724,27 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                             f"请检查模型配置、key 或额度", phase="analyze", kind="analyze_end")
 
         try:
-            ctx = {"done": 0}
+            ctx = {"done": 0, "scope": _analysis_scope_maps(known_folder_ids)}
             emit("info", f"开始分析，批大小 {batch_size} × 并发 {concurrency}"
-                 + ("，已启用连续分析" if state["continuous"] else ""),
-                 phase="analyze", kind="analyze_start", done=0, total=len(videos), failed=0,
-                 inflight=0)
+                 + ("，已启用连续分析" if state["continuous"] else "")
+                 + {"stale_too": "，含画像过期项",
+                    "missing_only": "，只补缺失（忽略画像过期）",
+                    "force_all": "，强制全部重算"}.get(rebuild_mode, "，只分析新增"),
+                 phase="analyze", kind="analyze_start", done=0, total=len(videos),
+                 pending=pending0, failed=0, inflight=0)
             while not state["stop"]:
                 current = candidates()
-                existing = store.load_analysis_raw()
-                current_analysis_ids = {
-                    bvid for bvid, row in existing.items()
-                    if {str(k): str(v) for k, v in
-                        (row.get("organization_profile_versions") or {}).items()} == profile_versions
-                }
+                # 用持久化的 status 判定「哪些已经完成」，而不是每次比对整个画像字典
+                ctx["scope"] = refresh_analysis_statuses()["scope"]
+                done_ids = _pending_analysis_ids(rebuild_mode, store.analysis_status_map())
                 pending = [v for v in current if v.get("bvid")
-                           and v["bvid"] not in current_analysis_ids
+                           and v["bvid"] not in done_ids
                            and v["bvid"] not in failed_session
                            and not _is_invalid(v)]
                 state["total"] = len(current)
+                state["pending"] = len(pending)
                 state["done"] = len([v for v in current if _is_invalid(v) or
-                                     v.get("bvid") in current_analysis_ids])
+                                     v.get("bvid") in done_ids])
                 ctx["done"] = state["done"]
                 if pending:
                     state["waiting"] = False
@@ -2524,15 +2757,10 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                     else:
                         with ThreadPoolExecutor(max_workers=concurrency) as ex:
                             list(ex.map(lambda b: work(b, ctx), batches))
-                    after = store.load_analysis_raw()
-                    after_current_ids = {
-                        bvid for bvid, row in after.items()
-                        if {str(k): str(v) for k, v in
-                            (row.get("organization_profile_versions") or {}).items()} == profile_versions
-                    }
+                    refresh_analysis_statuses(force=True)
+                    after_status = store.analysis_status_map()
                     failed_session.update(v["bvid"] for v in pending
-                                          if v["bvid"] not in after_current_ids and
-                                          v["bvid"] not in current_analysis_ids)
+                                          if after_status.get(v["bvid"]) != "current")
                     continue
                 scan_running = bool(APP.get("scan_run") and APP["scan_run"].get("running"))
                 if not state["continuous"] or not scan_running:
@@ -2562,12 +2790,13 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
             state["waiting"] = False
 
     threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(videos)}
+    return {"ok": True, "started": True, "total": len(videos), "pending": pending0}
 
 
 @app.get("/api/analyze/status")
 def analyze_status():
     return APP["analyze_run"] or {"running": False, "done": 0, "total": 0,
+                                  "pending": 0,
                                   "failed": 0, "stop": False, "error": None}
 
 
@@ -2596,9 +2825,12 @@ def get_plan():
     """返回分析结果 + 现有收藏夹，供前端展示归类方案。"""
     readiness = _organization_profile_readiness()
     profile_versions = readiness["profile_versions"]
+    status_info = refresh_analysis_statuses()
+    statuses = store.analysis_status_map()
     analysis = store.load_analysis()
     folders = store.load_folders()
     active_folder_ids = {str(folder["media_id"]) for folder in folders}
+    inbox_folder_ids = set(readiness.get("inbox_folder_ids") or _default_folder_ids(folders))
     videos = {}
     for video in store.load_videos():
         if not video.get("bvid"):
@@ -2612,11 +2844,12 @@ def get_plan():
     stale_analysis_count = 0
     decorated_analysis = []
     for row in analysis:
-        current = (readiness["ready"] and
-                   {str(k): str(v) for k, v in
-                    (row.get("organization_profile_versions") or {}).items()} == profile_versions)
+        key = str(row.get("bvid", ""))
+        # 直接读持久化的 status：判定口径与「开始分析」完全一致，不会两处算出不同结果
+        current = readiness["ready"] and statuses.get(key) == "current"
         stale_analysis_count += int(not current)
-        decorated_analysis.append({**row, "organization_profile_current": current})
+        decorated_analysis.append({**row, "organization_profile_current": current,
+                                   "analysis_status": statuses.get(key, "missing")})
     analysis = decorated_analysis
     current_profiles = _current_folder_profile_contexts()
     profile_current_ids = [row["id"] for row in current_profiles]
@@ -2633,18 +2866,21 @@ def get_plan():
             continue
         row = dict(item)
         if row.get("action") in ("move_to_existing", "create_new"):
+            # 与底层分析结果共用同一个 status，避免「分析有效但方案过期」这类矛盾显示
             row["profile_context_current"] = (
-                readiness["ready"] and
-                {str(k): str(v) for k, v in
-                 (row.get("organization_profile_versions") or {}).items()} == profile_versions)
+                readiness["ready"] and statuses.get(str(bvid)) == "current")
         else:
             row["profile_context_current"] = True
         plan_rows[bvid] = row
     return {
         "analysis": analysis,
+        # 移入目标只列有当前画像的收藏夹；默认收藏夹是未分拣收件箱，永远不是移入目标。
         "existing_folders": [folder for folder in folders
-                             if str(folder["media_id"]) in profile_current_id_set],
+                             if str(folder["media_id"]) in profile_current_id_set
+                             and str(folder["media_id"]) not in inbox_folder_ids],
         "videos_by_bvid": videos,
+        "inbox_folder_ids": sorted(inbox_folder_ids),
+        "inbox_folder_names": sorted(_default_folder_names(folders)),
         "invalid_count": len(invalid),
         "invalid_bvids": invalid,
         "profile_current_ids": profile_current_ids,
@@ -2652,6 +2888,12 @@ def get_plan():
         "profile_stale_ids": profile_stale_ids,
         "organization_profile_versions": profile_versions,
         "stale_analysis_count": stale_analysis_count,
+        "analysis_counts": {
+            "current": int(status_info["current"]),
+            "stale": int(status_info["stale"]),
+            "not_analyzed": max(0, len(videos) - len(analysis)),
+            "total_videos": len(videos),
+        },
         "plan": plan_rows,
     }
 
@@ -2700,12 +2942,13 @@ def apply_plan(body: PlanReview):
             return JSONResponse({"ok": False, "error": readiness["message"],
                                  "readiness": readiness}, status_code=409)
         profile_versions = readiness["profile_versions"]
+        refresh_analysis_statuses()
+        statuses = store.analysis_status_map()
         if any(str(item.get("action", "skip")) in classification_actions and
-               {str(k): str(v) for k, v in
-                (item.get("organization_profile_versions") or {}).items()} != profile_versions
+               statuses.get(str(item.get("bvid", ""))) != "current"
                for item in body.apply_list):
             return JSONResponse({"ok": False,
-                                 "error": "归类结果对应的画像版本已变化或缺少版本记录，请重新分析后再确认"},
+                                 "error": "有条目的归类结果已过期或缺少分析记录，请重新分析后再确认"},
                                 status_code=409)
         profile_ids = {row["id"] for row in _current_folder_profile_contexts()}
         profile_names = {str(folder.get("title", "")) for folder in store.load_folders()
@@ -2848,12 +3091,12 @@ def apply_start():
         if not readiness["ready"]:
             return JSONResponse({"ok": False, "error": readiness["message"],
                                  "readiness": readiness}, status_code=409)
+        refresh_analysis_statuses()
+        statuses = store.analysis_status_map()
         if any(it.get("action") in ("move_to_existing", "create_new") and
-               {str(k): str(v) for k, v in
-                (it.get("organization_profile_versions") or {}).items()} !=
-               readiness["profile_versions"] for _, it in pending):
+               statuses.get(str(b)) != "current" for b, it in pending):
             return JSONResponse({"ok": False,
-                                 "error": "待执行方案对应的画像版本已变化或缺少版本记录，请重新分析并确认方案"},
+                                 "error": "待执行方案里有已过期的归类结果，请重新分析并确认方案"},
                                 status_code=409)
     total = len(pending)
     already_done = len([1 for it in plan.values() if it.get("status") == "done"])
@@ -2976,10 +3219,10 @@ def apply_start():
                     emit("err", state["error"], phase="apply", kind="apply_end",
                          done=state["done"], total=total)
                     return
+                refresh_analysis_statuses()
+                current_statuses = store.analysis_status_map()
                 if any(it.get("action") in ("move_to_existing", "create_new") and
-                       {str(k): str(v) for k, v in
-                        (it.get("organization_profile_versions") or {}).items()} !=
-                       readiness_now["profile_versions"] for _, it in pending):
+                       current_statuses.get(str(b)) != "current" for b, it in pending):
                     state["error"] = "画像版本在执行前发生变化，未发送移动请求；请重新分析并确认方案"
                     state["stop"] = True
                     emit("err", state["error"], phase="apply", kind="apply_end",
@@ -3004,6 +3247,7 @@ def apply_start():
                          done=state["done"], total=total)
                     return
             name_to_id = {f["title"]: str(f["media_id"]) for f in live_folders}
+            forbidden_names = _default_folder_names(live_folders)
             active_ids = {str(f["media_id"]) for f in live_folders}
             latest_videos = {}
             for video in store.load_videos():
@@ -3058,7 +3302,7 @@ def apply_start():
                         delete_groups.setdefault(src, []).append(entry)
                 elif action == "create_new":
                     name = (item.get("create_new_name") or item.get("target_folder") or "").strip()
-                    if name == DEFAULT_FAVORITE_NAME:
+                    if name in forbidden_names:
                         fail_entries([entry], "默认收藏夹只能移出，不能作为新建或移入目标")
                     elif not name:
                         fail_entries([entry], f"{bvid} 新收藏夹名为空")
@@ -3067,7 +3311,7 @@ def apply_start():
                 else:
                     target_name = (item.get("target_folder") or "").strip()
                     target_id = name_to_id.get(target_name, "")
-                    if target_name == DEFAULT_FAVORITE_NAME:
+                    if target_name in forbidden_names:
                         fail_entries([entry], "默认收藏夹只能移出，不能作为内容整理的移入目标")
                     elif not target_id:
                         fail_entries([entry], f"{bvid} 目标收藏夹「{target_name}」不存在")
@@ -3155,6 +3399,12 @@ def apply_start():
         finally:
             save_progress()
             state["running"] = False
+            # 内容整理结束后自动刷新一次收藏夹目录，避免 remote_count 与本地关系长期不一致
+            if state.get("ok") or state.get("deleted"):
+                refreshed = _refresh_folder_directory()
+                if refreshed is not None:
+                    emit("ok", f"已自动刷新收藏夹目录：{len(refreshed)} 个",
+                         phase="apply", kind="folders_refreshed")
 
     threading.Thread(target=run, daemon=True).start()
     return {"ok": True, "started": True, "total": total, "batch_size": batch_size,
@@ -3189,12 +3439,47 @@ def status():
 
 
 # ============ 静态页面 ============
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+class _NoCacheStatic(StaticFiles):
+    """静态资源不走浏览器启发式缓存。
+
+    否则浏览器按「距 Last-Modified 时间的 10%」自算新鲜期，
+    在有效期内直接用本地缓存、不回源，导致改完前端刷新后看到的还是旧页面。
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
+
+app.mount("/static", _NoCacheStatic(directory=str(STATIC_DIR)), name="static")
+
+
+def _asset_version() -> str:
+    """静态资源版本号：内容变就变，浏览器缓存自动失效。
+
+    index.html 里的 ?v= 在这里按实际内容改写，无需手动维护版本号。
+    否则改了 app.js 却忘改 ?v=，浏览器会用「旧 JS + 新 HTML」：
+    旧脚本一旦引用已被移除的元素就抛错，整个前端初始化中断。
+    """
+    parts = []
+    for name in ("app.js", "style.css"):
+        try:
+            st = (STATIC_DIR / name).stat()
+            parts.append(f"{name}:{st.st_mtime_ns}:{st.st_size}")
+        except OSError:
+            parts.append(name)
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:10]
+
+
+_ASSET_VERSION_RE = re.compile(r"\?v=[A-Za-z0-9._-]*")
 
 
 @app.get("/")
 def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+    html = _ASSET_VERSION_RE.sub("?v=" + _asset_version(), html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
 def main():

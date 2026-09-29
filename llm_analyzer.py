@@ -180,7 +180,8 @@ class ContextBatchNeedsSplit(ContextBudgetError):
 class LLMAnalyzer:
     def __init__(self, config: LLMConfig, folders: list[str] | None = None,
                  folder_profiles: list[dict] | None = None,
-                 on_context_split=None):
+                 on_context_split=None,
+                 default_folders: list[dict] | None = None):
         self.config = config
         self.folders = list(folders or [])
         self.folder_contexts = {
@@ -191,6 +192,15 @@ class LLMAnalyzer:
             str(row.get("id")): str(row.get("name") or "")
             for row in (folder_profiles or []) if isinstance(row, dict) and row.get("id")
         }
+        # 未分拣收件箱（默认收藏夹）：它没有画像，但 _pack 要能把「内容在此」标注出来，
+        # 否则模型会把它当成已经归位的内容，只凭一个大杂烩画像就判「留在原处」。
+        self.default_folder_ids = {str(row.get("id")) for row in (default_folders or [])
+                                   if isinstance(row, dict) and row.get("id")}
+        self.default_folder_names = [str(row.get("name") or "")
+                                     for row in (default_folders or [])]
+        for row in (default_folders or []):
+            if isinstance(row, dict) and row.get("id"):
+                self.folder_names_by_id.setdefault(str(row["id"]), str(row.get("name") or ""))
         self._local = threading.local()
         self._sys = None
         self.on_context_split = on_context_split
@@ -219,15 +229,20 @@ class LLMAnalyzer:
                     "confidence": row.get("confidence"),
                 })
             profile_context = json.dumps(profile_rows, ensure_ascii=False, separators=(",", ":"))
+            inbox_label = "、".join(n for n in self.default_folder_names if n) or "默认收藏夹"
+            inbox_note = (f"「{inbox_label}」——里面的条目**尚未归类**，需要指派到下面有画像的收藏夹"
+                          if self.default_folder_names else "（本次没有收件箱条目）")
             self._sys = (
                 "你是 B 站收藏夹整理助手。任务是判断一批视频各自**归属于哪个收藏夹**。\n"
                 "\n"
                 f"【用户现有收藏夹】（共 {len(self.folders)} 个）\n{fl}\n"
                 "\n【当前有效的收藏夹画像】（所有候选夹均有完整画像，列表不遗漏）\n"
                 f"{profile_context if profile_rows else '（暂无最新画像）'}\n"
+                f"\n【未分拣收件箱】{inbox_note}\n"
                 "\n"
                 "【输入】一个 JSON 对象：\n"
                 '{"videos":[{"id":1,"title":"...","desc":"...","upper":"...",'
+                '"in_default_inbox":true,'
                 '"current_folders":[{"id":"...","name":"...",'
                 '"profile":{"summary":"...","topics":[],"typical_content":[],'
                 '"out_of_scope":[],"coherence":"...","confidence":0.0}}]}, ...]}\n'
@@ -239,22 +254,27 @@ class LLMAnalyzer:
                 "\n"
                 "【规则】\n"
                 "1. 每个输入 id 必须有一条对应结果，id 原样返回，不得遗漏、不得新增。\n"
-                "2. 若 current_folders 中的最新画像清楚表明内容适合留在当前夹，recommended 填当前夹名，"
-                "action=move_to_existing（表示留在现有夹，不会产生移动）。\n"
-                "3. 只有内容明显偏离当前画像，且其他现有夹或新主题有充分依据时才建议移出；"
+                "2. 归类以画像的实际主题和收纳范围为**主要依据**，收藏夹名称只作弱提示；"
+                "不得只凭名称判断内容适合某个夹。先在全部候选画像里比对，选出最合适的一个作为 recommended，"
+                "action=move_to_existing。\n"
+                "3. action=move_to_existing 且 recommended 就是它已经所在的夹时，表示「留在原位、不产生移动」。"
+                "想表达「留下」时也要给出 recommended，不要用 skip 表达「留下」。\n"
+                f"4. in_default_inbox=true 表示这条内容还躺在「{inbox_label}」里**等待分拣**。"
+                "收件箱只是临时入口，不是归属：必须在上面有画像的收藏夹中挑出最合适的一个；"
+                "只有所有画像都明显不符、且新主题清楚时才 action=create_new；"
+                "确实无处可去时才 action=skip。不要因为「暂时放在收件箱也行」就跳过。\n"
+                "5. 内容已经在一个或多个有画像的收藏夹里时，若其中一个夹的画像清楚表明适合留下，"
+                "recommended 填那个夹名。只有内容明显偏离当前画像、且其他夹有充分依据时才建议移出；"
                 "去向不明确时保留原位，不要为了整理而移动。\n"
-                "4. 所有现有收藏夹都提供了当前完整画像。归类必须以画像的实际主题和收纳范围为主要依据，"
-                "收藏夹名称只作弱提示；不得只凭名称判断内容适合某个夹。若所有画像都不匹配，"
-                "只有新主题清楚时才建议新建，否则保留原位或跳过。\n"
-                "5. 仅当标题/简介/UP主 全空或完全无法归类 → action=skip。\n"
-                "6. confidence 为 0~1 的把握程度。\n"
-                "7. 仅当输入条目提供了 current_folders.profile 时，才检查它是否明显偏离该夹画像；"
+                "6. 仅当标题/简介/UP主 全空或完全无法归类 → action=skip。\n"
+                "7. confidence 为 0~1 的把握程度。\n"
+                "8. 仅当输入条目提供了 current_folders.profile 时，才检查它是否明显偏离该夹画像；"
                 "profile_mismatch_folder_ids 只能填本条 current_folders 中有 profile 的原始 ID。"
                 "证据不明确时留空，不要因为收藏夹名称不贴合就判定偏离。\n"
-                "8. profile_mismatch_reason 简短说明证据；没有偏离时留空。\n"
-                "9. 理由务必简短（不超过 20 字），不要展开分析，避免浪费输出长度。\n"
-                "10.「默认收藏夹」只能移出，不能作为任何内容的移入目标；不能建议移入已有的默认收藏夹，也不能把它作为新建收藏夹。"
-                "默认夹内内容若适合当前画像就留在原处；若明显偏离且去向明确，只能建议移往其他有画像的收藏夹或新主题。\n"
+                "9. profile_mismatch_reason 简短说明证据；没有偏离时留空。\n"
+                "10. 理由务必简短（不超过 20 字），不要展开分析，避免浪费输出长度。\n"
+                f"11.「{inbox_label}」只能移出，绝不能作为移入目标：recommended 永远不能填它，"
+                "action=create_new 也不能新建同名收藏夹。\n"
                 "只返回 JSON。"
             )
         return self._sys
@@ -291,6 +311,9 @@ class LLMAnalyzer:
                 current_folders.append(folder)
             if current_folders:
                 item["current_folders"] = current_folders
+            # 待分拣标记：内容还躺在默认收藏夹（收件箱）里，需要被指派归属。
+            if memberships & self.default_folder_ids:
+                item["in_default_inbox"] = True
             out.append(item)
         return out
 
@@ -394,7 +417,7 @@ class LLMAnalyzer:
                                   else ("create_new" if rec else "skip"))
                     # 默认收藏夹永远不是归类目的地。若模型误把它作为去向，降级为无操作，
                     # 避免前端把它误判成“新建收藏夹”或服务端发出移入请求。
-                    if rec == "默认收藏夹":
+                    if rec and (rec in self.default_folder_names or rec == "默认收藏夹"):
                         action = "skip"
                         rec = ""
                     try:
