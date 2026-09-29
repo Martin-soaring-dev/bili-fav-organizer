@@ -96,27 +96,13 @@
               <button id="manage-models-btn" class="btn ghost" type="button">管理模型</button>
               <button id="save-config" class="btn">保存配置</button>
               <button id="test-llm" class="btn ghost">测试模型连接</button>
-            </div>
-            <div id="active-model-info" class="model-static-info">选择供应商与模型后显示地址与参数。</div>
-            <div class="grid2" style="margin-top:8px">
-              <label>最大输出 (tokens)
-                <input id="analyze-max-tokens" type="number" min="256" max="131072"
-                       step="1024" value="32768" class="num-input">
-              </label>
-              <label>模型上下文窗口 (tokens)
-                <input id="model-context-tokens" type="number" min="4096" max="1000000"
-                       step="1024" value="32768" class="num-input">
-              </label>
-              <label>模型 TPM 上限 (tokens/分钟)
+              <label class="model-pick">模型 TPM 上限 (tokens/分钟)
                 <input id="model-tpm-limit" type="number" min="1000" max="10000000"
                        step="1000" value="20000" class="num-input">
               </label>
-              <label>画像请求间隔 (秒)
-                <input id="profile-request-interval" type="number" min="0.5" max="60"
-                       step="0.5" value="2" class="num-input">
-              </label>
             </div>
-            <div class="hint">最大输出是每次回复的上限；画像任务按 TPM 分配分批预算，内容归类会在发送前按上下文窗口和输出上限预检并自动拆分。部分模型的思考也消耗输出预算。上下文窗口与 TPM 优先使用激活模型的属性；画像请求间隔用于控制发送频率。规格来源未知时，这里的数字只是运行回退预算，不代表供应商返回的真实模型上限；请按官方规格手动填写。</div>
+            <div id="active-model-info" class="model-static-info">选择供应商与模型后显示地址与参数。</div>
+            <div class="hint">上下文窗口与最大输出直接读取激活模型的规格（在「管理模型」里修改），这里不再单独设置。画像任务按 TPM 上限分配分批预算，内容归类会在发送前按上下文窗口和输出上限预检并自动拆分；部分模型的思考也消耗输出预算。TPM 上限是本地限流预算，不代表供应商返回的真实限速；规格来源未知时请按官方规格手动填写。</div>
           </div>
         </div>
       </section>
@@ -202,7 +188,7 @@
       <div id="profile-route" class="route-panel" style="display:none">
         <section class="card">
           <h2>🧭 收藏夹画像生成 / 重建</h2>
-          <p class="desc">对本地已扫描的全部内容按上下文窗口分批压缩，再综合生成简介、主题、适合收纳范围和明显范围外内容。收藏夹名称只作弱提示；只有扫描完整的收藏夹可生成画像。</p>
+          <p class="desc">对本地已扫描的全部内容按上下文窗口分批压缩，再综合生成简介、主题、适合收纳范围和明显范围外内容。收藏夹名称只作弱提示；只有扫描完整的收藏夹可生成画像。默认收藏夹是未分拣收件箱，不生成画像。</p>
           <div class="row">
             <button id="profile-refresh" class="btn ghost">刷新列表</button>
             <button id="profile-select-all" class="btn ghost">全选 active</button>
@@ -210,6 +196,10 @@
             <button id="profile-generate" class="btn primary">生成缺失 / 过期画像</button>
             <button id="profile-rebuild" class="btn ghost">重建所选画像</button>
             <button id="profile-stop" class="btn danger">停止</button>
+            <label class="model-pick">画像请求间隔 (秒)
+              <input id="profile-request-interval" type="number" min="0.5" max="60"
+                     step="0.5" value="2" class="num-input">
+            </label>
             <span id="profile-status" class="muted"></span>
           </div>
           <div class="progress" id="profile-progress" style="display:none">
@@ -223,7 +213,7 @@
       <div id="content-route" class="route-panel">
       <!-- 步骤 2：LLM 分析 -->
       <section class="card">
-        <h2>❷ LLM 归类分析</h2>
+        <h2>🤖 LLM 归类分析</h2>
         <p class="desc">批量调用已配置模型，为每个视频推断应归属收藏夹。分类依据是收藏夹的当前画像；只有所有有内容的 active 收藏夹都已完成扫描并生成最新画像后才能分析。批大小是单批上限，发送前会按上下文预算自动拆分。</p>
         <div id="content-profile-readiness" class="profile-gate-status" role="status"></div>
         <div class="row">
@@ -253,6 +243,14 @@
               <option value="4">4</option>
             </select>
           </label>
+          <label class="inline-label">重建索引
+            <select id="analyze-rebuild" title="决定哪些条目会被重新发送给模型">
+              <option value="incremental">不重建（仅分析新增）</option>
+              <option value="stale_too">新增 + 过期重算</option>
+              <option value="force_all">强制全部重算</option>
+            </select>
+          </label>
+          <span class="muted" id="analysis-counts"></span>
         </div>
         <div class="progress" id="analyze-progress" style="display:none">
           <div class="bar analyze-bar">
@@ -265,7 +263,7 @@
 
       <!-- 步骤 3：预归类方案 -->
       <section class="card">
-        <h2>❸ 预归类方案</h2>
+        <h2>📊 预归类方案</h2>
         <p class="desc">默认显示归类统计；点「查看详情」逐条修改目标收藏夹，确认后进入执行。</p>
         <div class="row">
           <button id="plan-load" class="btn primary">加载分析结果</button>
@@ -281,7 +279,7 @@
 
       <!-- 步骤 4：执行 -->
       <section class="card">
-        <h2>❹ 确认执行</h2>
+        <h2>🚀 确认执行</h2>
         <p class="desc">按已确认方案使用 B站批量接口移动视频；失效视频单独批量删除。明确失败会记录后继续，风控或结果不确定时停止。</p>
         <div class="row">
           <button id="apply-start" class="btn primary">开始执行</button>
