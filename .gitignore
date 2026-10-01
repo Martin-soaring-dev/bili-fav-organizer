@@ -2,6 +2,7 @@
 secrets.json
 config.json
 data/
+tests/.test-data/
 server.log
 *.log
 .private/

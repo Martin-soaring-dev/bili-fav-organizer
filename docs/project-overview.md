@@ -1,7 +1,7 @@
 # 项目梳理 · B站收藏夹智能整理
 
-> 整理日期：2026-09-26  
-> 代码版本：`main` @ `22c8ee4`（Merge pull request #1 from Martin-soaring-dev/mimo-beta）  
+> 更新日期：2026-10-02
+> 当前架构试验分支：`new_arch`，从 `main` @ `8950502` 开始
 > 仓库：https://github.com/Martin-soaring-dev/bili-fav-organizer
 
 ---
@@ -31,6 +31,11 @@ bili-fav-organizer/
 ├── bili_api.py            # B 站网页 API 封装（~960 行）· 会话、节流、收藏夹读写
 ├── llm_analyzer.py        # LLM 归类与画像生成（~1200 行）· 批处理/上下文预算/限流
 ├── store.py               # SQLite 数据层（~1240 行）· 迁移/索引/画像/供应商模型
+├── bili_fav/               # 领域规则、计划版本、远端核对、持久任务运行时
+│   ├── domain/organization.py
+│   ├── planning.py
+│   ├── execution.py
+│   └── runtime.py
 ├── static/                # 前端（原生 HTML/CSS/JS，无构建）
 │   ├── index.html         # 单页 UI（~30 KB）
 │   ├── app.js             # 交互逻辑（~142 KB）
@@ -63,7 +68,7 @@ flowchart TB
     subgraph Server["server.py · FastAPI @ 127.0.0.1:8080"]
         API["REST API · /api/*"]
         SSE["SSE · /api/events/stream"]
-        Jobs["后台任务线程<br/>scan / analyze / profile / merge / apply"]
+        Jobs["持久 TaskManager + 单 Worker<br/>scan / analyze / profile / merge / apply"]
     end
 
     subgraph Core["核心模块"]
@@ -108,7 +113,7 @@ flowchart TB
 | 职责 | 说明 |
 |------|------|
 | HTTP API | 约 62 个路由，覆盖登录、配置、扫描、画像、分析、方案、执行、合并 |
-| 后台任务 | `scan_run` / `analyze_run` / `folder_profile_run` / `folder_merge_run` / `apply_run` 全局状态 + 可中断 |
+| 后台任务 | 统一提交到 SQLite 持久 Job 队列；单 Worker 串行执行，前端状态可从 `/api/jobs` 恢复 |
 | 事件总线 | `emit()` + SSE 推送，前端日志/进度实时刷新 |
 | 凭据隔离 | `secrets.json` 单独存放；`/api/config` 只回显 API Key 尾 4 位 |
 | 数据导入导出 | JSON bundle（不含 Cookie / API Key） |
@@ -167,10 +172,13 @@ SQLite（WAL 模式），表结构：
 | `folder_profiles` | 收藏夹画像（绑定快照时间/版本） | `media_id` |
 | `analyses` | 归类分析结果（`status=stale` 表示画像已变需重算） | `resource_key` |
 | `plans` | 已提交的预归类方案 | `resource_key` |
+| `jobs` | 后台任务状态、进度与取消请求 | `id` |
+| `plan_versions` | 内容/合并方案的快照、差异、审批与执行状态 | `id` |
+| `execution_runs` / `execution_operations` | 执行批次与远端写操作日志、核对结果 | `id` |
 | `providers` / `models` | LLM 供应商与模型配置（含 API Key） | `id` |
 | `app_state` | 各类任务状态 JSON（扫描选择/执行状态/合并草稿…） | `name` |
 
-Schema 版本迁移：`schema_migrations` 表 + 启动时幂等升级（当前 v6：分析 `status`/`dependent_ids`）。
+Schema 版本迁移：`schema_migrations` 表 + 启动时幂等升级（当前 v7：持久任务、方案版本、执行日志）。
 
 ### 4.5 前端 `static/`
 
@@ -229,28 +237,31 @@ flowchart LR
 | `unknown` | 超时/无响应，**停止**，需人工复核后移回待操作 |
 | 风控 | 立即停止整个任务 |
 
+### 5.4 架构路线图阶段 1–5（`new_arch`）
+
+| 阶段 | 已落地内容 |
+|------|------------|
+| 1 稳定现有系统 | 后台任务与同步目录/方案写入共享互斥闸门；测试数据、配置与旧数据迁移彼此隔离；不确定的远端写入进入人工复核，不自动重发 |
+| 2 Runtime / Task Manager | SQLite 持久 Job、单 Worker、进度与取消状态、冲突拒绝、重启恢复；重启不会自动重放任务 |
+| 3 Domain / Application | 默认夹识别与目标校验、方案差异/快照判定、远端结果核对已拆为纯领域模块；`server.py` 仍负责 HTTP 与跨模块流程编排 |
+| 4 Plan 一等对象 | 收藏目录、成员关系、视频元数据与画像版本组成基础快照；内容/合并计划都有版本、差异、审批状态，执行前会检查快照是否过期 |
+| 5 Execution Journal + Reconcile | 每次远端写操作先落日志，再按 B 站读接口核对结果；重启时未确认的写入标为 `unknown`，需要人工复核 |
+
 ---
 
 ## 6. 测试现状
 
 ```
 tests/
-├── test_batch_api.py           7 用例 · 批量请求 payload / 错误分类  ✅
-├── test_batch_executor.py      2 用例 · 分组执行 / uncertain 停止   ❌ 2 ERROR
-├── test_default_folder_inbox.py 12 用例 · 默认夹检测/守卫/就绪/删画像 ✅
-├── test_folder_organize_plan.py 3 用例 · 合并计划                    ⚠️ 1 ERROR + 1 FAIL
-└── test_scan_selection.py      1 用例 · 扫描选择往返                 ✅
+├── test_architecture.py       7 用例 · 计划校验/快照/恢复/串行/远端核对 ✅
+├── test_batch_api.py          7 用例 · 批量请求 payload / 错误分类       ✅
+├── test_batch_executor.py     2 用例 · 分组执行 / uncertain 停止        ✅
+├── test_default_folder_inbox.py 13 用例 · 默认夹检测/守卫/就绪/删画像   ✅
+├── test_folder_organize_plan.py 3 用例 · 合并计划                         ✅
+└── test_scan_selection.py     1 用例 · 扫描选择往返                      ✅
 ```
 
-**汇总：26 个用例，22 通过，1 失败，3 错误。**
-
-| 问题 | 用例 | 现象 | 可能原因 |
-|------|------|------|----------|
-| ERROR | `test_groups_and_executes_in_batches`<br/>`test_uncertain_batch_stops_and_requires_review` | `server.APP["apply_run"]` 为 `None` | 测试未正确初始化 `APP["apply_run"]`，或执行器入口签名/初始化方式已变 |
-| ERROR | `test_preserves_completed_identical_group` | 返回 `JSONResponse` 不可下标 | 测试仍按 dict 断言，接口已改成 FastAPI `JSONResponse` |
-| FAIL | `test_rejects_target_as_source` | 期望 400，实际 409 | 冲突语义改为 409，测试未同步 |
-
-> 这些是**测试与实现不同步**，不是核心业务逻辑回归的直接证据；但执行器与合并计划属于高风险写路径，建议优先修复。
+**汇总：33 个用例，33 通过。** 测试通过 `BILI_FAV_ORGANIZER_TEST_MODE` 使用独立的临时数据目录，不读取或备份开发者的本地收藏数据与凭据。
 
 ---
 
@@ -291,8 +302,8 @@ tests/
 
 ### 高优先级（影响正确性/可维护性）
 
-1. **修复失败测试**（4 个）：`test_batch_executor` 初始化 `APP["apply_run"]`、`test_folder_organize_plan` 适配 `JSONResponse` 与 409 语义。写路径没有测试保护风险较高。
-2. **`server.py` 过大**（3500+ 行）：建议按路由域拆分（auth / config / scan / profile / analyze / plan / merge / apply），便于测试与协作。
+1. **继续拆分 `server.py`**（仍承载 HTTP、编排和部分业务流程）：按路由域与应用服务逐步迁移，保持模块边界与现有 API 行为一致。
+2. **补足关键流程测试**：增加扫描状态机、画像门槛、方案 API 与取消/恢复路径的覆盖。
 3. **`app.js` 过大**（142 KB / 570+ 函数级定义）：可按 UI 分区拆模块，或至少用 IIFE/模块化分段。
 
 ### 中优先级
@@ -338,8 +349,8 @@ BiliFavOrganizer.bat
 | SQLite 迁移 + 持久索引 | ✅ 已实施 |
 | 默认夹收件箱规则 | ✅ 有测试保护 |
 | Windows 便携发布 | ✅ CI 自动化 |
-| 测试通过率 | ⚠️ 22/26（4 个需修） |
-| 模块化/可维护性 | ⚠️ 后端单文件过大 |
+| 测试通过率 | ✅ 33/33 |
+| 模块化/可维护性 | 🟡 已建立领域/计划/执行/运行时边界；HTTP 编排仍集中在 `server.py` |
 | 供应商兼容层 | ✅ 有设计文档 + 特判 |
 
 ---

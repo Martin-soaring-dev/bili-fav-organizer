@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1130" viewBox="0 0 1680 1130" role="img" aria-labelledby="title desc">
+  <title id="title">Bili-Fav Organizer 当前分支架构图</title>
+  <desc id="desc">new_arch 分支的浏览器前端、FastAPI 服务、运行时与业务模块、SQLite 持久化和 Bilibili 与 LLM 适配器架构。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7f9fd"/>
+      <stop offset="1" stop-color="#edf3fb"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#172944"/>
+      <stop offset="1" stop-color="#243f68"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#19324f" flood-opacity=".08"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#55708e"/>
+    </marker>
+    <marker id="arrowStart" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="auto">
+      <path d="M10,0 L0,5 L10,10 z" fill="#55708e"/>
+    </marker>
+    <style>
+      text { font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", sans-serif; }
+      .title { font-size: 31px; font-weight: 700; fill: #fff; }
+      .subtitle { font-size: 14px; fill: #c2d1e4; }
+      .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; fill: #89a2c1; }
+      .section { font-size: 14px; font-weight: 700; fill: #354b67; }
+      .card-title { font-size: 19px; font-weight: 700; fill: #1d3048; }
+      .code { font-size: 12px; fill: #71839b; font-family: Consolas, "Cascadia Code", monospace; }
+      .body { font-size: 14px; fill: #42566f; }
+      .small { font-size: 12px; fill: #60748e; }
+      .tiny { font-size: 11px; fill: #70839c; }
+      .white { fill: #fff; }
+      .bold { font-weight: 700; }
+      .connector { fill: none; stroke: #6d86a2; stroke-width: 2; marker-end: url(#arrow); }
+      .connector-both { fill: none; stroke: #6d86a2; stroke-width: 2; marker-start: url(#arrowStart); marker-end: url(#arrow); }
+      .data-link { fill: none; stroke: #8b9db2; stroke-width: 1.8; stroke-dasharray: 5 5; marker-end: url(#arrow); }
+      .pilltext { font-size: 11px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <rect width="1680" height="1130" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1680" height="128" fill="url(#hero)"/>
+  <circle cx="1570" cy="24" r="130" fill="#42618a" opacity=".12"/>
+  <circle cx="1500" cy="132" r="90" fill="#5b81b1" opacity=".10"/>
+
+  <text x="70" y="37" class="eyebrow" fill="#9fb4ce">BILI-FAV ORGANIZER  /  SYSTEM MAP</text>
+  <text x="70" y="79" class="title">当前分支架构</text>
+  <text x="70" y="105" class="subtitle">本地优先 · 人工复核 · 远端写入留痕并回读核对</text>
+  <rect x="1303" y="43" width="298" height="40" rx="20" fill="#ffffff" opacity=".12" stroke="#ffffff" stroke-opacity=".22"/>
+  <circle cx="1327" cy="63" r="5" fill="#73ddb4"/>
+  <text x="1343" y="68" font-size="14" font-weight="700" fill="#fff">new_arch</text>
+  <text x="1422" y="68" font-size="12" fill="#c2d1e4">架构阶段 1–5 已落地</text>
+
+  <!-- Main connectors, placed behind the cards -->
+  <path class="connector-both" d="M490 244 H520"/>
+  <path class="connector" d="M1065 344 V386"/>
+  <path class="data-link" d="M320 710 V770"/>
+  <path class="connector" d="M840 710 V770"/>
+  <path class="connector" d="M1360 710 V770"/>
+
+  <!-- Browser -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="155" width="420" height="189" rx="18" fill="#fff" stroke="#dce5f0"/>
+    <rect x="70" y="155" width="7" height="189" rx="4" fill="#2ba883"/>
+  </g>
+  <text x="99" y="186" class="eyebrow" fill="#2b9a79">CLIENT</text>
+  <text x="99" y="216" class="card-title">浏览器单页工作台</text>
+  <text x="99" y="239" class="code">static/index.html · app.js · style.css</text>
+  <line x1="99" y1="254" x2="460" y2="254" stroke="#e8eef5"/>
+  <text x="99" y="278" class="body">连接配置 · 扫描与内容树 · 收藏夹画像</text>
+  <text x="99" y="301" class="body">LLM 归类 · 方案复核 · 合并与执行</text>
+  <rect x="99" y="314" width="333" height="20" rx="10" fill="#eaf7f2"/>
+  <text x="111" y="328" class="tiny" fill="#287b65">原生 HTML / CSS / JS，无前端构建步骤</text>
+
+  <!-- API server -->
+  <g filter="url(#shadow)">
+    <rect x="520" y="155" width="1090" height="189" rx="18" fill="#fff" stroke="#dce5f0"/>
+    <rect x="520" y="155" width="7" height="189" rx="4" fill="#5378c8"/>
+  </g>
+  <text x="550" y="186" class="eyebrow" fill="#5378c8">HTTP &amp; APPLICATION ORCHESTRATION</text>
+  <text x="550" y="216" class="card-title">FastAPI 服务入口</text>
+  <text x="776" y="216" class="code">server.py · 127.0.0.1:8080</text>
+  <rect x="1394" y="181" width="183" height="27" rx="13.5" fill="#eef3fc"/>
+  <text x="1410" y="199" class="pilltext" fill="#4569b4">REST  /api/*</text>
+  <text x="550" y="245" class="body">登录 / 配置 · folders / scan / library · profiles / analyze / plan</text>
+  <text x="550" y="269" class="body">folder-organize / apply · jobs / execution-runs</text>
+  <line x1="550" y1="283" x2="1577" y2="283" stroke="#e8eef5"/>
+  <circle cx="559" cy="307" r="4" fill="#735cc4"/>
+  <text x="572" y="312" class="small">emit() → /api/events/stream（SSE 实时进度与日志）</text>
+  <text x="1010" y="312" class="small">路由校验、跨模块流程编排、任务提交与状态查询</text>
+
+  <!-- API connection labels -->
+  <rect x="1000" y="352" width="130" height="22" rx="11" fill="#edf2fa"/>
+  <text x="1017" y="367" class="tiny" fill="#536b88">路由 / Job runner</text>
+  <rect x="492" y="221" width="112" height="21" rx="10.5" fill="#eff4f9"/>
+  <text x="502" y="235" class="tiny" fill="#536b88">REST ↔ SSE</text>
+
+  <!-- Application layer -->
+  <rect x="70" y="386" width="1540" height="324" rx="20" fill="#eaf0f8" stroke="#d3dfed"/>
+  <text x="96" y="419" class="section">应用层</text>
+  <text x="159" y="419" class="small">server.py 负责 HTTP 与流程编排；下列模块承载运行时、领域规则、方案和执行核对</text>
+  <rect x="1400" y="400" width="178" height="25" rx="12.5" fill="#fff" stroke="#d8e2ef"/>
+  <text x="1416" y="417" class="tiny" fill="#60748e">单任务 · 互斥写入闸门</text>
+
+  <!-- Runtime card -->
+  <g filter="url(#shadow)">
+    <rect x="95" y="445" width="460" height="240" rx="15" fill="#fff" stroke="#dce5f0"/>
+    <rect x="95" y="445" width="460" height="6" rx="3" fill="#4e82c4"/>
+  </g>
+  <circle cx="122" cy="480" r="14" fill="#eaf2fc"/>
+  <text x="117" y="485" font-size="12" font-weight="700" fill="#3970b4">01</text>
+  <text x="148" y="484" class="card-title">持久任务运行时</text>
+  <text x="119" y="510" class="code">bili_fav/runtime.py · TaskManager</text>
+  <text x="119" y="540" class="body">SQLite Job · 单 Worker 串行执行</text>
+  <text x="119" y="563" class="body">scan / analyze / profile / merge / apply</text>
+  <text x="119" y="586" class="body">进度持久化 · 取消 · 冲突拒绝 · 启动恢复</text>
+  <rect x="119" y="606" width="412" height="56" rx="10" fill="#fff7e8"/>
+  <text x="133" y="629" class="small" fill="#8c6422">重启时 queued/running → interrupted</text>
+  <text x="133" y="649" class="small" fill="#8c6422">不会自动重放；从业务检查点由用户续提</text>
+
+  <!-- Domain and plan card -->
+  <g filter="url(#shadow)">
+    <rect x="610" y="445" width="450" height="240" rx="15" fill="#fff" stroke="#dce5f0"/>
+    <rect x="610" y="445" width="450" height="6" rx="3" fill="#8b68c7"/>
+  </g>
+  <circle cx="637" cy="480" r="14" fill="#f2edfa"/>
+  <text x="632" y="485" font-size="12" font-weight="700" fill="#7651b4">02</text>
+  <text x="663" y="484" class="card-title">领域规则与方案</text>
+  <text x="634" y="510" class="code">domain/organization.py · planning.py</text>
+  <text x="634" y="540" class="body">默认收藏夹作为收件箱 · 目标夹守卫</text>
+  <text x="634" y="563" class="body">画像就绪门槛 · 人工复核项校验</text>
+  <text x="634" y="586" class="body">内容 / 合并计划版本、差异与快照指纹</text>
+  <rect x="634" y="606" width="402" height="56" rx="10" fill="#f4effc"/>
+  <text x="648" y="629" class="small" fill="#684a9c">执行前核对基础快照是否仍然新鲜</text>
+  <text x="648" y="649" class="small" fill="#684a9c">计划必须经人工审批后才能执行</text>
+
+  <!-- Execution card -->
+  <g filter="url(#shadow)">
+    <rect x="1115" y="445" width="470" height="240" rx="15" fill="#fff" stroke="#dce5f0"/>
+    <rect x="1115" y="445" width="470" height="6" rx="3" fill="#dd8b43"/>
+  </g>
+  <circle cx="1142" cy="480" r="14" fill="#fff2e5"/>
+  <text x="1137" y="485" font-size="12" font-weight="700" fill="#bd6d24">03</text>
+  <text x="1168" y="484" class="card-title">执行日志与远端核对</text>
+  <text x="1139" y="510" class="code">bili_fav/execution.py · execution journal</text>
+  <text x="1139" y="540" class="body">发送前记录操作 · 执行后回读验证结果</text>
+  <text x="1139" y="563" class="body">批量移动 / 删除 · 收藏夹生命周期操作</text>
+  <text x="1139" y="586" class="body">先确认目标侧成功，再移除源侧记录</text>
+  <rect x="1139" y="606" width="422" height="56" rx="10" fill="#fff3ef"/>
+  <text x="1153" y="629" class="small" fill="#9c5543">结果：done / failed / unknown</text>
+  <text x="1153" y="649" class="small" fill="#9c5543">unknown 停止自动推进，进入人工复核</text>
+
+  <!-- Dependency labels -->
+  <rect x="225" y="729" width="190" height="25" rx="12.5" fill="#f7f9fc" stroke="#dde6f1"/>
+  <text x="242" y="746" class="tiny" fill="#647a94">Job / 方案 / 执行日志</text>
+  <rect x="766" y="729" width="148" height="25" rx="12.5" fill="#f7f9fc" stroke="#dde6f1"/>
+  <text x="788" y="746" class="tiny" fill="#647a94">B 站读写与回读</text>
+  <rect x="1281" y="729" width="158" height="25" rx="12.5" fill="#f7f9fc" stroke="#dde6f1"/>
+  <text x="1303" y="746" class="tiny" fill="#647a94">分析 / 画像 / 合并</text>
+
+  <!-- Persistence -->
+  <g filter="url(#shadow)">
+    <rect x="70" y="770" width="500" height="284" rx="17" fill="#fff" stroke="#dce5f0"/>
+    <rect x="70" y="770" width="500" height="6" rx="3" fill="#397e96"/>
+  </g>
+  <text x="96" y="808" class="eyebrow" fill="#397e96">LOCAL PERSISTENCE</text>
+  <text x="96" y="837" class="card-title">SQLite 与本机数据</text>
+  <text x="96" y="859" class="code">store.py · WAL · schema v7</text>
+  <text x="96" y="886" class="body">目录 / 视频 / 成员关系 / 扫描阶段 / 收藏夹画像</text>
+  <text x="96" y="909" class="body">分析 / 计划版本 / 持久 Job / 执行批次与操作</text>
+  <text x="96" y="932" class="body">供应商与模型配置（API Key 保存在 providers）</text>
+  <line x1="96" y1="949" x2="544" y2="949" stroke="#e8eef5"/>
+  <text x="96" y="975" class="small" font-weight="700" fill="#536b88">%LOCALAPPDATA%\BiliFavOrganizer\</text>
+  <rect x="96" y="991" width="206" height="25" rx="8" fill="#edf5fa"/>
+  <text x="108" y="1008" class="tiny" fill="#426b82">secrets.json · B 站 Cookie</text>
+  <rect x="311" y="991" width="233" height="25" rx="8" fill="#edf5fa"/>
+  <text x="323" y="1008" class="tiny" fill="#426b82">config.json · 本机设置</text>
+  <text x="96" y="1037" class="tiny">写操作另记 write_operations.jsonl；导出不包含凭据。</text>
+
+  <!-- Bilibili adapter -->
+  <g filter="url(#shadow)">
+    <rect x="590" y="770" width="500" height="284" rx="17" fill="#fff" stroke="#dce5f0"/>
+    <rect x="590" y="770" width="500" height="6" rx="3" fill="#df6a82"/>
+  </g>
+  <text x="616" y="808" class="eyebrow" fill="#cc5c75">BILIBILI CONNECTOR</text>
+  <text x="616" y="837" class="card-title">B 站接口适配</text>
+  <text x="616" y="859" class="code">bili_api.py · BiliSession</text>
+  <text x="616" y="886" class="body">Cookie / CSRF / WBI · 全局节流 · 写审计</text>
+  <text x="616" y="909" class="body">收藏夹目录与资源读取 · 收藏夹写入操作</text>
+  <text x="616" y="932" class="small" fill="#536b88">media_id = 收藏夹 ID　·　aid = 视频 ID</text>
+  <text x="616" y="952" class="small" fill="#536b88">≤1000 候选走 ID/批量元数据；更大则按 20 条分页</text>
+  <rect x="616" y="972" width="448" height="61" rx="11" fill="#fff1f4"/>
+  <circle cx="637" cy="994" r="5" fill="#df6a82"/>
+  <text x="651" y="998" class="pilltext" fill="#a94860">外部服务</text>
+  <text x="616" y="1020" class="body" fill="#7c4050">B 站网页 API · 收藏夹 / 资源 / 写入端点</text>
+
+  <!-- LLM adapter -->
+  <g filter="url(#shadow)">
+    <rect x="1110" y="770" width="500" height="284" rx="17" fill="#fff" stroke="#dce5f0"/>
+    <rect x="1110" y="770" width="500" height="6" rx="3" fill="#7f69c6"/>
+  </g>
+  <text x="1136" y="808" class="eyebrow" fill="#735db5">MODEL CONNECTOR</text>
+  <text x="1136" y="837" class="card-title">LLM 服务适配</text>
+  <text x="1136" y="859" class="code">llm_analyzer.py · provider compatible</text>
+  <text x="1136" y="886" class="body">归类分析 · 收藏夹画像 · 合并建议</text>
+  <text x="1136" y="909" class="body">上下文预算 · 超限拆批 · 拒绝截断结果</text>
+  <text x="1136" y="932" class="small" fill="#536b88">TPM 限流 · 模型参数差异转换 · 用量回写</text>
+  <rect x="1136" y="972" width="448" height="61" rx="11" fill="#f3effc"/>
+  <circle cx="1157" cy="994" r="5" fill="#7f69c6"/>
+  <text x="1171" y="998" class="pilltext" fill="#654eab">外部服务</text>
+  <text x="1136" y="1020" class="body" fill="#574780">OpenAI 兼容 Chat Completions 服务</text>
+
+  <!-- Footer -->
+  <line x1="70" y1="1080" x2="1610" y2="1080" stroke="#d7e1ed"/>
+  <text x="70" y="1104" class="tiny">架构边界提示：阶段 1–5 已完成；HTTP 路由与部分业务流程仍由 server.py 编排。</text>
+  <text x="1610" y="1104" class="tiny" text-anchor="end">Bili-Fav Organizer · new_arch</text>
+</svg>

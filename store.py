@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import sqlite3
@@ -39,7 +40,7 @@ FOLDER_MERGE_STATE_FILE = LEGACY_DATA_DIR / "folder_merge_state.json"
 FOLDER_MERGE_DRAFT_FILE = LEGACY_DATA_DIR / "folder_merge_draft.json"
 
 _lock = threading.RLock()
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 _DATASET_DEFAULTS = {
     "analysis": {}, "plan": {}, "apply_state": {}, "scan_done": [],
     "scan_selection": [], "folder_merge_plan": [], "folder_merge_draft": [],
@@ -106,6 +107,8 @@ def _backup_legacy_files() -> str:
 def _migrate_database_location() -> None:
     """Copy the project-local SQLite database to the durable per-user data folder once."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("BILI_FAV_ORGANIZER_TEST_MODE") == "1":
+        return
     if DB_FILE.exists() or not LEGACY_DB_FILE.exists():
         return
     temporary = DATA_DIR / f".library-{uuid.uuid4().hex}.migrating"
@@ -171,7 +174,7 @@ def _legacy_bundle():
 def _initialize():
     _migrate_database_location()
     existed = DB_FILE.exists()
-    if not existed:
+    if not existed and os.environ.get("BILI_FAV_ORGANIZER_TEST_MODE") != "1":
         backup = _backup_legacy_files()
         if backup:
             print(f"[store] 已备份旧数据：{backup}")
@@ -208,6 +211,39 @@ def _initialize():
             CREATE TABLE IF NOT EXISTS plans (
                 resource_key TEXT PRIMARY KEY, record_json TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}', progress_json TEXT NOT NULL DEFAULT '{}',
+                cancel_requested INTEGER NOT NULL DEFAULT 0, error TEXT,
+                created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT, updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_jobs_status_created ON jobs(status, created_at);
+            CREATE TABLE IF NOT EXISTS plan_versions (
+                id TEXT PRIMARY KEY, plan_key TEXT NOT NULL, version INTEGER NOT NULL,
+                status TEXT NOT NULL, base_snapshot_json TEXT NOT NULL,
+                diff_json TEXT NOT NULL, items_json TEXT NOT NULL,
+                created_at TEXT NOT NULL, approved_at TEXT, updated_at TEXT NOT NULL,
+                UNIQUE(plan_key, version)
+            );
+            CREATE INDEX IF NOT EXISTS idx_plan_versions_key_version
+                ON plan_versions(plan_key, version DESC);
+            CREATE TABLE IF NOT EXISTS execution_runs (
+                id TEXT PRIMARY KEY, plan_version_id TEXT, job_id TEXT,
+                status TEXT NOT NULL, error TEXT, created_at TEXT NOT NULL,
+                started_at TEXT, finished_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_execution_runs_created ON execution_runs(created_at DESC);
+            CREATE TABLE IF NOT EXISTS execution_operations (
+                id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES execution_runs(id),
+                sequence INTEGER NOT NULL, kind TEXT NOT NULL, source_folder_id TEXT NOT NULL DEFAULT '',
+                target_folder_id TEXT NOT NULL DEFAULT '', resources_json TEXT NOT NULL,
+                payload_json TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL,
+                result_json TEXT NOT NULL DEFAULT '{}', error TEXT,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(run_id, sequence)
+            );
+            CREATE INDEX IF NOT EXISTS idx_execution_operations_run
+                ON execution_operations(run_id, sequence);
             CREATE TABLE IF NOT EXISTS app_state (
                 name TEXT PRIMARY KEY, value_json TEXT NOT NULL
             );
@@ -269,7 +305,7 @@ def _initialize():
         if row is None:
             has_data = any(conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
                            for table in ("folders", "videos", "analyses", "plans", "app_state"))
-            if not has_data:
+            if not has_data and os.environ.get("BILI_FAV_ORGANIZER_TEST_MODE") != "1":
                 _import_bundle(conn, _legacy_bundle(), legacy=True)
             row = (0,)
         current_version = int(row[0])
@@ -872,6 +908,325 @@ def replace_plan(items: dict):
         for key, rec in (items or {}).items():
             conn.execute("INSERT INTO plans(resource_key,record_json) VALUES(?,?)",
                          (str(key), _json(rec)))
+
+
+def capture_plan_snapshot(profile_versions: dict | None = None) -> dict:
+    """Return a compact, stable fingerprint of the catalog used by a reviewed plan."""
+    with _lock:
+        conn = _connect()
+        try:
+            folders = [dict(row) for row in conn.execute(
+                "SELECT media_id,title,remote_count,status FROM folders "
+                "WHERE status='active' ORDER BY media_id")]
+            scans = [dict(row) for row in conn.execute(
+                "SELECT media_id,status,expected_count,fetched_count,snapshot_completed_at "
+                "FROM folder_scan_state ORDER BY media_id")]
+            memberships = [
+                [str(row[0]), str(row[1])]
+                for row in conn.execute(
+                    "SELECT fi.media_id,fi.resource_key FROM folder_items fi "
+                    "JOIN folders f ON f.media_id=fi.media_id "
+                    "WHERE f.status='active' ORDER BY fi.media_id,fi.resource_key")
+            ]
+            folder_records_hash = hashlib.sha256()
+            for row in conn.execute("SELECT media_id,record_json FROM folders "
+                                    "WHERE status='active' ORDER BY media_id"):
+                folder_records_hash.update(str(row[0]).encode("utf-8"))
+                folder_records_hash.update(b"\0")
+                folder_records_hash.update(str(row[1]).encode("utf-8"))
+                folder_records_hash.update(b"\n")
+            video_records_hash = hashlib.sha256()
+            for row in conn.execute(
+                    "SELECT DISTINCT v.resource_key,v.record_json FROM videos v "
+                    "JOIN folder_items fi ON fi.resource_key=v.resource_key "
+                    "JOIN folders f ON f.media_id=fi.media_id "
+                    "WHERE f.status='active' ORDER BY v.resource_key"):
+                video_records_hash.update(str(row[0]).encode("utf-8"))
+                video_records_hash.update(b"\0")
+                video_records_hash.update(str(row[1]).encode("utf-8"))
+                video_records_hash.update(b"\n")
+        finally:
+            conn.close()
+    basis = {
+        "folders": folders,
+        "scans": scans,
+        "memberships": memberships,
+        "folder_records_fingerprint": folder_records_hash.hexdigest(),
+        "video_records_fingerprint": video_records_hash.hexdigest(),
+        "profile_versions": {str(k): str(v) for k, v in sorted((profile_versions or {}).items())},
+    }
+    digest = hashlib.sha256(_json(basis).encode("utf-8")).hexdigest()
+    return {
+        "fingerprint": digest,
+        "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "schema_version": _SCHEMA_VERSION,
+        "folder_count": len(folders),
+        "membership_count": len(memberships),
+        "profile_versions": basis["profile_versions"],
+    }
+
+
+def create_plan_version(items: dict, base_snapshot: dict, diff: dict, *, status="approved",
+                        plan_key="content") -> dict:
+    """Atomically replace the active plan and append an immutable reviewed version."""
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    version_id = uuid.uuid4().hex
+    with _transaction() as conn:
+        row = conn.execute("SELECT COALESCE(MAX(version),0) FROM plan_versions WHERE plan_key=?",
+                           (str(plan_key),)).fetchone()
+        version = int(row[0]) + 1
+        if plan_key == "content":
+            conn.execute("DELETE FROM plans")
+            for key, rec in (items or {}).items():
+                conn.execute("INSERT INTO plans(resource_key,record_json) VALUES(?,?)",
+                             (str(key), _json(rec)))
+        elif plan_key == "folder_merge":
+            _save_dataset_conn(conn, "folder_merge_plan", list((items or {}).values()))
+        else:
+            raise ValueError(f"unknown plan key: {plan_key}")
+        conn.execute("""INSERT INTO plan_versions(
+                      id,plan_key,version,status,base_snapshot_json,diff_json,items_json,
+                      created_at,approved_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                     (version_id, str(plan_key), version, status, _json(base_snapshot or {}),
+                      _json(diff or {}), _json(items or {}), now,
+                      now if status == "approved" else None, now))
+    return {
+        "id": version_id, "plan_key": str(plan_key), "version": version,
+        "status": status, "base_snapshot": base_snapshot or {}, "diff": diff or {},
+        "created_at": now, "approved_at": now if status == "approved" else None,
+    }
+
+
+def _plan_version_row(row) -> dict:
+    return {
+        "id": str(row["id"]), "plan_key": str(row["plan_key"]),
+        "version": int(row["version"]), "status": str(row["status"]),
+        "base_snapshot": json.loads(row["base_snapshot_json"]),
+        "diff": json.loads(row["diff_json"]), "items": json.loads(row["items_json"]),
+        "created_at": row["created_at"], "approved_at": row["approved_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def current_plan_version(plan_key: str = "content") -> dict | None:
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute("SELECT * FROM plan_versions WHERE plan_key=? "
+                               "ORDER BY version DESC LIMIT 1", (str(plan_key),)).fetchone()
+            return _plan_version_row(row) if row else None
+        finally:
+            conn.close()
+
+
+def load_plan_version(version_id: str) -> dict | None:
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute("SELECT * FROM plan_versions WHERE id=?", (str(version_id),)).fetchone()
+            return _plan_version_row(row) if row else None
+        finally:
+            conn.close()
+
+
+def load_plan_versions(limit: int = 50, plan_key: str = "content") -> list[dict]:
+    limit = max(1, min(200, int(limit)))
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute("SELECT * FROM plan_versions WHERE plan_key=? "
+                                "ORDER BY version DESC LIMIT ?", (str(plan_key), limit)).fetchall()
+            return [_plan_version_row(row) for row in rows]
+        finally:
+            conn.close()
+
+
+def set_plan_version_status(version_id: str, status: str) -> None:
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _transaction() as conn:
+        conn.execute("UPDATE plan_versions SET status=?, updated_at=?, "
+                     "approved_at=CASE WHEN ?='approved' THEN COALESCE(approved_at,?) ELSE approved_at END "
+                     "WHERE id=?", (status, now, status, now, str(version_id)))
+
+
+def create_execution_run(plan_version_id: str | None, job_id: str | None = None) -> str:
+    run_id = uuid.uuid4().hex
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _transaction() as conn:
+        conn.execute("INSERT INTO execution_runs(id,plan_version_id,job_id,status,created_at,started_at) "
+                     "VALUES(?,?,?,'running',?,?)",
+                     (run_id, plan_version_id, job_id, now, now))
+    return run_id
+
+
+def update_execution_run(run_id: str, status: str, error: str | None = None) -> None:
+    finished = time.strftime("%Y-%m-%d %H:%M:%S") if status in {
+        "completed", "partial", "unknown", "failed", "cancelled", "interrupted", "stale"
+    } else None
+    with _transaction() as conn:
+        conn.execute("UPDATE execution_runs SET status=?,error=?,finished_at=? WHERE id=?",
+                     (status, error, finished, str(run_id)))
+
+
+def create_execution_operation(run_id: str, kind: str, source_folder_id: str,
+                               target_folder_id: str, resources: list,
+                               payload: dict | None = None) -> str:
+    operation_id = uuid.uuid4().hex
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _transaction() as conn:
+        row = conn.execute("SELECT COALESCE(MAX(sequence),0)+1 FROM execution_operations "
+                           "WHERE run_id=?", (str(run_id),)).fetchone()
+        conn.execute("""INSERT INTO execution_operations(
+                      id,run_id,sequence,kind,source_folder_id,target_folder_id,resources_json,
+                      payload_json,status,result_json,created_at,updated_at)
+                      VALUES(?,?,?,?,?,?,?,?,'sending','{}',?,?)""",
+                     (operation_id, str(run_id), int(row[0]), kind, str(source_folder_id or ""),
+                      str(target_folder_id or ""), _json(resources or []), _json(payload or {}), now, now))
+    return operation_id
+
+
+def update_execution_operation(operation_id: str, status: str, *, result: dict | None = None,
+                                error: str | None = None) -> None:
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _transaction() as conn:
+        conn.execute("UPDATE execution_operations SET status=?,result_json=?,error=?,updated_at=? "
+                     "WHERE id=?", (status, _json(result or {}), error, now, str(operation_id)))
+
+
+def load_execution_runs(limit: int = 50) -> list[dict]:
+    with _lock:
+        conn = _connect()
+        try:
+            return [dict(row) for row in conn.execute(
+                "SELECT * FROM execution_runs ORDER BY created_at DESC LIMIT ?",
+                (max(1, min(200, int(limit))),))]
+        finally:
+            conn.close()
+
+
+def load_execution_run(run_id: str) -> dict | None:
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute("SELECT * FROM execution_runs WHERE id=?", (str(run_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+
+def load_execution_operations(run_id: str) -> list[dict]:
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute("SELECT * FROM execution_operations WHERE run_id=? "
+                                "ORDER BY sequence", (str(run_id),)).fetchall()
+            return [{**dict(row), "resources": json.loads(row["resources_json"]),
+                     "payload": json.loads(row["payload_json"]),
+                     "result": json.loads(row["result_json"])} for row in rows]
+        finally:
+            conn.close()
+
+
+def recover_incomplete_work() -> None:
+    """Mark work interrupted at startup; never replay a write whose outcome may be unknown."""
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _transaction() as conn:
+        conn.execute("UPDATE jobs SET status='interrupted',error=COALESCE(error,?),finished_at=?,updated_at=? "
+                     "WHERE status IN ('queued','running')",
+                     ("进程重启，任务已暂停；可从业务检查点重新提交", now, now))
+        conn.execute("UPDATE execution_operations SET status='unknown',error=COALESCE(error,?),updated_at=? "
+                     "WHERE status='sending'",
+                     ("进程在请求结果确认前退出；必须先核对远端状态", now))
+        conn.execute("UPDATE execution_runs SET status='interrupted',finished_at=? "
+                     "WHERE status='running'", (now,))
+        conn.execute("UPDATE plan_versions SET status='interrupted',updated_at=? "
+                     "WHERE status='executing'", (now,))
+
+
+def create_job(job_id: str, kind: str, payload: dict | None = None,
+               progress: dict | None = None) -> None:
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _transaction() as conn:
+        active = conn.execute("SELECT id,kind FROM jobs WHERE status IN ('queued','running') "
+                              "ORDER BY created_at LIMIT 1").fetchone()
+        if active:
+            raise RuntimeError(f"已有任务 {active['id']}（{active['kind']}）正在运行")
+        conn.execute("INSERT INTO jobs(id,kind,status,payload_json,progress_json,created_at,updated_at) "
+                     "VALUES(?,?,'queued',?,?,?,?)",
+                     (str(job_id), str(kind), _json(payload or {}), _json(progress or {}), now, now))
+
+
+def update_job(job_id: str, *, status: str | None = None, progress: dict | None = None,
+               error: str | None = None, cancel_requested: bool | None = None) -> None:
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    with _transaction() as conn:
+        row = conn.execute("SELECT progress_json FROM jobs WHERE id=?", (str(job_id),)).fetchone()
+        if not row:
+            return
+        changes = []
+        values = []
+        if status is not None:
+            changes.append("status=?"); values.append(status)
+            if status == "running":
+                changes.append("started_at=COALESCE(started_at,?)"); values.append(now)
+            if status in {"completed", "failed", "cancelled", "interrupted"}:
+                changes.append("finished_at=?"); values.append(now)
+        if progress is not None:
+            current = json.loads(row[0] or "{}")
+            current.update(progress)
+            changes.append("progress_json=?"); values.append(_json(current))
+        if error is not None:
+            changes.append("error=?"); values.append(str(error))
+        if cancel_requested is not None:
+            changes.append("cancel_requested=?"); values.append(int(cancel_requested))
+        changes.append("updated_at=?"); values.append(now)
+        values.append(str(job_id))
+        conn.execute(f"UPDATE jobs SET {','.join(changes)} WHERE id=?", values)
+
+
+def load_job(job_id: str) -> dict | None:
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute("SELECT * FROM jobs WHERE id=?", (str(job_id),)).fetchone()
+            return _job_row(row) if row else None
+        finally:
+            conn.close()
+
+
+def _job_row(row) -> dict:
+    item = dict(row)
+    item["payload"] = json.loads(item.pop("payload_json"))
+    item["progress"] = json.loads(item.pop("progress_json"))
+    item["cancel_requested"] = bool(item["cancel_requested"])
+    return item
+
+
+def load_jobs(limit: int = 50, kind: str | None = None) -> list[dict]:
+    with _lock:
+        conn = _connect()
+        try:
+            limit = max(1, min(200, int(limit)))
+            if kind:
+                rows = conn.execute("SELECT * FROM jobs WHERE kind=? ORDER BY created_at DESC LIMIT ?",
+                                    (str(kind), limit)).fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?",
+                                    (limit,)).fetchall()
+            return [_job_row(row) for row in rows]
+        finally:
+            conn.close()
+
+
+def load_active_job() -> dict | None:
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute("SELECT * FROM jobs WHERE status IN ('queued','running') "
+                               "ORDER BY created_at DESC LIMIT 1").fetchone()
+            return _job_row(row) if row else None
+        finally:
+            conn.close()
 
 
 def _get_dataset(name: str):

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from functools import wraps
 import hashlib
 import json
 import logging
@@ -42,6 +43,13 @@ from pydantic import BaseModel, Field
 import bili_api
 import llm_analyzer
 import store
+from bili_fav import planning as planning_service
+from bili_fav.domain import organization as organization_domain
+from bili_fav.execution import (
+    reconcile_batch, reconcile_created_folder, reconcile_folder_deleted,
+    reconcile_folder_renamed, reconcile_invalid_cleanup,
+)
+from bili_fav.runtime import JobConflict, TaskManager
 
 HERE = Path(__file__).resolve().parent
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else HERE
@@ -59,6 +67,9 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 log = logging.getLogger("server")
 
 app = FastAPI(title="B站收藏夹整理")
+_BUSINESS_MUTATION_LOCK = threading.Lock()
+_JOB_START_LOCK = threading.Lock()
+TASK_MANAGER = TaskManager(store, operation_lock=_BUSINESS_MUTATION_LOCK)
 
 # ---------- 运行状态（跨请求的全局状态） ----------
 APP = {
@@ -79,6 +90,10 @@ _evt_seq = [0]
 
 def emit(level: str, text: str, **extra):
     """追加一条事件到缓冲（供 SSE 推送）。level: info/ok/warn/err。"""
+    job_id = TASK_MANAGER.current_job_id
+    if job_id:
+        extra.setdefault("job_id", job_id)
+        TASK_MANAGER.record_event({"level": level, "text": text, **extra})
     with _evt_lock:
         _evt_seq[0] += 1
         APP["events"].append({"id": _evt_seq[0], "t": time.strftime("%H:%M:%S"),
@@ -111,7 +126,7 @@ DEFAULT_CONFIG = {
     "apply_batch": 1000,        # 批量 move / batch-del 的单批条数，硬上限 1000
 }
 
-DEFAULT_FAVORITE_NAME = "默认收藏夹"
+DEFAULT_FAVORITE_NAME = organization_domain.DEFAULT_FAVORITE_NAME
 
 
 def _folder_attr_is_default(folder: dict) -> bool | None:
@@ -119,13 +134,7 @@ def _folder_attr_is_default(folder: dict) -> bool | None:
 
     位域约定：bit0=是否私有，bit1=0 默认收藏夹 / 1 非默认收藏夹。
     """
-    attr = folder.get("attr") if isinstance(folder, dict) else None
-    if attr is None:
-        return None
-    try:
-        return (int(attr) & 2) == 0
-    except (TypeError, ValueError):
-        return None
+    return organization_domain.folder_attr_is_default(folder)
 
 
 def _default_folder(folders: list | None = None) -> dict | None:
@@ -135,18 +144,12 @@ def _default_folder(folders: list | None = None) -> dict | None:
     也不会因为「目录里只有一个夹」就把它当成默认夹而拒绝往里移入内容。
     """
     rows = store.load_folders() if folders is None else folders
-    if not rows:
-        return None
-    for f in rows:
-        if (f.get("title") or "").strip() == DEFAULT_FAVORITE_NAME:
-            return f
-    flagged = [f for f in rows if _folder_attr_is_default(f) is True]
-    return flagged[0] if len(flagged) == 1 else None
+    return organization_domain.default_folder(rows)
 
 
 def _default_folder_ids(folders: list | None = None) -> set[str]:
-    row = _default_folder(folders)
-    return {str(row["media_id"])} if row else set()
+    rows = store.load_folders() if folders is None else folders
+    return organization_domain.default_folder_ids(rows)
 
 
 def _default_folder_names(folders: list | None = None) -> set[str]:
@@ -154,23 +157,98 @@ def _default_folder_names(folders: list | None = None) -> set[str]:
 
     识别不出默认收藏夹时返回空集合：宁可不拦，也不要误拦正常的移入。
     """
-    row = _default_folder(folders)
-    title = str((row or {}).get("title") or "").strip()
-    return {title} if title else set()
+    rows = store.load_folders() if folders is None else folders
+    return organization_domain.default_folder_names(rows)
 
 
 def _default_folder_destination_error(items: list[dict]) -> str:
     """拒绝把内容移入或新建为默认收藏夹。"""
-    forbidden = _default_folder_names()
-    for item in items:
-        action = str(item.get("action", "skip"))
-        target = str(item.get("target_folder", "")).strip()
-        new_name = str(item.get("create_new_name") or target).strip()
-        if action == "move_to_existing" and target in forbidden:
-            return "默认收藏夹只能移出，不能作为内容整理的移入目标；请修改该条方案"
-        if action == "create_new" and new_name in forbidden:
-            return "默认收藏夹只能移出，不能作为新建或移入目标；请修改该条方案"
-    return ""
+    return organization_domain.destination_error(items, store.load_folders())
+
+
+def _submit_background_job(kind: str, runner, state_key: str, *, payload=None,
+                           cancellable=True) -> str:
+    def state_provider():
+        return APP.get(state_key) or {}
+
+    def request_cancel():
+        state = APP.get(state_key)
+        if not state or "stop" not in state:
+            return False
+        state["stop"] = True
+        return True
+
+    job_id = TASK_MANAGER.submit(
+        kind, runner, payload=payload or {}, state_provider=state_provider,
+        on_cancel=request_cancel if cancellable else None,
+    )
+    state = APP.get(state_key)
+    if state is not None:
+        state["job_id"] = job_id
+    return job_id
+
+
+def _task_state(state_key: str, kind: str, default: dict) -> dict:
+    state = APP.get(state_key)
+    if state is not None:
+        return state
+    job = TASK_MANAGER.latest(kind)
+    if not job:
+        return default
+    progress = dict(job.get("progress") or {})
+    progress.update({"job_id": job["id"], "status": job["status"],
+                     "running": job["status"] in ("queued", "running"),
+                     "error": job.get("error") or progress.get("error")})
+    return progress
+
+
+def _runtime_busy_response(operation: str):
+    active = TASK_MANAGER.active()
+    if not active:
+        return None
+    return JSONResponse(
+        {"ok": False,
+         "error": f"任务「{active['kind']}」正在运行，当前不能{operation}",
+         "job_id": active["id"]},
+        status_code=409,
+    )
+
+
+def _serialize_job_start(operation: str):
+    """Make the busy check and job submission one serialized API operation."""
+    def decorate(handler):
+        @wraps(handler)
+        def wrapped(*args, **kwargs):
+            with _JOB_START_LOCK:
+                TASK_MANAGER.start()
+                busy = _runtime_busy_response(operation)
+                if busy:
+                    return busy
+                with _BUSINESS_MUTATION_LOCK:
+                    return handler(*args, **kwargs)
+        return wrapped
+    return decorate
+
+
+def _serialize_business_mutation(operation: str):
+    """Prevent sync catalog edits from overlapping jobs or each other."""
+    def decorate(handler):
+        @wraps(handler)
+        def wrapped(*args, **kwargs):
+            if not _BUSINESS_MUTATION_LOCK.acquire(blocking=False):
+                active = TASK_MANAGER.active()
+                job = f"任务「{active['kind']}」" if active else "其他数据更新"
+                return JSONResponse(
+                    {"ok": False, "error": f"{job}正在运行，当前不能{operation}",
+                     "job_id": active["id"] if active else None},
+                    status_code=409,
+                )
+            try:
+                return handler(*args, **kwargs)
+            finally:
+                _BUSINESS_MUTATION_LOCK.release()
+        return wrapped
+    return decorate
 
 # 常用 OpenAI 兼容供应商预设（URL 可在管理界面修改）
 PROVIDER_PRESETS = [
@@ -1005,12 +1083,12 @@ def models_test(model_id: str):
 
 
 # ============ 项目数据：导出 / 导入 / 清除 ============
-INVALID_TITLE = "已失效视频"
+INVALID_TITLE = organization_domain.INVALID_VIDEO_TITLE
 
 
 def _is_invalid(video: dict) -> bool:
     """防火墙：只有标题**恰好**是「已失效视频」才算失效视频。"""
-    return (video.get("title") or "").strip() == INVALID_TITLE
+    return organization_domain.is_invalid_video(video)
 
 
 def _autobackup_data(tag: str = "autobackup") -> str:
@@ -1065,6 +1143,7 @@ def data_export():
 
 
 @app.post("/api/data/import")
+@_serialize_business_mutation("导入数据")
 def data_import(body: DataIn):
     """导入项目数据（覆盖当前数据）。导入前自动备份当前数据。"""
     if not body.bundle:
@@ -1079,6 +1158,7 @@ def data_import(body: DataIn):
 
 
 @app.post("/api/data/clear")
+@_serialize_business_mutation("清除数据")
 def data_clear(body: DataIn):
     """清除指定范围的数据。scope: scan / analysis / plan / all。清除前**自动备份**。"""
     valid = {"scan", "analysis", "plan", "folder_merge", "folder_profile", "all"}
@@ -1172,6 +1252,7 @@ def _refresh_folder_directory() -> list | None:
 
 
 @app.post("/api/folders/refresh")
+@_serialize_business_mutation("刷新收藏夹目录")
 def folders_refresh():
     if APP["scan_run"] and APP["scan_run"].get("running"):
         return JSONResponse({"ok": False, "error": "扫描运行中，暂不刷新目录"}, status_code=409)
@@ -1187,6 +1268,7 @@ def folders_refresh():
 
 
 @app.put("/api/scan/selection")
+@_serialize_business_mutation("修改扫描范围")
 def scan_selection(body: ScanSelectionIn):
     valid = {str(f["media_id"]) for f in store.load_folders()}
     ids = list(dict.fromkeys(str(x) for x in body.folder_ids))
@@ -1198,16 +1280,19 @@ def scan_selection(body: ScanSelectionIn):
 
 
 @app.post("/api/scan")
+@_serialize_job_start("启动扫描")
 def scan(body: Optional[ScanIn] = None):
     """按文件夹选择批量元数据或分页读取，校验后更新该夹快照。"""
     if APP["scan_run"] and APP["scan_run"].get("running"):
         return JSONResponse({"ok": False, "error": "扫描已在运行中"}, status_code=400)
 
+    run_id = uuid.uuid4().hex
+    app_state = APP["scan_run"] = {"id": run_id, "running": True, "step": "init", "done": 0,
+                                   "total": 0, "error": None, "strategy": "",
+                                   "folder_done": 0, "folder_total": 0, "current": "",
+                                   "stop": False}
+
     def run():
-        run_id = uuid.uuid4().hex
-        app_state = APP["scan_run"] = {"id": run_id, "running": True, "step": "init", "done": 0,
-                                       "total": 0, "error": None, "strategy": "",
-                                       "folder_done": 0, "folder_total": 0, "current": ""}
         try:
             cfg = load_config()
             session = bili_api.BiliSession(get_session_cookie())
@@ -1427,18 +1512,30 @@ def scan(body: Optional[ScanIn] = None):
             app_state["current"] = ""
             ANALYZE_WAKE.set()
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True}
+    try:
+        job_id = _submit_background_job(
+            "scan", run, "scan_run",
+            payload={"folder_ids": body.folder_ids if body else None,
+                     "mode": body.mode if body else "resume"},
+        )
+    except JobConflict as exc:
+        app_state["running"] = False
+        APP["scan_run"] = None
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True, "started": True, "job_id": job_id}
 
 @app.get("/api/scan/status")
 def scan_status():
-    return APP["scan_run"] or {"running": False, "error": None}
+    return _task_state("scan_run", "scan", {"running": False, "error": None})
 
 
 @app.post("/api/scan/stop")
 def scan_stop():
     if APP["scan_run"]:
-        APP["scan_run"]["stop"] = True
+        state = APP["scan_run"]
+        if state.get("job_id") and TASK_MANAGER.cancel(state["job_id"]):
+            return {"ok": True}
+        state["stop"] = True
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的扫描"}
 
@@ -1550,6 +1647,7 @@ def folder_organize_get():
 
 
 @app.post("/api/folder-organize/suggest")
+@_serialize_job_start("启动合并建议")
 def folder_organize_suggest():
     if APP.get("folder_merge_ai_run") and APP["folder_merge_ai_run"].get("running"):
         return JSONResponse({"ok": False, "error": "AI 合并分析已在运行"}, status_code=409)
@@ -1664,11 +1762,18 @@ def folder_organize_suggest():
         finally:
             state["running"] = False
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True}
+    try:
+        job_id = _submit_background_job("folder_merge_ai", run, "folder_merge_ai_run",
+                                        payload={"folder_count": len(folders)}, cancellable=False)
+    except JobConflict as exc:
+        state["running"] = False
+        APP["folder_merge_ai_run"] = None
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True, "started": True, "job_id": job_id}
 
 
 @app.put("/api/folder-organize/draft")
+@_serialize_business_mutation("修改合并草稿")
 def folder_organize_draft(body: FolderMergePlanIn):
     known = {str(f["media_id"]): f for f in store.load_folders()}
     groups = []
@@ -1697,6 +1802,7 @@ def folder_organize_draft(body: FolderMergePlanIn):
 
 
 @app.put("/api/folder-organize/plan")
+@_serialize_business_mutation("保存合并方案")
 def folder_organize_plan(body: FolderMergePlanIn):
     if body.groups:
         readiness = _organization_profile_readiness()
@@ -1752,11 +1858,27 @@ def folder_organize_plan(body: FolderMergePlanIn):
             group.update(status=previous["status"], results=previous.get("results", []))
             if previous.get("error"): group["error"] = previous["error"]
         groups.append(group)
-    store.save_folder_merge_plan(groups)
-    return {"ok": True, "groups": groups}
+    def merge_group_key(group):
+        return json.dumps([
+            str(group.get("target_id", "")),
+            sorted(str(x) for x in group.get("source_ids", [])),
+            str(group.get("final_name", "")),
+        ], ensure_ascii=False, separators=(",", ":"))
+
+    previous = {merge_group_key(group): group for group in old_groups}
+    current = {merge_group_key(group): group for group in groups}
+    snapshot = store.capture_plan_snapshot(profile_versions)
+    version = store.create_plan_version(
+        current, snapshot, planning_service.diff_plans(previous, current),
+        status="approved", plan_key="folder_merge",
+    )
+    return {"ok": True, "groups": groups,
+            "plan_version": {key: version[key] for key in
+                             ("id", "version", "status", "base_snapshot", "diff")}}
 
 
 @app.post("/api/folder-organize/start")
+@_serialize_job_start("启动收藏夹合并")
 def folder_organize_start():
     if APP.get("folder_merge_run") and APP["folder_merge_run"].get("running"):
         return JSONResponse({"ok": False, "error": "收藏夹合并已在运行"}, status_code=409)
@@ -1776,6 +1898,16 @@ def folder_organize_start():
            for g in pending):
         return JSONResponse({"ok": False, "error": "待执行方案包含没有当前画像的收藏夹，请重新生成并提交方案"}, status_code=409)
     current_versions = readiness["profile_versions"]
+    merge_version = store.current_plan_version("folder_merge")
+    if not merge_version or merge_version.get("status") != "approved":
+        return JSONResponse({"ok": False,
+                             "error": "合并方案尚未处于已批准版本，请重新提交并复核"}, status_code=409)
+    observed_snapshot = store.capture_plan_snapshot(current_versions)
+    if not planning_service.is_snapshot_current(merge_version.get("base_snapshot"),
+                                                observed_snapshot):
+        store.set_plan_version_status(merge_version["id"], "stale")
+        return JSONResponse({"ok": False,
+                             "error": "合并方案所依据的收藏快照已变化，请重新生成并复核"}, status_code=409)
     if any(set(str(x) for x in g.get("profile_context_ids", [])) != set(current_versions) or
            {str(k): str(v) for k, v in (g.get("profile_context_versions") or {}).items()} != current_versions
            for g in pending):
@@ -1789,7 +1921,9 @@ def folder_organize_start():
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
     state = APP["folder_merge_run"] = {"running": True, "stop": False, "done": 0,
-                                       "total": len(pending), "error": None, "status": "running"}
+                                       "total": len(pending), "error": None, "status": "running",
+                                       "plan_version_id": merge_version["id"]}
+    execution_run_id = [None]
 
     def save():
         store.save_folder_merge_plan(plan)
@@ -1800,10 +1934,99 @@ def folder_organize_start():
             yield items[i:i + size]
 
     def run():
+        def journaled_batch(kind, source_id, target_id, aids, payload):
+            op_id = store.create_execution_operation(
+                execution_run_id[0], kind, source_id, target_id, aids, payload,
+            )
+            try:
+                if kind == "move":
+                    session.move_batch(source_id, target_id, aids, mid=owner_mid,
+                                       should_stop=lambda: state["stop"])
+                else:
+                    session.batch_delete(source_id, aids, should_stop=lambda: state["stop"])
+            except bili_api.WriteUncertainError as exc:
+                store.update_execution_operation(op_id, "unknown", error=str(exc))
+                raise
+            except Exception as exc:
+                store.update_execution_operation(op_id, "failed", error=str(exc))
+                raise
+            try:
+                verification = reconcile_batch(
+                    session, kind, source_id, target_id if kind == "move" else "",
+                    aids, should_stop=lambda: state["stop"],
+                )
+            except Exception as exc:
+                verification = {"verified": False, "verification_error": str(exc)}
+            if not verification.get("verified"):
+                error = verification.get("verification_error") or "远端成员关系未达到预期"
+                store.update_execution_operation(op_id, "unknown", result=verification, error=error)
+                raise bili_api.WriteUncertainError(f"{kind} 已发送但远端核对未通过：{error}")
+            store.update_execution_operation(op_id, "verified", result=verification)
+
+        def journaled_cleanup(source_id):
+            op_id = store.create_execution_operation(
+                execution_run_id[0], "clean_invalid", source_id, "", [],
+                {"source_id": source_id},
+            )
+            try:
+                session.clean_invalid_folder(source_id, should_stop=lambda: state["stop"])
+            except bili_api.WriteUncertainError as exc:
+                store.update_execution_operation(op_id, "unknown", error=str(exc))
+                raise
+            except Exception as exc:
+                store.update_execution_operation(op_id, "failed", error=str(exc))
+                raise
+            try:
+                verification = reconcile_invalid_cleanup(
+                    session, source_id, _is_invalid, should_stop=lambda: state["stop"])
+            except Exception as exc:
+                verification = {"verified": False, "verification_error": str(exc)}
+            if not verification.get("verified"):
+                error = verification.get("verification_error") or "远端仍有失效内容或无法完成核对"
+                store.update_execution_operation(op_id, "unknown", result=verification, error=error)
+                raise bili_api.WriteUncertainError(f"清理失效内容已发送但未能核对：{error}")
+            store.update_execution_operation(op_id, "verified", result=verification)
+
+        def journaled_folder_change(kind, media_id, title=""):
+            payload = {"title": title} if title else {}
+            op_id = store.create_execution_operation(
+                execution_run_id[0], kind, "", media_id if kind == "rename_folder" else "", [],
+                {**payload, "media_id": media_id},
+            )
+            try:
+                if kind == "delete_folder":
+                    session.delete_folder(media_id, should_stop=lambda: state["stop"])
+                    verification = reconcile_folder_deleted(session, media_id)
+                else:
+                    session.rename_folder(media_id, title, should_stop=lambda: state["stop"])
+                    verification = reconcile_folder_renamed(session, media_id, title)
+            except bili_api.WriteUncertainError as exc:
+                store.update_execution_operation(op_id, "unknown", error=str(exc))
+                raise
+            except Exception as exc:
+                store.update_execution_operation(op_id, "failed", error=str(exc))
+                raise
+            if not verification.get("verified"):
+                error = verification.get("verification_error") or "远端收藏夹状态未达到预期"
+                store.update_execution_operation(op_id, "unknown", result=verification, error=error)
+                raise bili_api.WriteUncertainError(f"{kind} 已发送但远端核对未通过：{error}")
+            store.update_execution_operation(op_id, "verified", result=verification)
+
         try:
+            store.set_plan_version_status(merge_version["id"], "executing")
+            execution_run_id[0] = store.create_execution_run(merge_version["id"],
+                                                              state.get("job_id"))
+            state["execution_run_id"] = execution_run_id[0]
             # 先把远端目录变化同步到 SQLite，并在所有写请求之前重验画像版本。
             live_folders = session.list_folders()
             store.save_folders(live_folders)
+            refreshed_snapshot = store.capture_plan_snapshot(current_versions)
+            if not planning_service.is_snapshot_current(merge_version.get("base_snapshot"),
+                                                        refreshed_snapshot):
+                state.update(status="blocked", error="远端目录刷新后发现方案基础快照变化，请重新复核",
+                             stop=True)
+                store.set_plan_version_status(merge_version["id"], "stale")
+                return
             readiness_now = _organization_profile_readiness()
             if not readiness_now["ready"]:
                 state.update(status="blocked", error=readiness_now["message"], stop=True)
@@ -1848,14 +2071,13 @@ def folder_organize_start():
                     result.update(before=count, movable=len(normal), invalid=len(invalid) + hidden_invalid)
                     try:
                         for batch in chunks(normal):
-                            session.move_batch(str(source_id), target_id, batch, mid=owner_mid,
-                                               should_stop=lambda: state["stop"])
+                            journaled_batch("move", str(source_id), target_id, batch,
+                                            {"group_target_id": target_id})
                         for batch in chunks(invalid):
-                            session.batch_delete(str(source_id), batch,
-                                                 should_stop=lambda: state["stop"])
+                            journaled_batch("delete", str(source_id), "", batch,
+                                            {"group_target_id": target_id})
                         if hidden_invalid:
-                            session.clean_invalid_folder(str(source_id),
-                                                         should_stop=lambda: state["stop"])
+                            journaled_cleanup(str(source_id))
                         # B 站的收藏夹计数在 move 后可能短暂延迟，等待其收敛再决定是否删夹。
                         after = count
                         for attempt in range(6):
@@ -1870,7 +2092,7 @@ def folder_organize_start():
                             result.update(status="not_empty", error=f"仍有 {after} 条，未删除夹")
                             group_ok = False
                         elif group.get("delete_sources", True):
-                            session.delete_folder(str(source_id), should_stop=lambda: state["stop"])
+                            journaled_folder_change("delete_folder", str(source_id))
                             result["status"] = "merged_and_deleted"
                         else:
                             result["status"] = "merged_kept"
@@ -1884,7 +2106,7 @@ def folder_organize_start():
                     final_name = (group.get("final_name") or "").strip()
                     current = {str(f["media_id"]): f for f in session.list_folders()}.get(target_id)
                     if current and final_name and current.get("title") != final_name:
-                        session.rename_folder(target_id, final_name, should_stop=lambda: state["stop"])
+                        journaled_folder_change("rename_folder", target_id, final_name)
                     group["status"] = "done"
                 else:
                     group["status"] = "partial"
@@ -1907,20 +2129,36 @@ def folder_organize_start():
         finally:
             state["running"] = False
             save()
+            final_plan_status = {
+                "done": "completed", "unknown": "unknown", "rate_limited": "partial",
+                "error": "partial", "stopped": "partial", "blocked": "stale",
+            }.get(state.get("status"), "partial")
+            store.set_plan_version_status(merge_version["id"], final_plan_status)
+            if execution_run_id[0]:
+                store.update_execution_run(execution_run_id[0], final_plan_status,
+                                           state.get("error"))
             try:
                 folders = session.list_folders(); store.save_folders(folders); APP["folders"] = folders
             except Exception: pass
             emit("ok" if state["status"] == "done" else "warn", "收藏夹合并任务已结束",
                  phase="folder_merge", kind="folder_merge_end")
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(pending)}
+    try:
+        job_id = _submit_background_job("folder_merge", run, "folder_merge_run",
+                                        payload={"group_count": len(pending)})
+    except JobConflict as exc:
+        state["running"] = False
+        APP["folder_merge_run"] = None
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True, "started": True, "total": len(pending), "job_id": job_id}
 
 
 @app.post("/api/folder-organize/stop")
 def folder_organize_stop():
     state = APP.get("folder_merge_run")
     if state and state.get("running"):
+        if state.get("job_id") and TASK_MANAGER.cancel(state["job_id"]):
+            return {"ok": True}
         state["stop"] = True
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的收藏夹合并"}
@@ -2222,6 +2460,7 @@ def folder_profiles_get():
 
 
 @app.delete("/api/folder-profiles/{media_id}")
+@_serialize_business_mutation("删除收藏夹画像")
 def folder_profile_delete(media_id: str):
     """删除某个收藏夹的本地画像；不会改动 B 站收藏夹简介。"""
     folders = store.load_folders()
@@ -2263,6 +2502,7 @@ def folder_profile_bilibili_info(media_id: str):
 
 
 @app.post("/api/folder-profiles/{media_id}/publish-intro")
+@_serialize_business_mutation("上传收藏夹简介")
 def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
     """把用户确认的画像简介写回 B 站；保留远端标题、隐私状态与封面。"""
     folder = next((row for row in store.load_folders()
@@ -2298,6 +2538,7 @@ def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
 
 
 @app.post("/api/folder-profiles/generate")
+@_serialize_job_start("生成收藏夹画像")
 def folder_profiles_generate(body: FolderProfileGenerateIn):
     current = APP.get("folder_profile_run") or {}
     if current.get("running"):
@@ -2443,19 +2684,29 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                  total=state["total"], generated=state["generated"],
                  skipped=state["skipped"], failed=state["failed"])
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(requested)}
+    try:
+        job_id = _submit_background_job("folder_profile", run, "folder_profile_run",
+                                        payload={"folder_ids": requested,
+                                                 "rebuild": bool(body.rebuild)})
+    except JobConflict as exc:
+        state["running"] = False
+        APP["folder_profile_run"] = None
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True, "started": True, "total": len(requested), "job_id": job_id}
 
 
 @app.get("/api/folder-profiles/status")
 def folder_profiles_status():
-    return APP.get("folder_profile_run") or {"running": False, "done": 0, "total": 0}
+    return _task_state("folder_profile_run", "folder_profile",
+                       {"running": False, "done": 0, "total": 0})
 
 
 @app.post("/api/folder-profiles/stop")
 def folder_profiles_stop():
     state = APP.get("folder_profile_run")
     if state and state.get("running"):
+        if state.get("job_id") and TASK_MANAGER.cancel(state["job_id"]):
+            return {"ok": True}
         state["stop"] = True
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的画像任务"}
@@ -2591,6 +2842,7 @@ def _make_analyzer(folders: list[str], folder_profiles: list[dict] | None = None
 
 
 @app.post("/api/analyze/start")
+@_serialize_job_start("启动内容分析")
 def analyze_start(body: Optional[AnalyzeIn] = None):
     if APP["analyze_run"] and APP["analyze_run"].get("running"):
         return JSONResponse({"ok": False, "error": "分析已在运行中"}, status_code=400)
@@ -2789,21 +3041,35 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
             state["continuous"] = False
             state["waiting"] = False
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(videos), "pending": pending0}
+    try:
+        job_id = _submit_background_job("analyze", run, "analyze_run",
+                                        payload={"video_count": len(videos),
+                                                 "pending_count": pending0,
+                                                 "batch_size": batch_size,
+                                                 "concurrency": concurrency})
+    except JobConflict as exc:
+        state["running"] = False
+        APP["analyze_run"] = None
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+    return {"ok": True, "started": True, "total": len(videos),
+            "pending": pending0, "job_id": job_id}
 
 
 @app.get("/api/analyze/status")
 def analyze_status():
-    return APP["analyze_run"] or {"running": False, "done": 0, "total": 0,
-                                  "pending": 0,
-                                  "failed": 0, "stop": False, "error": None}
+    return _task_state("analyze_run", "analyze",
+                       {"running": False, "done": 0, "total": 0,
+                        "pending": 0, "failed": 0, "stop": False, "error": None})
 
 
 @app.post("/api/analyze/stop")
 def analyze_stop():
     if APP["analyze_run"]:
-        APP["analyze_run"]["stop"] = True
+        state = APP["analyze_run"]
+        if state.get("job_id") and TASK_MANAGER.cancel(state["job_id"]):
+            ANALYZE_WAKE.set()
+            return {"ok": True}
+        state["stop"] = True
         ANALYZE_WAKE.set()
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的分析"}
@@ -2872,6 +3138,7 @@ def get_plan():
         else:
             row["profile_context_current"] = True
         plan_rows[bvid] = row
+    current_version = store.current_plan_version("content")
     return {
         "analysis": analysis,
         # 移入目标只列有当前画像的收藏夹；默认收藏夹是未分拣收件箱，永远不是移入目标。
@@ -2895,10 +3162,31 @@ def get_plan():
             "total_videos": len(videos),
         },
         "plan": plan_rows,
+        "plan_version": ({key: current_version[key] for key in
+                          ("id", "version", "status", "base_snapshot", "diff", "created_at", "approved_at")}
+                         if current_version else None),
     }
 
 
+@app.get("/api/plan/versions")
+def plan_versions_get(limit: int = 50):
+    return {"versions": [
+        {key: version[key] for key in
+         ("id", "version", "status", "base_snapshot", "diff", "created_at", "approved_at")}
+        for version in store.load_plan_versions(limit=limit, plan_key="content")
+    ]}
+
+
+@app.get("/api/plan/versions/{version_id}")
+def plan_version_get(version_id: str):
+    version = store.load_plan_version(version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="方案版本不存在")
+    return version
+
+
 @app.post("/api/plan/mark_invalid")
+@_serialize_business_mutation("生成失效视频方案")
 def plan_mark_invalid():
     """把所有标题恰为「已失效视频」的视频标记为删除（写入 plan.json，等执行）。
 
@@ -2915,9 +3203,13 @@ def plan_mark_invalid():
     for v in inv:
         plan[v["bvid"]] = {"bvid": v["bvid"], "action": "delete_invalid",
                            "target_folder": "", "create_new_name": ""}
-    store.save_plan(plan)
+    old = store.load_plan_raw()
+    snapshot = store.capture_plan_snapshot()
+    version = store.create_plan_version(
+        plan, snapshot, planning_service.diff_plans(old, plan), status="approved",
+    )
     emit("warn", f"已把 {len(inv)} 条失效视频标记为删除（到阶段❹点「开始执行」生效）")
-    return {"ok": True, "count": len(inv)}
+    return {"ok": True, "count": len(inv), "plan_version": version}
 
 
 class PlanReview(BaseModel):
@@ -2925,11 +3217,15 @@ class PlanReview(BaseModel):
 
 
 @app.post("/api/plan/apply")
+@_serialize_business_mutation("保存归类方案")
 def apply_plan(body: PlanReview):
     """把前端确认后的归类方案存入 plan.json，作为执行阶段的输入。
 
     关键：**保留已存在的 done 状态**，否则已执行过的条目会被重置为待办 → 重复执行。
     """
+    validation_error = planning_service.validate_review_items(body.apply_list)
+    if validation_error:
+        return JSONResponse({"ok": False, "error": validation_error}, status_code=400)
     destination_error = _default_folder_destination_error(body.apply_list)
     if destination_error:
         return JSONResponse({"ok": False, "error": destination_error}, status_code=409)
@@ -2962,37 +3258,20 @@ def apply_plan(body: PlanReview):
                                 status_code=409)
 
     old = store.load_plan_raw()
-    plan = {}
-    kept_done = 0
-    for item in body.apply_list:
-        bvid = item.get("bvid", "")
-        if not bvid:
-            continue
-        entry = {
-            "bvid": bvid,
-            "action": item.get("action", "skip"),
-            "target_folder": item.get("target_folder", ""),
-            "create_new_name": item.get("create_new_name", ""),
-            "status": "pending",
-        }
-        if entry["action"] in classification_actions:
-            entry["organization_profile_versions"] = profile_versions
-        prev = old.get(bvid) or {}
-        if prev.get("status") == "done":
-            entry["status"] = "done"
-            entry["result"] = prev.get("result", "")
-            entry["at"] = prev.get("at", "")
-            kept_done += 1
-        plan[bvid] = entry
-    # 保留 plan 中原本存在、但本次未提交的条目（例如"标记失效视频"）
-    for bvid, prev in old.items():
-        plan.setdefault(bvid, prev)
-    store.save_plan(plan)
+    plan, kept_done = planning_service.build_reviewed_plan(
+        body.apply_list, old, profile_versions,
+    )
+    snapshot = store.capture_plan_snapshot(profile_versions)
+    version = store.create_plan_version(
+        plan, snapshot, planning_service.diff_plans(old, plan), status="approved",
+    )
     msg = f"已写入方案 {len(plan)} 条"
     if kept_done:
         msg += f"（其中 {kept_done} 条已完成状态已保留，不会重复执行）"
     emit("info", msg)
-    return {"ok": True, "planned": len(plan), "kept_done": kept_done}
+    return {"ok": True, "planned": len(plan), "kept_done": kept_done,
+            "plan_version": {key: version[key] for key in
+                             ("id", "version", "status", "base_snapshot", "diff")}}
 
 
 class PlanStatusIn(BaseModel):
@@ -3002,10 +3281,12 @@ class PlanStatusIn(BaseModel):
 
 
 @app.post("/api/plan/set_status")
+@_serialize_business_mutation("修改方案执行状态")
 def plan_set_status(body: PlanStatusIn):
     """把条目在「待操作 / 已完成」之间移动（例如把已完成的移回待操作）。"""
     st = body.status if body.status in ("pending", "done") else "pending"
     plan = store.load_plan_raw()
+    previous = dict(plan)
     targets = set(plan.keys()) if body.all else set(body.bvids or [])
     n = 0
     for bvid, item in plan.items():
@@ -3014,9 +3295,22 @@ def plan_set_status(body: PlanStatusIn):
             if st == "pending":
                 item["result"] = ""
             n += 1
-    store.save_plan(plan)
+    version = None
+    if n and st == "pending":
+        current_version = store.current_plan_version("content")
+        snapshot = ((current_version or {}).get("base_snapshot") or
+                    store.capture_plan_snapshot())
+        version = store.create_plan_version(
+            plan, snapshot, planning_service.diff_plans(previous, plan), status="approved",
+        )
+    else:
+        store.save_plan(plan)
     emit("info", f"已把 {n} 条改为「{'待操作' if st == 'pending' else '已完成'}」")
-    return {"ok": True, "count": n, "status": st}
+    result = {"ok": True, "count": n, "status": st}
+    if version:
+        result["plan_version"] = {key: version[key] for key in
+                                  ("id", "version", "status", "diff")}
+    return result
 
 
 class PlanRemoveIn(BaseModel):
@@ -3024,22 +3318,31 @@ class PlanRemoveIn(BaseModel):
 
 
 @app.post("/api/plan/remove")
+@_serialize_business_mutation("移除方案条目")
 def plan_remove(body: PlanRemoveIn):
     """把条目从方案中彻底移除（只删本地方案，不动 B站）。"""
-    plan = store.load_plan_raw()
+    previous = store.load_plan_raw()
+    plan = dict(previous)
     targets = set(body.bvids or [])
     n = 0
     for b in list(plan.keys()):
         if b in targets:
             plan.pop(b, None)
             n += 1
-    store.replace_plan(plan)
+    current_version = store.current_plan_version("content")
+    snapshot = ((current_version or {}).get("base_snapshot") or
+                store.capture_plan_snapshot())
+    version = store.create_plan_version(
+        plan, snapshot, planning_service.diff_plans(previous, plan), status="approved",
+    )
     emit("warn", f"已从方案中移除 {n} 条")
-    return {"ok": True, "count": n}
+    return {"ok": True, "count": n,
+            "plan_version": {key: version[key] for key in ("id", "version", "status", "diff")}}
 
 
 # ============ 阶段4: 执行 ============
 @app.post("/api/apply/start")
+@_serialize_job_start("启动执行")
 def apply_start():
     """批量执行 plan：失效视频 batch-del，其余视频 move。
 
@@ -3098,6 +3401,25 @@ def apply_start():
             return JSONResponse({"ok": False,
                                  "error": "待执行方案里有已过期的归类结果，请重新分析并确认方案"},
                                 status_code=409)
+    profile_versions_for_snapshot = (readiness.get("profile_versions", {})
+                                     if needs_profiles else {})
+    plan_version = store.current_plan_version("content")
+    if not plan_version:
+        snapshot = store.capture_plan_snapshot(profile_versions_for_snapshot)
+        plan_version = store.create_plan_version(
+            plan, snapshot, planning_service.diff_plans({}, plan), status="approved",
+        )
+    elif plan_version.get("status") != "approved":
+        return JSONResponse({"ok": False,
+                             "error": "当前方案版本尚未处于已批准状态，请重新复核并确认方案"},
+                            status_code=409)
+    observed_snapshot = store.capture_plan_snapshot(profile_versions_for_snapshot)
+    if not planning_service.is_snapshot_current(plan_version.get("base_snapshot"),
+                                                observed_snapshot):
+        store.set_plan_version_status(plan_version["id"], "stale")
+        return JSONResponse({"ok": False,
+                             "error": "方案依据的收藏快照或画像版本已变化，请重新分析并确认方案"},
+                            status_code=409)
     total = len(pending)
     already_done = len([1 for it in plan.values() if it.get("status") == "done"])
     held_unknown = len([1 for it in plan.values() if it.get("status") == "unknown"])
@@ -3105,7 +3427,9 @@ def apply_start():
     state = APP["apply_run"] = {"running": True, "done": 0, "total": total,
                                 "ok": 0, "failed": 0, "skip": 0, "deleted": 0,
                                 "unknown": 0, "stop": False, "error": None, "log": [],
-                                "batch_size": batch_size, "batch_done": 0, "batch_total": 0}
+                                "batch_size": batch_size, "batch_done": 0, "batch_total": 0,
+                                "plan_version_id": plan_version["id"]}
+    execution_run_id = [None]
 
     def _mark(item, status: str, result: str):
         """写入一条方案的执行结果。"""
@@ -3162,21 +3486,21 @@ def apply_start():
             label = "删除失效" if kind == "delete" else f"移入「{target_name}」"
             emit("info", f"批次 {bn}/{bt}：{label} {len(entries)} 条",
                  phase="apply", done=state["done"], total=total)
+            operation_id = store.create_execution_operation(
+                execution_run_id[0], kind, src, target_id, aids,
+                {"bvids": [bvid for bvid, _item, _video in entries],
+                 "target_name": target_name},
+            )
             try:
                 if kind == "delete":
                     session.batch_delete(src, aids, should_stop=lambda: state["stop"])
                     msg = f"批量删除失效视频成功（批次 {bn}）"
-                    finish_items(entries, "done", msg, source_id=src)
-                    state["deleted"] += len(entries)
                 else:
                     session.move_batch(src, target_id, aids, mid=owner_mid,
                                        should_stop=lambda: state["stop"])
                     msg = f"批量移入「{target_name}」成功（批次 {bn}）"
-                    finish_items(entries, "done", msg, target_id=target_id, source_id=src)
-                emit("ok", f"批次 {bn}/{bt} 完成：{len(entries)} 条",
-                     phase="apply", done=state["done"], total=total)
-                return True
             except bili_api.WriteUncertainError as e:
+                store.update_execution_operation(operation_id, "unknown", error=str(e))
                 msg = f"批次 {bn} 结果不确定：{e}"
                 finish_items(entries, "unknown", msg)
                 state["error"] = msg + "。已停止，请人工复核后再继续。"
@@ -3185,6 +3509,7 @@ def apply_start():
                      done=state["done"], total=total)
                 return False
             except bili_api.RateLimitedError as e:
+                store.update_execution_operation(operation_id, "failed", error=str(e))
                 state["error"] = ("已手动停止，本批保留待处理。" if state["stop"] else
                                   f"风控触发：{e}。已停止，本批保留待处理。")
                 state["stop"] = True
@@ -3193,13 +3518,50 @@ def apply_start():
                 return False
             except bili_api.BiliApiError as e:
                 # 明确业务失败：记账后继续后续批次。
+                store.update_execution_operation(operation_id, "failed", error=str(e))
                 fail_entries(entries, f"批次 {bn} 失败：{e}")
                 return True
             except Exception as e:
+                store.update_execution_operation(operation_id, "failed", error=str(e))
                 fail_entries(entries, f"批次 {bn} 异常：{e}")
                 return True
 
+            try:
+                verification = reconcile_batch(
+                    session, kind, src, target_id if kind == "move" else "", aids,
+                    should_stop=lambda: state["stop"],
+                )
+            except Exception as e:
+                verification = {"verified": False, "verification_error": str(e)}
+            if not verification.get("verified"):
+                details = verification.get("verification_error") or (
+                    f"远端成员关系未达到预期：source={verification.get('source_present', [])}, "
+                    f"target={verification.get('target_present', [])}")
+                store.update_execution_operation(operation_id, "unknown", result=verification,
+                                                 error=details)
+                msg = f"批次 {bn} 已发送但远端核对未通过：{details}"
+                finish_items(entries, "unknown", msg)
+                state["error"] = msg + "。已暂停，不会自动重发，请人工复核。"
+                state["stop"] = True
+                emit("err", state["error"], phase="apply", kind="apply_end",
+                     done=state["done"], total=total)
+                return False
+
+            store.update_execution_operation(operation_id, "verified", result=verification)
+            if kind == "delete":
+                finish_items(entries, "done", msg, source_id=src)
+                state["deleted"] += len(entries)
+            else:
+                finish_items(entries, "done", msg, target_id=target_id, source_id=src)
+            emit("ok", f"批次 {bn}/{bt} 完成并经远端核对：{len(entries)} 条",
+                 phase="apply", done=state["done"], total=total)
+            return True
+
         try:
+            store.set_plan_version_status(plan_version["id"], "executing")
+            execution_run_id[0] = store.create_execution_run(plan_version["id"],
+                                                              state.get("job_id"))
+            state["execution_run_id"] = execution_run_id[0]
             if migrated:
                 emit("info", f"已把历史断点前 {migrated} 条补标为已完成")
             emit("info", f"开始批量执行：待操作 {total} 条，单批上限 {batch_size}"
@@ -3238,7 +3600,9 @@ def apply_start():
                     emit("err", state["error"], phase="apply", kind="apply_end",
                          done=state["done"], total=total)
                     return
+                live_folder_names = {str(folder.get("title", "")) for folder in live_folders}
                 if any(it.get("action") == "move_to_existing" and
+                       str(it.get("target_folder", "")) in live_folder_names and
                        str(it.get("target_folder", "")) not in profile_names
                        for _, it in pending):
                     state["error"] = "执行目标不再是有当前完整画像的收藏夹，未发送移动请求"
@@ -3246,6 +3610,16 @@ def apply_start():
                     emit("err", state["error"], phase="apply", kind="apply_end",
                          done=state["done"], total=total)
                     return
+            refreshed_snapshot = store.capture_plan_snapshot(profile_versions_for_snapshot)
+            if not planning_service.is_snapshot_current(plan_version.get("base_snapshot"),
+                                                        refreshed_snapshot):
+                state["error"] = "远端收藏夹目录刷新后发现方案基础快照变化，未发送写请求；请重新复核方案"
+                state["stop"] = True
+                state["preflight_stale"] = True
+                store.set_plan_version_status(plan_version["id"], "stale")
+                emit("err", state["error"], phase="apply", kind="apply_end",
+                     done=state["done"], total=total)
+                return
             name_to_id = {f["title"]: str(f["media_id"]) for f in live_folders}
             forbidden_names = _default_folder_names(live_folders)
             active_ids = {str(f["media_id"]) for f in live_folders}
@@ -3354,21 +3728,50 @@ def apply_start():
                 target_id = name_to_id.get(name, "")
                 entries = [entry for _, entry in grouped]
                 if not target_id:
+                    operation_id = store.create_execution_operation(
+                        execution_run_id[0], "create_folder", "", "", [],
+                        {"title": name, "bvids": [entry[0] for entry in entries]},
+                    )
                     try:
                         target_id = session.create_folder(name)
                         if not target_id:
                             raise bili_api.BiliApiError("未返回收藏夹 id")
-                        name_to_id[name] = target_id
-                        emit("ok", f"已新建收藏夹「{name}」", phase="apply")
+                    except bili_api.WriteUncertainError as e:
+                        store.update_execution_operation(operation_id, "unknown", error=str(e))
+                        finish_items(entries, "unknown", f"新建收藏夹「{name}」结果不确定：{e}")
+                        state["error"] = f"新建收藏夹「{name}」结果不确定，已暂停，不会自动重发。"
+                        state["stop"] = True
+                        emit("err", state["error"], phase="apply", kind="apply_end",
+                             done=state["done"], total=total)
+                        return
                     except bili_api.RateLimitedError as e:
+                        store.update_execution_operation(operation_id, "failed", error=str(e))
                         state["error"] = f"新建「{name}」时触发风控：{e}。已停止。"
                         state["stop"] = True
                         emit("err", state["error"], phase="apply", kind="apply_end",
                              done=state["done"], total=total)
                         return
                     except Exception as e:
+                        store.update_execution_operation(operation_id, "failed", error=str(e))
                         fail_entries(entries, f"新建收藏夹「{name}」失败：{e}")
                         continue
+                    try:
+                        verification = reconcile_created_folder(session, target_id, name)
+                    except Exception as e:
+                        verification = {"verified": False, "verification_error": str(e)}
+                    if not verification.get("verified"):
+                        message = verification.get("verification_error") or "远端未能唯一确认新建收藏夹"
+                        store.update_execution_operation(operation_id, "unknown", result=verification,
+                                                         error=message)
+                        finish_items(entries, "unknown", f"新建收藏夹「{name}」未能核对：{message}")
+                        state["error"] = f"新建收藏夹「{name}」未能确认，已暂停，不会自动重发。"
+                        state["stop"] = True
+                        emit("err", state["error"], phase="apply", kind="apply_end",
+                             done=state["done"], total=total)
+                        return
+                    store.update_execution_operation(operation_id, "verified", result=verification)
+                    name_to_id[name] = target_id
+                    emit("ok", f"已新建并核对收藏夹「{name}」", phase="apply")
                 # 同一新夹的条目仍需按来源夹分组。
                 by_src = {}
                 for src, entry in grouped:
@@ -3399,6 +3802,19 @@ def apply_start():
         finally:
             save_progress()
             state["running"] = False
+            if state.get("preflight_stale"):
+                final_status = "stale"
+            elif state.get("unknown"):
+                final_status = "unknown"
+            elif state.get("failed"):
+                final_status = "partial"
+            elif state.get("stop"):
+                final_status = "partial" if state.get("error") else "cancelled"
+            else:
+                final_status = "completed"
+            store.set_plan_version_status(plan_version["id"], final_status)
+            if execution_run_id[0]:
+                store.update_execution_run(execution_run_id[0], final_status, state.get("error"))
             # 内容整理结束后自动刷新一次收藏夹目录，避免 remote_count 与本地关系长期不一致
             if state.get("ok") or state.get("deleted"):
                 refreshed = _refresh_folder_directory()
@@ -3406,23 +3822,33 @@ def apply_start():
                     emit("ok", f"已自动刷新收藏夹目录：{len(refreshed)} 个",
                          phase="apply", kind="folders_refreshed")
 
-    threading.Thread(target=run, daemon=True).start()
+    try:
+        job_id = _submit_background_job("apply", run, "apply_run",
+                                        payload={"plan_version_id": (store.current_plan_version() or {}).get("id"),
+                                                 "total": total, "batch_size": batch_size})
+    except JobConflict as exc:
+        state["running"] = False
+        APP["apply_run"] = None
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
     return {"ok": True, "started": True, "total": total, "batch_size": batch_size,
-            "held_unknown": held_unknown}
+            "held_unknown": held_unknown, "job_id": job_id}
 
 
 @app.get("/api/apply/status")
 def apply_status():
-    return APP["apply_run"] or {"running": False, "done": 0, "total": 0,
-                                "ok": 0, "failed": 0, "skip": 0, "unknown": 0,
-                                "error": None,
-                                "log": []}
+    return _task_state("apply_run", "apply",
+                       {"running": False, "done": 0, "total": 0,
+                        "ok": 0, "failed": 0, "skip": 0, "unknown": 0,
+                        "error": None, "log": []})
 
 
 @app.post("/api/apply/stop")
 def apply_stop():
     if APP["apply_run"]:
-        APP["apply_run"]["stop"] = True
+        state = APP["apply_run"]
+        if state.get("job_id") and TASK_MANAGER.cancel(state["job_id"]):
+            return {"ok": True}
+        state["stop"] = True
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的执行"}
 
@@ -3430,12 +3856,56 @@ def apply_stop():
 # ============ 全局状态 ============
 @app.get("/api/status")
 def status():
+    TASK_MANAGER.start()
     return {
         "stats": store.stats(),
-        "scan": APP["scan_run"],
-        "analyze": APP["analyze_run"],
-        "apply": APP["apply_run"],
+        "scan": _task_state("scan_run", "scan", {"running": False, "error": None}),
+        "analyze": _task_state("analyze_run", "analyze", {"running": False}),
+        "apply": _task_state("apply_run", "apply", {"running": False}),
+        "jobs": TASK_MANAGER.list(limit=20),
     }
+
+
+@app.on_event("startup")
+def _start_task_manager():
+    TASK_MANAGER.start()
+
+
+@app.get("/api/jobs")
+def jobs_list(limit: int = 50, kind: str = ""):
+    TASK_MANAGER.start()
+    return {"jobs": TASK_MANAGER.list(limit=limit, kind=kind or None)}
+
+
+@app.get("/api/jobs/{job_id}")
+def job_get(job_id: str):
+    TASK_MANAGER.start()
+    job = TASK_MANAGER.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return job
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def job_cancel(job_id: str):
+    TASK_MANAGER.start()
+    if not TASK_MANAGER.cancel(job_id):
+        return JSONResponse({"ok": False, "error": "任务已结束或当前任务不支持取消"},
+                            status_code=409)
+    return {"ok": True, "job_id": job_id}
+
+
+@app.get("/api/execution/runs")
+def execution_runs_get(limit: int = 50):
+    return {"runs": store.load_execution_runs(limit=limit)}
+
+
+@app.get("/api/execution/runs/{run_id}")
+def execution_run_get(run_id: str):
+    run = store.load_execution_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="执行记录不存在")
+    return {"run": run, "operations": store.load_execution_operations(run_id)}
 
 
 # ============ 静态页面 ============
