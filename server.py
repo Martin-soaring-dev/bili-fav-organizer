@@ -60,6 +60,8 @@ log = logging.getLogger("server")
 
 app = FastAPI(title="B站收藏夹整理")
 
+MODEL_TEST_TIMEOUT_SECONDS = 45
+
 # ---------- 运行状态（跨请求的全局状态） ----------
 APP = {
     "session": None,          # bili_api.BiliSession
@@ -284,6 +286,19 @@ def _thinking_params(effort: str) -> dict:
     elif effort == "xhigh":
         params["reasoning_effort"] = "max"
     return params
+
+
+def _build_model_test_payload(config: llm_analyzer.LLMConfig) -> dict:
+    """Build the same short JSON probe for both model-test entry points."""
+    return llm_analyzer.build_chat_completion_payload(
+        config,
+        messages=[
+            {"role": "system", "content": "Return only a valid JSON object."},
+            {"role": "user", "content": 'Return exactly {"ok":true}.'},
+        ],
+        max_tokens=256,
+        structured_output=True,
+    )
 
 
 def resolved_llm_settings(cfg: dict | None = None) -> dict:
@@ -611,6 +626,17 @@ def _effective_model_rows(models: list[dict]) -> list[dict]:
     return result
 
 
+def _model_output_limit_error(provider: dict, model_name: str,
+                              requested: int | None) -> str | None:
+    if requested is None or int(requested) <= 0:
+        return None
+    effective = llm_analyzer.cap_completion_tokens(
+        provider.get("base_url") or "", model_name, int(requested))
+    if effective < int(requested):
+        return f"最大输出超过该模型 API 上限（{effective:,} tokens）"
+    return None
+
+
 @app.get("/api/providers/presets")
 def provider_presets():
     return {"presets": PROVIDER_PRESETS}
@@ -682,11 +708,15 @@ def provider_models_delete_all(provider_id: str):
 
 @app.post("/api/models")
 def models_create(body: ModelIn):
-    if not store.get_provider(body.provider_id):
+    provider = store.get_provider(body.provider_id)
+    if not provider:
         return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
     name = (body.name or "").strip()
     if not name:
         return JSONResponse({"ok": False, "error": "模型名称不能为空"}, status_code=400)
+    limit_error = _model_output_limit_error(provider, name, body.max_output_tokens)
+    if limit_error:
+        return JSONResponse({"ok": False, "error": limit_error}, status_code=400)
     model = store.create_model(
         body.provider_id, name,
         context_tokens=body.context_tokens,
@@ -700,6 +730,17 @@ def models_create(body: ModelIn):
 def models_update(model_id: str, body: ModelUpdateIn):
     if body.provider_id and not store.get_provider(body.provider_id):
         return JSONResponse({"ok": False, "error": "目标供应商不存在"}, status_code=404)
+    existing = store.get_model(model_id)
+    if not existing:
+        return JSONResponse({"ok": False, "error": "模型不存在"}, status_code=404)
+    provider = store.get_provider(body.provider_id or existing["provider_id"])
+    if not provider:
+        return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
+    limit_error = _model_output_limit_error(
+        provider, (body.name or existing["name"]).strip() or existing["name"],
+        body.max_output_tokens)
+    if limit_error:
+        return JSONResponse({"ok": False, "error": limit_error}, status_code=400)
     model = store.update_model(
         model_id, name=body.name, context_tokens=body.context_tokens,
         max_output_tokens=body.max_output_tokens,
@@ -1044,16 +1085,9 @@ def models_test(model_id: str):
             provider_name=provider.get("name", ""),
             capabilities=dict(model.get("capabilities") or {}),
         )
-        payload = llm_analyzer.build_chat_completion_payload(
-            test_config,
-            messages=[
-                {"role": "system", "content": "Return only a valid JSON object."},
-                {"role": "user", "content": 'Return exactly {"ok":true}.'},
-            ],
-            max_tokens=256,
-            structured_output=True,
-        )
-        r = requests.post(url, json=payload, headers=headers, timeout=45)
+        payload = _build_model_test_payload(test_config)
+        r = requests.post(url, json=payload, headers=headers,
+                          timeout=MODEL_TEST_TIMEOUT_SECONDS)
         if not r.ok:
             msg = f"HTTP {r.status_code}: {r.text[:180]}"
             store.update_model(model_id, test_status="fail", test_message=msg,
@@ -2138,12 +2172,9 @@ def test_llm(body: Optional[ModelTestIn] = None):
             model=cfg["model"], params=cfg.get("llm_params") or {}, max_tokens=256,
             provider_name=cfg.get("_provider_name", ""),
             capabilities=dict(cfg.get("model_capabilities") or {}))
-        payload = llm_analyzer.build_chat_completion_payload(
-            test_config,
-            [{"role": "system", "content": "Return only a valid JSON object."},
-             {"role": "user", "content": 'Return exactly {"ok":true}.'}],
-            max_tokens=256, structured_output=True)
-        r = _rq.post(url, json=payload, headers=headers, timeout=30)
+        payload = _build_model_test_payload(test_config)
+        r = _rq.post(url, json=payload, headers=headers,
+                     timeout=MODEL_TEST_TIMEOUT_SECONDS)
         if not r.ok:
             return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
         content = llm_analyzer.extract_chat_completion_content(r.json())

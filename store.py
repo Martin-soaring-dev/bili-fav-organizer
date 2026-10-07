@@ -1133,10 +1133,12 @@ def replace_provider_models(provider_id: str, models: list[dict]) -> list[dict]:
                 # Remote model-list APIs often expose only an ID. Keep user-maintained
                 # limits and test state unless the endpoint actually supplied metadata.
                 updates = {"updated_at": now}
-                if item.get("context_tokens") is not None:
+                if (item.get("context_tokens") is not None and
+                        str(old["context_source"] or "") != "manual"):
                     updates["context_tokens"] = max(0, int(item["context_tokens"]))
                     updates["context_source"] = item.get("context_source") or "api"
-                if item.get("max_output_tokens") is not None:
+                if (item.get("max_output_tokens") is not None and
+                        str(old["output_source"] or "") != "manual"):
                     updates["max_output_tokens"] = max(0, int(item["max_output_tokens"]))
                     updates["output_source"] = item.get("output_source") or "api"
                 if item.get("thinking_effort") is not None:
