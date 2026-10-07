@@ -73,6 +73,7 @@ APP = {
     "events": [],             # 事件缓冲(带自增 id)，供 SSE 推送
 }
 ANALYZE_WAKE = threading.Event()
+_scan_start_lock = threading.Lock()
 _evt_lock = threading.Lock()
 _evt_seq = [0]
 
@@ -1135,6 +1136,69 @@ class ScanSelectionIn(BaseModel):
     folder_ids: list[str]
 
 
+class ScanRecoveryIn(BaseModel):
+    action: str = "retry"  # retry / clean / refresh
+    confirmed: bool = False
+
+
+def _pending_scan_issues() -> list[dict]:
+    """Include pre-upgrade inconsistent scans without treating a gap as invalid content."""
+    saved = store.load_scan_issues()
+    states = store.load_folder_scan_states()
+    folders = {str(f["media_id"]): f for f in store.load_folders()}
+    ids = {mid for mid, issue in saved.items() if issue.get("status") != "resolved"}
+    ids.update(mid for mid, state in states.items() if state.get("status") == "inconsistent")
+    result = []
+    for mid in sorted(ids):
+        state, folder = states.get(mid, {}), folders.get(mid, {})
+        issue = {"media_id": mid, "title": folder.get("title", mid), "status": "pending",
+                 "expected_count": state.get("expected_count", folder.get("count", 0)),
+                 "fetched_count": state.get("fetched_count", 0),
+                 "unique_count": state.get("fetched_count", 0), "history": [],
+                 "last_error": state.get("last_error"), **saved.get(mid, {})}
+        result.append(issue)
+    return result
+
+
+@app.middleware("http")
+async def scan_issue_gate(request, call_next):
+    blocked_paths = {"/api/analyze/start", "/api/analyze/continuous", "/api/plan/mark_invalid",
+                     "/api/plan/apply", "/api/apply/start", "/api/folder-profiles/generate",
+                     "/api/folder-organize/suggest", "/api/folder-organize/plan",
+                     "/api/folder-organize/start"}
+    if request.method in ("POST", "PUT") and (
+            request.url.path in blocked_paths or request.url.path.endswith("/publish-intro")):
+        issues = _pending_scan_issues()
+        if issues:
+            return JSONResponse({"ok": False, "code": "scan_issue_pending",
+                                 "error": "收藏夹扫描异常尚未解决，请先处理提示窗口中的问题。",
+                                 "issues": issues}, status_code=409)
+    return await call_next(request)
+
+
+@app.get("/api/scan/issues")
+def scan_issues_get():
+    issues = _pending_scan_issues()
+    return {"issues": issues, "blocked": bool(issues),
+            "running": bool((APP.get("scan_run") or {}).get("running"))}
+
+
+@app.post("/api/scan/issues/{media_id}/recover")
+def scan_issue_recover(media_id: str, body: ScanRecoveryIn):
+    issue = next((row for row in _pending_scan_issues() if row["media_id"] == media_id), None)
+    if not issue:
+        return JSONResponse({"ok": False, "error": "该收藏夹没有待处理的扫描异常"}, status_code=404)
+    if body.action not in ("retry", "clean", "refresh"):
+        return JSONResponse({"ok": False, "error": "不支持的处理方式"}, status_code=400)
+    if body.action == "clean":
+        if not body.confirmed:
+            return JSONResponse({"ok": False, "error": "自动清理会修改 B 站收藏夹，请先确认"}, status_code=400)
+        if issue.get("cleanup_unknown"):
+            return JSONResponse({"ok": False,
+                                 "error": "上次清理结果不确定，请前往 B 站核对后重试扫描，不能重复清理。"}, status_code=409)
+    return _start_scan(ScanIn(folder_ids=[media_id], mode="rebuild"), recovery=body.action)
+
+
 def _folder_view(folders: list) -> dict:
     done = {str(x) for x in store.load_scan_done()}
     states = store.load_folder_scan_states()
@@ -1199,21 +1263,49 @@ def scan_selection(body: ScanSelectionIn):
 
 @app.post("/api/scan")
 def scan(body: Optional[ScanIn] = None):
-    """按文件夹选择批量元数据或分页读取，校验后更新该夹快照。"""
-    if APP["scan_run"] and APP["scan_run"].get("running"):
-        return JSONResponse({"ok": False, "error": "扫描已在运行中"}, status_code=400)
+    return _start_scan(body)
 
-    def run():
+
+def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
+    """按文件夹选择批量元数据或分页读取，校验后更新该夹快照。"""
+    with _scan_start_lock:
+        if APP["scan_run"] and APP["scan_run"].get("running"):
+            return JSONResponse({"ok": False, "error": "扫描已在运行中"}, status_code=409)
+        if recovery and any((APP.get(key) or {}).get("running") for key in (
+                "analyze_run", "apply_run", "folder_merge_run", "folder_merge_ai_run", "folder_profile_run")):
+            return JSONResponse({"ok": False, "error": "请先停止正在运行的整理任务，再处理扫描异常"}, status_code=409)
         run_id = uuid.uuid4().hex
         app_state = APP["scan_run"] = {"id": run_id, "running": True, "step": "init", "done": 0,
-                                       "total": 0, "error": None, "strategy": "",
-                                       "folder_done": 0, "folder_total": 0, "current": ""}
+                                       "total": 0, "error": None, "strategy": "", "stop": False,
+                                       "folder_done": 0, "folder_total": 0, "current": "",
+                                       "recovery_action": recovery}
+
+    def run():
         try:
             cfg = load_config()
             session = bili_api.BiliSession(get_session_cookie())
             session.read_interval = max(2, int(cfg.get("scan_interval", 2) or 2))
             APP["session"] = session
             emit("info", f"开始扫描（请求间隔 ≥{session.read_interval} 秒）", kind="scan_start")
+
+            if recovery:
+                mid = body.folder_ids[0]
+                existing = next(row for row in _pending_scan_issues() if row["media_id"] == mid)
+                store.update_scan_issue(mid, **{k: v for k, v in existing.items() if k != "media_id"},
+                                        event="开始刷新目录并重新扫描" if recovery == "refresh" else
+                                        "开始重试扫描" if recovery == "retry" else "用户已确认自动清理")
+                if recovery == "clean":
+                    app_state["step"] = "cleaning"
+                    session.write_interval = max(2, float(cfg.get("write_interval", 2) or 2))
+                    # Persist before sending: a crash/transport failure must never replay this write.
+                    store.update_scan_issue(mid, cleanup_unknown=True, event="正在调用 B 站失效内容清理")
+                    try:
+                        session.clean_invalid_folder(mid, should_stop=lambda: app_state["stop"])
+                    except (bili_api.RateLimitedError, bili_api.BiliApiError) as exc:
+                        if not isinstance(exc, bili_api.WriteUncertainError):
+                            store.update_scan_issue(mid, cleanup_unknown=False)
+                        raise
+                    store.update_scan_issue(mid, cleanup_unknown=False, event="B 站已确认清理请求，等待重扫验证")
 
             app_state["step"] = "folders"
             folders = session.list_folders()
@@ -1224,7 +1316,8 @@ def scan(body: Optional[ScanIn] = None):
             picked = [f for f in folders if not requested or str(f["media_id"]) in requested]
             if not picked:
                 raise ValueError("未选择任何收藏夹")
-            store.save_scan_selection([str(f["media_id"]) for f in picked])
+            if not recovery:
+                store.save_scan_selection([str(f["media_id"]) for f in picked])
             app_state["selected_ids"] = [str(f["media_id"]) for f in picked]
             app_state["mode"] = body.mode if body else "resume"
             app_state["step"] = "videos"
@@ -1318,6 +1411,8 @@ def scan(body: Optional[ScanIn] = None):
                              kind="scan_progress", current=folder["title"])
                         strategy = "paged_index_fallback"
                         app_state["strategy"] = strategy
+                        staged.clear()
+                        fetched = 0
                         store.begin_folder_scan(run_id, mid, expected, strategy)
                     else:
                         if staged:
@@ -1366,7 +1461,6 @@ def scan(body: Optional[ScanIn] = None):
                         emit("warn", f"已停止；「{folder['title']}」暂存了 {len(staged)} 条，下次重扫该夹",
                              kind="scan_end")
                         break
-                    fetched = len(staged)
                     remainder = fetched - max(0, page_index - 1) * bili_api.PAGE_SIZE
                     done += max(0, remainder)
                     app_state["done"] = done
@@ -1383,11 +1477,18 @@ def scan(body: Optional[ScanIn] = None):
                     error = f"目录计数 {expected}，接口条数 {fetched}，唯一资源 {unique_count}；保留旧完整快照"
                     store.update_folder_scan_progress(mid, unique_count, None, error)
                     store.mark_folder_scan(mid, "inconsistent", error)
-                    app_state["error"] = app_state.get("error") or "收藏夹快照计数不一致，请刷新目录后重扫"
+                    store.update_scan_issue(mid, title=folder["title"], status="pending", scan_run_id=run_id,
+                                            expected_count=expected, fetched_count=fetched, unique_count=unique_count,
+                                            strategy=strategy, last_error=None,
+                                            event=f"数量仍不一致：B 站 {expected} 条，读取 {fetched} 条，去重 {unique_count} 条")
+                    app_state["error"] = app_state.get("error") or "收藏夹数量不一致，请先处理扫描异常提示"
                     emit("warn", f"「{folder['title']}」{error}", kind="scan_progress", current="")
                     continue
 
                 store.finish_folder_scan(run_id, mid, expected, unique_count)
+                if recovery:
+                    store.update_scan_issue(mid, last_error=None, cleanup_unknown=False,
+                                            event=f"重新扫描验证通过：B 站 {expected} 条，读取 {unique_count} 条")
                 app_state["current"] = ""
                 app_state["folder_done"] += 1
                 ANALYZE_WAKE.set()
@@ -1423,12 +1524,17 @@ def scan(body: Optional[ScanIn] = None):
             app_state["error"] = f"{exc}\n{traceback.format_exc()}"
             emit("err", f"扫描异常：{exc}", kind="scan_end")
         finally:
+            if recovery and app_state.get("error"):
+                mid = body.folder_ids[0]
+                store.update_scan_issue(mid, last_error=app_state["error"].split("\n")[0],
+                                        event=app_state["error"].split("\n")[0])
             app_state["running"] = False
             app_state["current"] = ""
             ANALYZE_WAKE.set()
+            emit("progress", "", kind="scan_idle")
 
     threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True}
+    return {"ok": True, "started": True, "run_id": run_id}
 
 @app.get("/api/scan/status")
 def scan_status():
@@ -2175,14 +2281,16 @@ def _organization_profile_readiness() -> dict:
                         "reason": reason})
     # 只有收件箱（默认收藏夹）有内容时也算就绪：LLM 仍可给出「新建收藏夹」建议，
     # 不会因为缺少可移入的现成夹而完全无法整理。
-    ready = (not missing) and bool(required or inbox_count)
+    scan_issues = _pending_scan_issues()
+    ready = (not missing) and not scan_issues and bool(required or inbox_count)
     return {"ready": ready, "required_count": len(required),
             "current_count": len(required) - len(missing),
             "empty_count": empty_count, "inbox_count": inbox_count,
             "inbox_folder_ids": sorted(default_ids),
-            "missing": missing,
+            "missing": missing, "scan_issues": scan_issues,
             "profile_versions": current_versions,
-            "message": (("所有有内容的 active 收藏夹均有当前完整画像。默认收藏夹是未分拣收件箱，"
+            "message": ("收藏夹扫描异常尚未解决，请先处理扫描异常提示。" if scan_issues else
+                        ("所有有内容的 active 收藏夹均有当前完整画像。默认收藏夹是未分拣收件箱，"
                          "其中内容会按其余收藏夹的画像归类。") if ready else
                         ("没有可整理的收藏夹内容。" if not (required or inbox_count) else
                          ("默认收藏夹是未分拣收件箱，其中内容会按其余收藏夹的画像归类，"

@@ -750,6 +750,67 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   font-family: Arial, sans-serif; font-size: 20px; font-weight: 500; line-height: 1;
 }
 .compact-modal { width: min(560px, 92vw); }
+
+/* 扫描异常提示：优先引导用户手动处理，远端清理必须单独确认。 */
+.scan-issue-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--accent2); border-radius: 8px; background: var(--soft-warn); font-size: 13px; }
+.scan-issue-banner[hidden], .scan-issue-picker[hidden], .scan-clean-confirm[hidden], .scan-issue-history[hidden], .scan-issue-options[hidden] { display: none; }
+#scan-issue-modal { z-index: 150; }
+.scan-issue-box { width: min(720px, 94vw); max-height: 94vh; border-radius: 16px; font-family: system-ui, "Segoe UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+.scan-issue-box .btn, .scan-issue-box .mini, .scan-issue-box select { font-family: inherit; }
+#scan-issue-link { display: inline-flex; align-items: center; background: var(--accent); border: 1px solid var(--accent); border-radius: 5px; color: var(--primary-text); font-weight: 600; }
+#scan-issue-link:hover { filter: brightness(1.1); }
+#scan-issue-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.scan-issue-head { display: flex; align-items: flex-start; justify-content: space-between; padding: 22px 26px 14px; }
+.scan-issue-eyebrow { font-size: 12px; color: var(--accent2); letter-spacing: 1px; }
+.scan-issue-head h2 { margin: 6px 0 0; font-size: 23px; color: var(--text); }
+.scan-issue-body { padding: 0 26px 20px; }
+.scan-issue-picker { display: flex; flex-direction: row; align-items: center; gap: 12px; margin: 0 0 12px; font-size: 13px; }
+.scan-issue-picker select { flex: 1; min-width: 0; }
+.scan-issue-description { margin: 0 0 14px; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.scan-issue-counts { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); padding: 12px 0; }
+.scan-issue-counts > div { padding: 0 18px; border-right: 1px solid var(--border); }
+.scan-issue-counts > div:last-child { border: 0; }
+.scan-issue-counts span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.scan-issue-counts strong { font-size: 25px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.scan-issue-counts small { color: var(--muted); margin-left: 6px; }
+.scan-issue-block-note { margin: 10px 0 17px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.scan-issue-options { display: grid; gap: 10px; }
+.scan-issue-option { padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; }
+.scan-issue-manual { border-color: var(--accent); background: var(--soft-accent); }
+.scan-option-title { display: flex; align-items: center; gap: 9px; }
+.scan-option-title h3 { margin: 0; color: var(--text); font-size: 14px; }
+.scan-option-number { width: 21px; height: 21px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--button-bg); color: var(--muted); font-size: 12px; flex: 0 0 auto; }
+.scan-issue-manual .scan-option-number { color: var(--accent); }
+.scan-option-badge { padding: 2px 7px; border-radius: 4px; font-size: 11px; color: var(--accent); background: var(--bg2); }
+.scan-option-caution { color: var(--danger); background: var(--soft-danger); }
+.scan-issue-option p { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 8px 0 11px; }
+.scan-issue-option .scan-auto-warning { color: var(--danger); }
+.scan-option-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.scan-issue-option .btn { margin: 0; font-size: 12px; padding: 8px 13px; text-decoration: none; }
+.scan-issue-refresh { background: var(--bg2); }
+.scan-clean-confirm { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--danger); border-radius: 8px; background: var(--soft-danger); }
+.scan-clean-confirm label { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; line-height: 1.6; font-size: 12px; margin-bottom: 12px; }
+.scan-clean-confirm input { width: auto; margin-top: 3px; }
+.scan-issue-result:empty { display: none; }
+.scan-issue-result { margin-top: 12px; padding: 10px 12px; border-radius: 8px; background: var(--soft-warn); font-size: 13px; line-height: 1.6; }
+.scan-issue-result.resolved { color: var(--green); background: var(--soft-green); }
+.scan-issue-history { margin-top: 12px; font-size: 12px; color: var(--muted); }
+.scan-issue-history summary { cursor: pointer; }
+.scan-issue-history ol { padding-left: 20px; line-height: 1.8; }
+.scan-issue-causes { margin-top: 17px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 12px; }
+.scan-issue-causes strong { font-weight: 600; color: var(--muted); }
+.scan-issue-causes p { margin: 6px 0 0; line-height: 1.75; color: var(--muted); }
+.scan-issue-foot { padding: 12px 26px; justify-content: space-between; }
+.scan-issue-foot span { color: var(--muted); font-size: 12px; }
+#scan-issue-link[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+@media (max-width: 540px) {
+  .scan-issue-head { padding: 18px 18px 12px; }
+  .scan-issue-body { padding: 0 18px 16px; }
+  .scan-issue-head h2 { font-size: 20px; }
+  .scan-issue-counts > div { padding: 0 10px; }
+  .scan-issue-foot { padding: 12px 18px; }
+  .scan-issue-foot span { flex: 1; }
+}
 .clear-options, .source-modal-list { display: grid; gap: 8px; }
 .clear-options label, .source-modal-list label { flex-direction: row; align-items: center; }
 .clear-options input, .source-modal-list input { width: auto; }

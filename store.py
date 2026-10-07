@@ -44,6 +44,7 @@ _DATASET_DEFAULTS = {
     "analysis": {}, "plan": {}, "apply_state": {}, "scan_done": [],
     "scan_selection": [], "folder_merge_plan": [], "folder_merge_draft": [],
     "folder_merge_state": {}, "analysis_scope_key": "",
+    "scan_issues": {},
 }
 _LEGACY_FILES = {
     "folders": FOLDERS_FILE, "videos": VIDEOS_FILE,
@@ -684,6 +685,10 @@ def finish_folder_scan(scan_run_id: str, media_id: str, expected: int, fetched: 
         done = {str(x) for x in _load_dataset_conn(conn, "scan_done", [])}
         done.add(str(media_id))
         _save_dataset_conn(conn, "scan_done", sorted(done))
+        issues = dict(_load_dataset_conn(conn, "scan_issues", {}))
+        if str(media_id) in issues:
+            issues[str(media_id)].update(status="resolved", resolved_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+            _save_dataset_conn(conn, "scan_issues", issues)
 
 
 def mark_folder_scan(media_id: str, status: str, error: str = ""):
@@ -699,6 +704,24 @@ def load_folder_scan_states() -> dict:
         try:
             return {str(r[0]): dict(r) for r in conn.execute("SELECT * FROM folder_scan_state")}
         finally: conn.close()
+
+
+def load_scan_issues() -> dict:
+    return _get_dataset("scan_issues") or {}
+
+
+def update_scan_issue(media_id: str, **changes) -> dict:
+    """Persist troubleshooting evidence independently of a retry's scan state."""
+    with _transaction() as conn:
+        issues = dict(_load_dataset_conn(conn, "scan_issues", {}))
+        issue = issues.setdefault(str(media_id), {"media_id": str(media_id), "history": []})
+        event = changes.pop("event", None)
+        issue.update(changes)
+        if event:
+            issue["history"] = (issue.get("history", []) + [
+                {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "text": event}])[-20:]
+        _save_dataset_conn(conn, "scan_issues", issues)
+        return issue
 
 
 def load_folder_items(media_id: str, *, query: str = "", offset: int = 0,
@@ -1189,7 +1212,7 @@ def clear_scope(scope: str) -> list:
             conn.execute("DELETE FROM scan_stage")
             conn.execute("DELETE FROM folder_scan_state")
             conn.execute("DELETE FROM folder_profiles")
-            for name, val in (("scan_done", []), ("scan_selection", [])):
+            for name, val in (("scan_done", []), ("scan_selection", []), ("scan_issues", {})):
                 _save_dataset_conn(conn, name, val)
             cleared += ["folders", "videos", "scan_done", "scan_selection"]
         if scope == "folder_profile":
