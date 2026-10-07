@@ -16,6 +16,19 @@
   applyTheme(savedTheme);
   $("theme-mode").addEventListener("change", () => applyTheme($("theme-mode").value));
 
+  const connectionToggle = $("connection-toggle");
+  const connectionContent = $("connection-content");
+  function setConnectionCollapsed(collapsed) {
+    connectionContent.hidden = collapsed;
+    connectionToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    connectionToggle.querySelector(".conn-toggle-icon").textContent = collapsed ? "▸" : "⌄";
+    localStorage.setItem("connection-config-collapsed", collapsed ? "true" : "false");
+  }
+  setConnectionCollapsed(localStorage.getItem("connection-config-collapsed") === "true");
+  connectionToggle.addEventListener("click", () => {
+    setConnectionCollapsed(connectionToggle.getAttribute("aria-expanded") === "true");
+  });
+
   // ---------- 日志 ----------
   function log(msg, level = "info") {
     const line = document.createElement("div");
@@ -1184,6 +1197,13 @@
     $("mode-manual").setAttribute("aria-selected", isFast ? "false" : "true");
     $("fast-mode-panel").hidden = !isFast;
     $("manual-mode-panel").hidden = isFast;
+    const routeStack = document.querySelector(".route-stack");
+    if (routeStack) {
+      routeStack.inert = isFast;
+      routeStack.setAttribute("aria-disabled", isFast ? "true" : "false");
+      routeStack.classList.toggle("is-locked", isFast);
+    }
+    $("manual-route-lock").hidden = !isFast;
   }
 
   function updateFastRunButton() {
@@ -1192,9 +1212,14 @@
     btn.disabled = fastRun.running || !biz;
     btn.setAttribute("aria-pressed", fastRun.running ? "true" : "false");
     btn.classList.toggle("busy", fastRun.running);
+    const activeBiz = fastRun.running ? fastRun.biz : biz;
+    const updateOnly = activeBiz === "update";
     btn.textContent = fastRun.running
-      ? `自动整理中… ${fastRun.stepIndex + 1}/${fastRun.steps.length}`
-      : "开始自动整理";
+      ? `${updateOnly ? "更新目录" : "自动整理"}中… ${fastRun.stepIndex + 1}/${fastRun.steps.length}`
+      : updateOnly ? "开始更新目录" : "开始自动整理";
+    document.querySelectorAll('input[name="fast-biz"]').forEach(el => {
+      el.disabled = fastRun.running;
+    });
     $("fast-stop").hidden = !fastRun.running;
   }
 
@@ -1320,7 +1345,8 @@
   async function runFastMode() {
     if (fastRun.running) return;
     const biz = getFastBiz();
-    if (!biz) { log("请先选择快速模式业务：内容整理或收藏夹整理", "warn"); return; }
+    if (!biz) { log("请选择快速模式业务", "warn"); return; }
+    const isUpdate = biz === "update";
 
     // 前置检查
     try {
@@ -1329,10 +1355,12 @@
         log("快速模式需要先登录 B 站（扫码或手动 Cookie）", "err");
         return;
       }
-      const cfg = await api("GET", "/api/config");
-      if (!cfg || !cfg.active_model_id) {
-        log("快速模式需要先在模型配置中激活一个模型", "err");
-        return;
+      if (!isUpdate) {
+        const cfg = await api("GET", "/api/config");
+        if (!cfg || !cfg.active_model_id) {
+          log("快速模式需要先在模型配置中激活一个模型", "err");
+          return;
+        }
       }
       const st = await api("GET", "/api/status");
       const runs = st || {};
@@ -1369,7 +1397,7 @@
         const r = await api("POST", "/api/folders/refresh");
         if (!r || r.ok === false) throw new Error((r && r.error) || "刷新目录失败");
         await refreshTree();
-        await loadFolderProfiles();
+        if (!isUpdate) await loadFolderProfiles();
       }},
       { label: "勾选全部收藏夹", state: "pending", run: async () => {
         const directory = await api("GET", "/api/folders");
@@ -1379,7 +1407,7 @@
         $("scan-selection-summary").textContent = `已选 ${ids.length} / ${ids.length} 个`;
       }},
       { label: "开始扫描（补齐未完成/变化）", state: "pending", run: async () => {
-        switchRoute("content-route");
+        if (!isUpdate) switchRoute("content-route");
         const directory = await api("GET", "/api/folders");
         await api("POST", "/api/scan", {
           folder_ids: directory.selected_ids || [],
@@ -1389,6 +1417,9 @@
       { label: "等待扫描完成", state: "pending", run: async () => {
         await waitScanDone();
       }},
+    ];
+
+    if (!isUpdate) steps.push(
       { label: "生成缺失 / 过期画像", state: "pending", run: async () => {
         switchRoute("profile-route");
         await loadFolderProfiles();
@@ -1404,7 +1435,7 @@
         await waitJobIdle("/api/folder-profiles/status", "画像生成");
         await refreshOrganizationReadiness();
       }},
-    ];
+    );
 
     if (isContent) {
       steps.push(
@@ -1429,7 +1460,7 @@
           await loadPlan();
         }},
       );
-    } else {
+    } else if (biz === "folder") {
       steps.push(
         { label: "生成 AI 合并建议", state: "pending", run: async () => {
           switchRoute("folder-route");
@@ -1450,7 +1481,7 @@
     fastRun.steps = steps;
     fastRun.stepIndex = 0;
     renderFastSteps();
-    log(`快速模式已启动：${isContent ? "内容整理" : "收藏夹整理"}`);
+    log(`快速模式已启动：${isUpdate ? "更新目录" : isContent ? "内容整理" : "收藏夹整理"}`);
 
     try {
       for (let i = 0; i < steps.length; i++) {
@@ -1461,8 +1492,17 @@
         setFastStep(i, "done");
       }
       setFastStep(steps.length - 1, "done");
-      $("fast-status").textContent = "自动步骤已完成，等待人工复核";
-      if (isContent) {
+      setMode("manual");
+      $("fast-status").textContent = isUpdate
+        ? "目录更新和扫描已完成，已切换到手动模式"
+        : "自动步骤已完成，已切换到手动模式，等待人工复核";
+      if (isUpdate) {
+        showFastDone(
+          "快速模式 · 更新目录完成",
+          "已完成：刷新收藏夹目录 → 全选收藏夹 → 扫描全部收藏夹。\n\n扫描结束后，快速模式已停止。"
+        );
+        log("目录更新和扫描已完成", "ok");
+      } else if (isContent) {
         showFastDone(
           "快速模式 · 内容整理完成",
           "已完成：刷新目录 → 扫描 → 生成画像 → LLM 归类分析 → 加载分析结果。\n\n" +
@@ -3513,6 +3553,8 @@
 
   // ---------- 初始化 ----------
   function init() {
+    setMode("fast");
+    updateFastRunButton();
     checkConn();
     loadConfig();
     loadCookieState().then(() => {

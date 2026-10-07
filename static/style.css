@@ -523,6 +523,30 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   min-height: min-content;
   margin-top: 0;
 }
+.route-stack.is-locked .route-tab,
+.route-stack.is-locked button,
+.route-stack.is-locked input,
+.route-stack.is-locked select,
+.route-stack.is-locked textarea {
+  cursor: not-allowed;
+  filter: grayscale(.75);
+  opacity: .55;
+}
+.route-stack.is-locked .route-tab:hover {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--muted);
+}
+.manual-route-lock {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent2);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--panel);
+  font-size: 12px;
+}
+.manual-route-lock[hidden] { display: none !important; }
 .route-tabs {
   display: flex;
   gap: 3px;
@@ -572,7 +596,26 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 /* 连接配置：压紧密度，避免把主流程标签顶出视口 */
 .conn-card .card .desc { margin-bottom: 8px; }
+.conn-heading { margin-bottom: 8px; }
+.conn-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.conn-toggle:hover,
+.conn-toggle:active { transform: none !important; }
+.conn-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.conn-toggle-icon { color: var(--muted); font-size: 16px; line-height: 1; }
 .conn-sections { display: flex; flex-direction: column; gap: 10px; }
+.conn-sections[hidden] { display: none !important; }
 .conn-section {
   border: 1px solid var(--divider);
   border-radius: 8px;
