@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="bfo-gradient-root-title bfo-gradient-root-desc">
+<title id="bfo-gradient-root-title">BiliFav Organizer</title>
+<desc id="bfo-gradient-root-desc">书签、字母 B 和播放负空间组成的收藏整理标识。</desc>
+<defs>
+  <linearGradient id="bfo-gradient-body" gradientUnits="userSpaceOnUse" x1="112" y1="64" x2="440" y2="448"><stop stop-color="#0F766E"/><stop offset=".52" stop-color="#14B8A6"/><stop offset="1" stop-color="#2DD4BF"/></linearGradient>
+  <linearGradient id="bfo-gradient-ribbon" gradientUnits="userSpaceOnUse" x1="70" y1="72" x2="188" y2="436"><stop stop-color="#14B8A6"/><stop offset="1" stop-color="#0F766E"/></linearGradient>
+  <linearGradient id="bfo-gradient-upper" gradientUnits="userSpaceOnUse" x1="96" y1="48" x2="400" y2="224"><stop stop-color="#0F766E"/><stop offset="1" stop-color="#2DD4BF"/></linearGradient>
+  <linearGradient id="bfo-gradient-fold" gradientUnits="userSpaceOnUse" x1="188" y1="150" x2="360" y2="308"><stop stop-color="#5EEAD4"/><stop offset=".62" stop-color="#14B8A6"/><stop offset="1" stop-color="#0F766E"/></linearGradient>
+  <clipPath id="bfo-gradient-cut"><path fill-rule="evenodd" clip-rule="evenodd" d="M96 48H276C362 48 412 92 412 156C412 190 396 212 374 230C424 252 452 286 452 336C452 414 386 464 290 464H214Q199 464 188 452L128 382L84 428Q64 448 64 420V80Q64 48 96 48Z M244 200Q220 186 220 214V294Q220 322 244 308L318 266Q342 254 318 242Z"/></clipPath>
+</defs>
+<g clip-path="url(#bfo-gradient-cut)">
+<path d="M96 48H276C362 48 412 92 412 156C412 190 396 212 374 230C424 252 452 286 452 336C452 414 386 464 290 464H214Q199 464 188 452L128 382L84 428Q64 448 64 420V80Q64 48 96 48Z" fill="url(#bfo-gradient-body)"/>
+<path d="M96 48C122 76 152 105 188 128V452L128 382L84 428Q64 448 64 420V80Q64 48 96 48Z" fill="url(#bfo-gradient-ribbon)"/>
+<path d="M96 48H276C362 48 412 92 412 156C412 190 396 212 374 230C298 200 186 146 96 48Z" fill="url(#bfo-gradient-upper)"/>
+<path d="M188 128C247 169 309 204 374 230C410 251 412 274 326 310C278 330 225 353 188 388Z" fill="url(#bfo-gradient-fold)"/>
+</g>
+</svg>

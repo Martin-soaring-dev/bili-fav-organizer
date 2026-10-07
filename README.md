@@ -1,5 +1,12 @@
 # B站收藏夹智能整理
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="static/brand/lockup-horizontal-inverse.svg">
+    <img src="static/brand/lockup-horizontal.svg" alt="BiliFav Organizer · B站收藏夹智能整理" width="600">
+  </picture>
+</p>
+
 [![Release](https://img.shields.io/github/v/release/Martin-soaring-dev/bili-fav-organizer?label=release)](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)
 [![Windows](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#从源码运行开发)
@@ -15,6 +22,8 @@
 **核心原则**：归类方案必须人工复核后才执行；执行时先加入目标夹、成功后再从原夹删除；默认收藏夹是「未分拣收件箱」，只出不进。
 
 **第一次使用？** 阅读[图文版快速上手指南](docs/快速上手.md)，或下载 [PDF 版](output/pdf/快速上手.pdf)。指南用当前界面截图演示下载、登录、模型配置、快速与手动整理、本地数据位置和常见问题。
+
+**品牌与视觉设计**：查看[完整设计规范](docs/brand/README.md)、[SVG 设计语言](docs/brand/svg-language.md)和[矢量资产](static/brand/)。
 
 ---
 
@@ -195,6 +204,7 @@ bili-fav-organizer/
 ├── static/                   # 前端单页
 ├── tests/                    # 单元测试
 ├── docs/
+│   ├── brand/                # 品牌规范、SVG 设计语言与本地预览
 │   ├── images/               # README 图示
 │   └── design/               # 实施方案
 ├── packaging/使用说明.txt
@@ -209,6 +219,7 @@ bili-fav-organizer/
 
 | 文档 | 内容 |
 |------|------|
+| [docs/brand/README.md](docs/brand/README.md) | 完整视觉规范、SVG 设计语言、应用接入与资产索引 |
 | [docs/design/scan-sqlite-migration-plan.md](docs/design/scan-sqlite-migration-plan.md) | 扫描策略状态机、SQLite 迁移 |
 | [docs/design/persistent-index-folder-profiles.md](docs/design/persistent-index-folder-profiles.md) | 持久索引、画像门槛、默认夹规则 |
 | [docs/design/provider-api-compatibility.md](docs/design/provider-api-compatibility.md) | 供应商 API 差异与模型规格来源 |

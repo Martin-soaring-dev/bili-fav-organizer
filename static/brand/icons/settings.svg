@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-labelledby="bfo-icon-settings-title bfo-icon-settings-desc">
+<title id="bfo-icon-settings-title">BiliFav settings</title>
+<desc id="bfo-icon-settings-desc">24 单位网格，1.8 单位圆端线条图标。</desc>
+<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/><circle cx="8" cy="6" r="2" fill="var(--bfo-icon-bg, #fff)"/><circle cx="16" cy="12" r="2" fill="var(--bfo-icon-bg, #fff)"/><circle cx="10" cy="18" r="2" fill="var(--bfo-icon-bg, #fff)"/></g>
+</svg>

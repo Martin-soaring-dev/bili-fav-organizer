@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BiliFav Organizer · 视觉设计规范预览</title>
+  <link rel="icon" type="image/svg+xml" href="../../static/brand/favicon.svg">
+  <link rel="stylesheet" href="../../static/brand/tokens.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bfo-ui-background); color: var(--bfo-ui-text); font: 15px/1.7 var(--bfo-font-sans); }
+    button { font: inherit; cursor: pointer; }
+    a { color: var(--bfo-ui-action); text-underline-offset: 3px; }
+    button:focus-visible, a:focus-visible { outline: 2px solid var(--bfo-ui-action); outline-offset: 3px; }
+    .page { max-width: 1160px; margin: auto; padding: 32px; }
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+    .signature { width: min(560px, 100%); height: auto; }
+    .switch { display: flex; flex: none; gap: 4px; border: 1px solid var(--bfo-ui-border); border-radius: 10px; padding: 4px; }
+    .switch button { border: 0; border-radius: 6px; background: transparent; color: var(--bfo-ui-muted); padding: 5px 12px; }
+    .switch button[aria-pressed="true"] { background: var(--bfo-ui-action); color: var(--bfo-ui-onAction); }
+    .meta { color: var(--bfo-ui-muted); margin: 16px 0 40px; }
+    h1 { font-size: 32px; line-height: 1.3; margin: 0 0 12px; }
+    h2 { font-size: 20px; margin: 0 0 8px; }
+    h3 { font-size: 16px; margin: 0 0 10px; }
+    p { margin: 0 0 16px; }
+    .section { margin: 0 0 40px; }
+    .hint { color: var(--bfo-ui-muted); font-size: 14px; }
+    .grid { display: grid; gap: 16px; grid-template-columns: repeat(3,minmax(0,1fr)); }
+    .card { background: var(--bfo-ui-surface); border: 1px solid var(--bfo-ui-border); padding: 24px; border-radius: 12px; }
+    .stage { display: grid; place-items: center; min-height: 180px; border-radius: 8px; background: #fff; }
+    .stage.dark { background: #0f3d3a; }
+    .stage img { width: 160px; height: 160px; }
+    .label { margin-top: 14px; font-size: 13px; color: var(--bfo-ui-muted); }
+    .samples { display: flex; align-items: end; gap: 32px; flex-wrap: wrap; padding: 24px; background: #fff; color: #52656a; border-radius: 12px; }
+    .sample { text-align: center; min-width: 48px; }
+    .sample img { display: block; margin: 0 auto 10px; }
+    .sample span { font-size: 12px; }
+    .two { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+    .lockup { width: 100%; height: auto; }
+    .lockup-stack { width: 270px; max-width: 100%; height: auto; }
+    .swatches { display: grid; gap: 16px; grid-template-columns: repeat(6,1fr); }
+    .swatch { height: 64px; border-radius: 8px; border: 1px solid #cfd6dd; }
+    .swatches code { font: 12px var(--bfo-font-mono); }
+    #icon-grid { display: grid; grid-template-columns: repeat(6,1fr); gap: 16px; }
+    .icon-cell { text-align: center; background: var(--bfo-ui-surface); border: 1px solid var(--bfo-ui-border); border-radius: 12px; padding: 20px 4px; }
+    .icon-cell svg { width: 28px; height: 28px; color: var(--bfo-ui-action); display: block; margin: 0 auto 10px; }
+    .icon-cell span { display: block; font-size: 12px; color: var(--bfo-ui-muted); }
+    .workflow { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+    .workflow span { display: flex; align-items: center; gap: 6px; color: var(--bfo-ui-muted); }
+    .workflow .active { color: var(--bfo-ui-action); font-weight: 600; }
+    .status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; background: var(--bfo-ui-background); color: var(--bfo-ui-warning); font-size: 13px; }
+    .plan { margin-top: 20px; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    .table-wrap { overflow: auto; margin-top: 16px; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+    th, td { padding: 12px 8px; border-top: 1px solid var(--bfo-ui-border); }
+    th { color: var(--bfo-ui-muted); font-weight: 500; }
+    .demo-action { display: inline-flex; align-items: center; gap: 8px; border-radius: 6px; padding: 8px 16px; background: var(--bfo-ui-action); color: var(--bfo-ui-onAction); }
+    .foot { border-top: 1px solid var(--bfo-ui-border); padding-top: 24px; display: flex; gap: 24px; flex-wrap: wrap; font-size: 14px; }
+    .only-dark { display: none; }
+    [data-theme="dark"] .only-light { display: none; }
+    [data-theme="dark"] .only-dark { display: block; }
+    @media(max-width: 760px) { .page { padding: 20px; } .header { flex-direction: column; align-items: start; } .grid { grid-template-columns: 1fr; } .two { grid-template-columns: 1fr; } .swatches { grid-template-columns: repeat(3,1fr); } #icon-grid { grid-template-columns: repeat(3,1fr); } .samples { gap: 20px; } h1 { font-size: 28px; } }
+    @media(prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <div hidden aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg">
+<symbol id="bfo-mark" viewBox="0 0 512 512"><path fill="currentColor" fill-rule="evenodd" d="M96 48H276C362 48 412 92 412 156C412 190 396 212 374 230C424 252 452 286 452 336C452 414 386 464 290 464H214Q199 464 188 452L128 382L84 428Q64 448 64 420V80Q64 48 96 48Z M244 200Q220 186 220 214V294Q220 322 244 308L318 266Q342 254 318 242Z"/></symbol>
+<symbol id="bfo-scan" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/><circle cx="11" cy="11" r="4"/><path d="m14 14 3 3"/></g></symbol>
+<symbol id="bfo-folder" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5h6l2 2h10v13H3Z"/></g></symbol>
+<symbol id="bfo-profile" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5h6l2 2h10v13H3Z"/><path d="M7 11h10M7 15h6"/></g></symbol>
+<symbol id="bfo-classify" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="5" rx="1"/><path d="M12 8v4M5 16v-4h14v4"/><rect x="2" y="16" width="6" height="5" rx="1"/><rect x="16" y="16" width="6" height="5" rx="1"/></g></symbol>
+<symbol id="bfo-review" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="m8 12 3 3 5-6"/></g></symbol>
+<symbol id="bfo-apply" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4v16M9 12h11m-5-5 5 5-5 5"/></g></symbol>
+<symbol id="bfo-merge" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v3q0 5 8 5M20 4v3q0 5-8 5M12 12v8m-4-4 4 4 4-4"/></g></symbol>
+<symbol id="bfo-archive" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v12h14V8M9 12h6"/></g></symbol>
+<symbol id="bfo-pause" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14M16 5v14"/></g></symbol>
+<symbol id="bfo-warning" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 10 18H2Z M12 9v5M12 17v.1"/></g></symbol>
+<symbol id="bfo-settings" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"/><circle cx="8" cy="6" r="2" fill="var(--bfo-icon-bg, #fff)"/><circle cx="16" cy="12" r="2" fill="var(--bfo-icon-bg, #fff)"/><circle cx="10" cy="18" r="2" fill="var(--bfo-icon-bg, #fff)"/></g></symbol>
+<symbol id="bfo-video" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m10 8 6 4-6 4Z"/></g></symbol>
+</svg>
+</div>
+  <main class="page">
+    <header class="header">
+      <img class="signature only-light" src="../../static/brand/lockup-horizontal.svg" alt="BiliFav Organizer · B站收藏夹智能整理">
+      <img class="signature only-dark" src="../../static/brand/lockup-horizontal-inverse.svg" alt="BiliFav Organizer · B站收藏夹智能整理">
+      <div class="switch" role="group" aria-label="预览主题">
+        <button type="button" data-mode="light" aria-pressed="true">浅色</button>
+        <button type="button" data-mode="dark" aria-pressed="false">深色</button>
+      </div>
+    </header>
+    <p class="meta">VISUAL IDENTITY / v1.0.0 / 2026-10-08 · 本地预览 · 所有品牌图形为 SVG</p>
+    <section class="section">
+      <h1>让收藏形成秩序。</h1>
+      <p class="hint">书签带保留内容，B 形承载品牌，播放孔标记视频。折叠的青绿色带将内容流转收束为清晰的收藏。</p>
+      <div class="grid">
+        <article class="card"><h3>01 / 主标志</h3><div class="stage"><img src="../../static/brand/mark-gradient.svg" alt="青绿色折叠带主标志"></div><div class="label">渐变 · 48 px 及以上</div></article>
+        <article class="card"><h3>02 / 平涂版</h3><div class="stage"><img src="../../static/brand/mark-flat.svg" alt="平涂多色标志"></div><div class="label">有限色彩 · 32 px 及以上</div></article>
+        <article class="card"><h3>03 / 反白版</h3><div class="stage dark"><img src="../../static/brand/mark-inverse.svg" alt="深背景白色镂空标志"></div><div class="label">单色轮廓 · 24 px 及以上</div></article>
+      </div>
+    </section>
+    <section class="section">
+      <h2>尺寸与细节</h2><p class="hint">16–32 px 使用单色小尺寸版；48–128 px 展示折叠层。所有样例以实际 CSS 尺寸呈现。</p>
+      <div class="samples" id="size-samples"></div>
+    </section>
+    <section class="section">
+      <h2>组合标志与应用图标</h2><p class="hint">中英文字标均已转为路径；深色应用图标使用浅书签与浅播放键。</p>
+      <div class="two">
+        <div class="card"><h3>双语横式</h3><img class="lockup only-light" src="../../static/brand/lockup-horizontal.svg" alt="浅色背景横式组合"><img class="lockup only-dark" src="../../static/brand/lockup-horizontal-inverse.svg" alt="深色背景横式组合"></div>
+        <div class="card"><h3>应用图标</h3><div style="display:flex;gap:24px;flex-wrap:wrap"><img width="120" height="120" src="../../static/brand/app-icon-light.svg" alt="浅底应用图标"><img width="120" height="120" src="../../static/brand/app-icon-dark.svg" alt="深底应用图标"></div></div>
+        <div class="card"><h3>双语竖式</h3><img class="lockup-stack only-light" src="../../static/brand/lockup-stacked.svg" alt="浅色背景竖式组合"><img class="lockup-stack only-dark" src="../../static/brand/lockup-stacked-inverse.svg" alt="深色背景竖式组合"></div>
+        <div class="card"><h3>几何母版</h3><img class="lockup-stack" src="construction.svg" alt="标志的 512 单位构造网格"></div>
+      </div>
+    </section>
+    <section class="section">
+      <h2>品牌色</h2><p class="hint">品牌渐变用于标志。正文与主按钮使用符合对应背景对比度的纯色。</p>
+      <div class="swatches" id="swatches"></div>
+    </section>
+    <section class="section">
+      <h2>SVG 功能图标</h2><p class="hint">24 单位网格 · 1.8 单位描边 · 圆端与圆连接 · currentColor</p>
+      <div id="icon-grid"></div>
+    </section>
+    <section class="section">
+      <h2>应用示例 · 待复核方案</h2><p class="hint">视觉示例不连接账户、不执行操作。颜色与状态文字共同表达任务结果。</p>
+      <div class="card">
+        <div class="workflow"><span>扫描</span><span aria-hidden="true">→</span><span>画像</span><span aria-hidden="true">→</span><span>归类建议</span><span aria-hidden="true">→</span><span class="active"><svg class="bfo-icon" aria-hidden="true"><use href="#bfo-review"></use></svg>人工复核</span><span aria-hidden="true">→</span><span>确认执行</span></div>
+        <div class="plan"><div><h3>12 条归类建议</h3><p class="hint">查看来源与目标，修改后再确认方案。</p></div><div><span class="status"><svg class="bfo-icon" aria-hidden="true"><use href="#bfo-warning"></use></svg>待人工复核</span></div></div>
+        <div class="table-wrap"><table><caption style="text-align:left;padding-bottom:8px">示例建议（节选）</caption><thead><tr><th>内容</th><th>来源</th><th>建议目标</th><th>状态</th></tr></thead><tbody><tr><td>增材制造：从模型到零件</td><td>未分拣</td><td>研究与制造</td><td>待确认</td></tr><tr><td>Python 数据管理实践</td><td>未分拣</td><td>编程与工具</td><td>待确认</td></tr></tbody></table></div>
+        <div style="margin-top:20px"><span class="demo-action"><svg class="bfo-icon" aria-hidden="true"><use href="#bfo-review"></use></svg>确认方案（视觉样例）</span></div>
+      </div>
+    </section>
+    <footer class="foot"><a href="README.md">品牌文档入口</a><a href="visual-identity.md">视觉识别规范</a><a href="svg-language.md">SVG 设计语言</a><a href="implementation.md">开发接入指南</a></footer>
+  </main>
+  <script>
+    const modes = document.querySelectorAll('[data-mode]');
+    modes.forEach(button => button.addEventListener('click', () => {
+      document.documentElement.dataset.theme = button.dataset.mode;
+      modes.forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    }));
+    [16,24,32,48,64,128].forEach(size => {
+      const item = document.createElement('div'); item.className = 'sample';
+      const img = document.createElement('img'); img.width = size; img.height = size;
+      img.src = '../../static/brand/' + (size < 48 ? 'favicon.svg' : 'mark-gradient.svg');
+      img.alt = size + ' px 标志'; const label = document.createElement('span'); label.textContent = size + ' px';
+      item.append(img,label); document.getElementById('size-samples').append(item);
+    });
+    [['Ink','#0F3D3A'],['Deep','#0F766E'],['Teal','#14B8A6'],['Mint','#2DD4BF'],['Canvas','#F0FDFA'],['White','#FFFFFF']].forEach(([name,color]) => {
+      const item = document.createElement('div'); const swatch = document.createElement('div'); swatch.className = 'swatch'; swatch.style.background = color;
+      const label = document.createElement('div'); label.textContent = name; const code = document.createElement('code'); code.textContent = color;
+      item.append(swatch,label,code); document.getElementById('swatches').append(item);
+    });
+    const iconNames = ['scan','folder','profile','classify','review','apply','merge','archive','pause','warning','settings','video'];
+    const labels = ['扫描','收藏夹','画像','归类','复核','执行','合并','归档','暂停','需关注','设置','视频'];
+    iconNames.forEach((name,index) => {
+      const item = document.createElement('div'); item.className = 'icon-cell';
+      const icon = document.createElementNS('http://www.w3.org/2000/svg','svg'); icon.setAttribute('aria-hidden','true');
+      const use = document.createElementNS('http://www.w3.org/2000/svg','use'); use.setAttribute('href','#bfo-'+name); icon.append(use);
+      const label = document.createElement('span'); label.textContent = labels[index] + ' / ' + name;
+      item.append(icon,label); document.getElementById('icon-grid').append(item);
+    });
+  </script>
+</body>
+</html>

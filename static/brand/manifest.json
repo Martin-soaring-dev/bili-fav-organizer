@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "masterViewBox": "0 0 512 512",
+  "files": [
+    "mark-gradient.svg",
+    "mark-flat.svg",
+    "mark-mono.svg",
+    "mark-compact.svg",
+    "mark-inverse.svg",
+    "app-icon-light.svg",
+    "app-icon-dark.svg",
+    "favicon.svg",
+    "lockup-horizontal.svg",
+    "lockup-horizontal-inverse.svg",
+    "lockup-stacked.svg",
+    "lockup-stacked-inverse.svg",
+    "wordmark.svg",
+    "icons/scan.svg",
+    "icons/folder.svg",
+    "icons/profile.svg",
+    "icons/classify.svg",
+    "icons/review.svg",
+    "icons/apply.svg",
+    "icons/merge.svg",
+    "icons/archive.svg",
+    "icons/pause.svg",
+    "icons/warning.svg",
+    "icons/settings.svg",
+    "icons/video.svg",
+    "sprite.svg"
+  ]
+}

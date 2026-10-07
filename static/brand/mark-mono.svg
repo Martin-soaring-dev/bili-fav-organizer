@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="bfo-mono-root-title bfo-mono-root-desc">
+<title id="bfo-mono-root-title">BiliFav Organizer</title>
+<desc id="bfo-mono-root-desc">书签、字母 B 和播放负空间组成的收藏整理标识。</desc>
+<path fill="#0F766E" fill-rule="evenodd" d="M96 48H276C362 48 412 92 412 156C412 190 396 212 374 230C424 252 452 286 452 336C452 414 386 464 290 464H214Q199 464 188 452L128 382L84 428Q64 448 64 420V80Q64 48 96 48Z M244 200Q220 186 220 214V294Q220 322 244 308L318 266Q342 254 318 242Z"/>
+</svg>

@@ -1,0 +1,39 @@
+/* BiliFav Organizer brand v1.0.0. Opt-in tokens; no existing UI overrides. */
+:root {
+  --bfo-ink: #0F3D3A;
+  --bfo-deep: #0F766E;
+  --bfo-teal: #14B8A6;
+  --bfo-mint: #2DD4BF;
+  --bfo-canvas: #F0FDFA;
+  --bfo-white: #FFFFFF;
+  --bfo-font-sans: system-ui, 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+  --bfo-font-mono: 'Cascadia Code', Consolas, monospace;
+}
+.bfo-theme-light, :root[data-theme="light"] {
+  --bfo-ui-background: #F3F5F7;
+  --bfo-ui-surface: #FFFFFF;
+  --bfo-ui-text: #24303B;
+  --bfo-ui-muted: #52656A;
+  --bfo-ui-border: #CFD6DD;
+  --bfo-ui-action: #087F6B;
+  --bfo-ui-onAction: #FFFFFF;
+  --bfo-ui-success: #238636;
+  --bfo-ui-warning: #9A6900;
+  --bfo-ui-danger: #C73535;
+  --bfo-icon-bg: #FFFFFF;
+}
+.bfo-theme-dark, :root[data-theme="dark"] {
+  --bfo-ui-background: #0F1419;
+  --bfo-ui-surface: #1A212B;
+  --bfo-ui-text: #D8E0EA;
+  --bfo-ui-muted: #A1ADBA;
+  --bfo-ui-border: #2A3441;
+  --bfo-ui-action: #00D3A8;
+  --bfo-ui-onAction: #052019;
+  --bfo-ui-success: #3FB950;
+  --bfo-ui-warning: #F5C518;
+  --bfo-ui-danger: #FF5A5A;
+  --bfo-icon-bg: #1A212B;
+}
+.bfo-icon { width: 24px; height: 24px; flex: none; color: inherit; }
+.bfo-mark { display: block; width: 32px; height: 32px; }
