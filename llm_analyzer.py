@@ -22,6 +22,7 @@ import time
 from collections import deque
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from urllib.parse import urlsplit
 
 import requests
 
@@ -86,17 +87,52 @@ def _extract_json(text: str):
     return None
 
 
+def extract_chat_completion_content(result: dict) -> str:
+    """Normalize text content from common OpenAI-compatible chat responses."""
+    choices = result.get("choices") if isinstance(result, dict) else None
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return ""
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        pieces = []
+        for item in content:
+            if isinstance(item, str):
+                pieces.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    pieces.append(text)
+        return "\n".join(pieces)
+    if isinstance(content, dict) and isinstance(content.get("text"), str):
+        return content["text"]
+    return ""
+
+
+def extract_json_object(text: str):
+    """Public JSON-object parser for model responses and connection probes."""
+    return _extract_json(text)
+
+
 class LLMConfig:
     """模型连接配置。可从 dict 或 config.json 构建。"""
 
     def __init__(self, base_url: str = "", api_key: str = "",
                  model: str = DEFAULT_MODEL, params: dict | None = None,
                  max_tokens: int = DEFAULT_MAX_TOKENS,
-                 context_window_tokens: int = 32768):
+                 context_window_tokens: int = 32768,
+                 provider_name: str = "",
+                 capabilities: dict | None = None):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.model = model or DEFAULT_MODEL
         self.params = params or {}
+        self.provider_name = str(provider_name or "")
+        self.capabilities = dict(capabilities or {})
         requested_max_tokens = int(max_tokens or DEFAULT_MAX_TOKENS)
         self.max_tokens = cap_completion_tokens(
             self.base_url, self.model, requested_max_tokens)
@@ -109,30 +145,400 @@ class LLMConfig:
 
 def build_chat_completion_payload(config: LLMConfig, messages: list[dict],
                                   max_tokens: int, temperature: float | None = None,
-                                  extra: dict | None = None) -> dict:
-    """Build a chat payload and adapt Xiaomi MiMo's documented field names."""
+                                  extra: dict | None = None,
+                                  structured_output: bool = False) -> dict:
+    """Build a provider/model-aware Chat Completions payload.
+
+    Provider protocol fields are selected from the endpoint and model family.
+    Optional model-catalog capabilities take precedence when the provider exposes
+    them. Unknown custom endpoints retain the OpenAI-compatible baseline.
+    """
+    provider = request_provider(config)
+    family = request_model_family(config.model)
     effective_max_tokens = cap_completion_tokens(
         config.base_url, config.model, min(int(max_tokens), config.max_tokens))
+    completion_field = _completion_token_field(provider, family, config)
     payload = {
         "model": config.model,
         "messages": messages,
         **({"temperature": temperature} if temperature is not None else {}),
         **config.params,
-        "max_tokens": effective_max_tokens,
         **(extra or {}),
     }
-    if "xiaomimimo.com" in config.base_url.lower():
-        # MiMo documents max_completion_tokens and thinking.type instead of the
-        # generic max_tokens / enable_thinking / reasoning_effort parameters.
-        disabled = payload.pop("enable_thinking", None) is False
+    payload.pop("max_tokens", None)
+    payload.pop("max_completion_tokens", None)
+    payload[completion_field] = effective_max_tokens
+
+    if structured_output and "response_format" not in payload and _supports_json_output(
+            config, provider, family):
+        payload["response_format"] = {"type": "json_object"}
+
+    _adapt_thinking_parameters(payload, config, provider, family, structured_output)
+    return payload
+
+
+def request_provider(config: LLMConfig) -> str:
+    """Identify a supported provider from its endpoint, then its saved label."""
+    host = (urlsplit(config.base_url or "").hostname or "").lower().rstrip(".")
+    host_rules = (
+        ("siliconflow", ("siliconflow.cn",)),
+        ("dashscope", ("dashscope.aliyuncs.com", "maas.aliyuncs.com")),
+        ("deepseek", ("deepseek.com",)),
+        ("mimo", ("xiaomimimo.com",)),
+        ("digitalocean", ("inference.do-ai.run",)),
+        ("amd", ("developer.amd.com.cn", "radeon-cloud")),
+        ("openai", ("api.openai.com",)),
+        ("gemini", ("generativelanguage.googleapis.com",)),
+        ("openrouter", ("openrouter.ai",)),
+        ("moonshot", ("api.moonshot.cn", "api.moonshot.ai")),
+        ("zhipu", ("open.bigmodel.cn",)),
+        ("groq", ("api.groq.com",)),
+        ("together", ("api.together.xyz", "api.together.ai")),
+        ("fireworks", ("api.fireworks.ai",)),
+        ("cerebras", ("api.cerebras.ai",)),
+        ("mistral", ("api.mistral.ai",)),
+        ("xai", ("api.x.ai",)),
+        ("perplexity", ("api.perplexity.ai",)),
+        ("nvidia", ("integrate.api.nvidia.com",)),
+        ("huggingface", ("router.huggingface.co",)),
+    )
+    for provider, suffixes in host_rules:
+        if any(host == suffix or host.endswith("." + suffix) for suffix in suffixes):
+            return provider
+
+    raw_label = str(config.provider_name or "").lower()
+    if "阿里云" in raw_label or "千问" in raw_label:
+        return "dashscope"
+    if "智谱" in raw_label:
+        return "zhipu"
+    label = re.sub(r"[^a-z0-9]+", " ", raw_label).strip()
+    if label in ("openai", "open ai", "openai api", "openai official"):
+        return "openai"
+    label_rules = (
+        ("siliconflow", ("siliconflow",)),
+        ("dashscope", ("dashscope", "qwen token", "qwen payg", "阿里云", "千问")),
+        ("deepseek", ("deepseek",)),
+        ("mimo", ("mimo", "xiaomi", "小米")),
+        ("digitalocean", ("digital ocean", "digitalocean")),
+        ("amd", ("radeon", "amd token", "amd cloud")),
+        ("gemini", ("gemini", "google ai")),
+        ("openrouter", ("openrouter",)),
+        ("moonshot", ("moonshot", "kimi")),
+        ("zhipu", ("zhipu", "智谱", "bigmodel")),
+        ("groq", ("groq",)),
+        ("together", ("together ai",)),
+        ("fireworks", ("fireworks",)),
+        ("cerebras", ("cerebras",)),
+        ("mistral", ("mistral",)),
+        ("xai", ("xai",)),
+        ("perplexity", ("perplexity",)),
+        ("nvidia", ("nvidia nim",)),
+        ("huggingface", ("hugging face", "huggingface")),
+    )
+    for provider, aliases in label_rules:
+        if any(alias in label for alias in aliases):
+            return provider
+    return "openai_compatible"
+
+
+def request_model_family(model: str) -> str:
+    """Normalize common model IDs into request-relevant capability families."""
+    name = str(model or "").lower()
+    compact = re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+    if any(term in compact for term in ("embedding", "embed", "rerank", "whisper", "tts")):
+        return "non_chat"
+    if "mimo" in compact:
+        return "mimo"
+    if "deepseek" in compact:
+        if "v4" in compact or compact.endswith("deepseek-flash") or "deepseek-flash" in compact:
+            return "deepseek_v4"
+        if any(part in compact for part in ("reasoner", "deepseek-r1", "deepseek-r2", "v3-2")):
+            return "deepseek_reasoning"
+        return "deepseek"
+    if "qwen" in compact or "qwq" in compact:
+        return "qwen_reasoning" if ("qwq" in compact or
+                                     re.search(r"qwen-?3(?:-|$)", compact)) else "qwen"
+    if "glm" in compact:
+        return "glm"
+    if "kimi" in compact or "moonshot" in compact:
+        return "kimi"
+    if "stepfun" in compact or re.search(r"step-\d", compact):
+        return "stepfun"
+    if "gemini" in compact:
+        return "gemini_reasoning" if re.search(r"gemini-(?:2-5|[3-9])(?:-|$)", compact) else "gemini"
+    if re.search(r"(?:^|-)o[134](?:-|$)", compact) or re.search(r"(?:^|-)gpt-[56](?:-|$)", compact):
+        return "openai_reasoning"
+    return "generic"
+
+
+def _completion_token_field(provider: str, family: str, config: LLMConfig | None = None) -> str:
+    if config:
+        explicit = (config.capabilities.get("completion_token_field") or
+                    config.capabilities.get("max_tokens_field"))
+        if explicit in ("max_tokens", "max_completion_tokens"):
+            return explicit
+        supported = _capability_list(config)
+        if supported is not None:
+            if "max_completion_tokens" in supported and "max_tokens" not in supported:
+                return "max_completion_tokens"
+            if "max_tokens" in supported:
+                return "max_tokens"
+    if provider == "mimo":
+        return "max_completion_tokens"
+    if provider == "openai" and family == "openai_reasoning":
+        return "max_completion_tokens"
+    return "max_tokens"
+
+
+def _capability_list(config: LLMConfig) -> set[str] | None:
+    values = config.capabilities.get("supported_parameters")
+    if not isinstance(values, list):
+        return None
+    return {str(value).strip().lower() for value in values}
+
+
+def _supports_json_output(config: LLMConfig, provider: str, family: str) -> bool:
+    capabilities = config.capabilities
+    for key in ("json_output", "structured_outputs", "supports_json_output"):
+        if isinstance(capabilities.get(key), bool):
+            return capabilities[key]
+    supported = _capability_list(config)
+    if supported is not None:
+        return "response_format" in supported
+    if family == "non_chat":
+        return False
+    model_id = re.sub(r"[^a-z0-9]+", "-", config.model.lower()).strip("-")
+    # Alibaba's thinking-only Qwen deployments reject JSON mode or cannot
+    # produce reliably valid JSON while reasoning remains mandatory.
+    if provider == "dashscope" and family == "qwen_reasoning" and "thinking" in model_id:
+        return False
+    if provider in ("deepseek", "siliconflow"):
+        return family.startswith(("deepseek", "qwen", "glm", "kimi", "stepfun")) or family == "generic"
+    if provider == "dashscope":
+        return family.startswith(("qwen", "deepseek", "glm", "kimi", "stepfun"))
+    if provider == "mimo":
+        return family == "mimo"
+    if provider == "openai":
+        return family == "openai_reasoning" or family == "generic"
+    if provider == "gemini":
+        return family.startswith("gemini")
+    if provider == "amd":
+        return family != "non_chat"
+    if provider == "moonshot":
+        return family.startswith(("kimi", "generic"))
+    # DigitalOcean and generic OpenAI-compatible gateways rely on model catalog
+    # capabilities. OpenRouter's /models catalog provides supported_parameters.
+    return False
+
+
+def _adapt_thinking_parameters(payload: dict, config: LLMConfig, provider: str,
+                               family: str, structured_output: bool) -> None:
+    """Translate app thinking controls to the selected provider/model dialect."""
+    if provider == "mimo":
+        supported = _capability_list(config)
+        raw = payload.pop("enable_thinking", None)
+        setting = payload.pop("thinking", None)
         payload.pop("reasoning_effort", None)
-        payload.pop("max_tokens", None)
-        payload["max_completion_tokens"] = effective_max_tokens
+        if supported is not None and "thinking" not in supported:
+            return
+        if isinstance(setting, dict) and setting.get("type") in ("enabled", "disabled"):
+            disabled = setting["type"] == "disabled"
+        else:
+            disabled = raw is False
         payload["thinking"] = {"type": "disabled" if disabled else "enabled"}
-        if not disabled:
+        if not disabled and family == "mimo":
+            # Current MiMo thinking models ignore these controls and document
+            # that callers should leave them at their defaults.
             payload.pop("temperature", None)
             payload.pop("top_p", None)
-    return payload
+        return
+
+    if provider == "deepseek" and family == "deepseek_v4":
+        supported = _capability_list(config)
+        requested = payload.pop("enable_thinking", None)
+        effort = payload.get("reasoning_effort")
+        if supported is not None and "thinking" not in supported:
+            payload.pop("thinking", None)
+            payload.pop("reasoning_effort", None)
+            return
+        if requested is None and effort is None and structured_output:
+            requested = False
+        if requested is not None:
+            payload["thinking"] = {"type": "enabled" if requested else "disabled"}
+        if not requested or (supported is not None and "reasoning_effort" not in supported):
+            payload.pop("reasoning_effort", None)
+        elif effort:
+            payload["reasoning_effort"] = _normalize_reasoning_effort(
+                "deepseek", family, effort)
+        return
+
+    if provider == "deepseek":
+        payload.pop("enable_thinking", None)
+        payload.pop("reasoning_effort", None)
+        return
+
+    if provider in ("siliconflow", "dashscope"):
+        supports_toggle = family in ("qwen_reasoning", "deepseek_v4") or (
+            provider == "siliconflow" and family == "glm")
+        if _capability_list(config) is not None:
+            supports_toggle = "enable_thinking" in (_capability_list(config) or set())
+        model_id = re.sub(r"[^a-z0-9]+", "-", config.model.lower()).strip("-")
+        thinking_only = provider == "dashscope" and family == "qwen_reasoning" and "thinking" in model_id
+        if not supports_toggle:
+            payload.pop("enable_thinking", None)
+        elif thinking_only:
+            # Some Qwen deployments accept only their built-in thinking mode;
+            # omit the false toggle instead of sending a request they reject.
+            if payload.get("enable_thinking") is False:
+                payload.pop("enable_thinking", None)
+        elif "enable_thinking" not in payload and structured_output:
+            # Structured tasks should use the model's direct-output mode unless
+            # the user explicitly opted into reasoning for this model.
+            payload["enable_thinking"] = False
+        supported = _capability_list(config)
+        model_id = re.sub(r"[^a-z0-9]+", "-", config.model.lower()).strip("-")
+        supports_effort = ("reasoning_effort" in supported if supported is not None else
+                           provider == "siliconflow" and
+                           (family == "deepseek_v4" or
+                            (family == "glm" and "glm-5-2" in model_id)))
+        if not supports_effort:
+            payload.pop("reasoning_effort", None)
+        elif "reasoning_effort" in payload:
+            payload["reasoning_effort"] = _normalize_reasoning_effort(
+                provider, family, payload["reasoning_effort"])
+        return
+
+    if provider == "moonshot" and family == "kimi":
+        model_id = re.sub(r"[^a-z0-9]+", "-", config.model.lower()).strip("-")
+        raw = payload.pop("enable_thinking", None)
+        supported = _capability_list(config)
+        if supported is not None and "thinking" not in supported:
+            payload.pop("thinking", None)
+            raw = None
+        if "kimi-k3" in model_id:
+            payload.pop("thinking", None)
+            if supported is not None and "reasoning_effort" not in supported:
+                payload.pop("reasoning_effort", None)
+            elif "reasoning_effort" in payload:
+                payload["reasoning_effort"] = _normalize_reasoning_effort(
+                    "moonshot", family, payload["reasoning_effort"])
+            return
+        if "k2-7-code" in model_id:
+            # This model is always in thinking mode and rejects attempts to disable it.
+            payload.pop("thinking", None)
+            payload.pop("reasoning_effort", None)
+            return
+        if supported is not None and "thinking" not in supported:
+            payload.pop("reasoning_effort", None)
+            return
+        if raw is None and structured_output and "k2-6" in model_id:
+            raw = False
+        if raw is not None:
+            payload["thinking"] = {"type": "enabled" if raw else "disabled"}
+        payload.pop("reasoning_effort", None)
+        return
+
+    if provider == "amd":
+        requested = payload.pop("enable_thinking", None)
+        effort = payload.pop("reasoning_effort", None)
+        supported = _capability_list(config)
+        if supported is None or "reasoning_effort" not in supported:
+            return
+        levels = {str(level).lower() for level in
+                  (config.capabilities.get("reasoning_effort_levels") or [])}
+        if requested is False:
+            if "none" in levels or family == "deepseek_v4" or "qwen3.8-flash-next" in config.model.lower():
+                payload["reasoning_effort"] = "none"
+        elif effort:
+            normalized = _normalize_reasoning_effort(provider, family, effort)
+            if not levels or normalized in levels:
+                payload["reasoning_effort"] = normalized
+        return
+
+    if provider == "digitalocean":
+        supported = _capability_list(config)
+        if supported is None or "enable_thinking" not in supported:
+            payload.pop("enable_thinking", None)
+        if supported is not None and "reasoning_effort" not in supported:
+            payload.pop("reasoning_effort", None)
+        return
+
+    if provider == "openai":
+        supported = _capability_list(config)
+        explicit_toggle = supported is not None and "enable_thinking" in supported
+        requested = None if explicit_toggle else payload.pop("enable_thinking", None)
+        model_id = re.sub(r"[^a-z0-9]+", "-", config.model.lower()).strip("-")
+        levels = {str(level).lower() for level in
+                  (config.capabilities.get("reasoning_effort_levels") or [])}
+        supports_none = (
+            "none" in levels or
+            bool(re.search(r"gpt-5-(?:[1-9]|[1-9][0-9])", model_id)) or
+            model_id in ("gpt-6-sol", "gpt-6-luna")
+        )
+        if requested is False and supports_none and not explicit_toggle:
+            payload["reasoning_effort"] = "none"
+        if ((supported is not None and "reasoning_effort" not in supported) or
+                (supported is None and family != "openai_reasoning")):
+            payload.pop("reasoning_effort", None)
+        elif "reasoning_effort" in payload and levels:
+            normalized = _normalize_reasoning_effort(
+                "openai", family, payload["reasoning_effort"])
+            if normalized not in levels:
+                payload.pop("reasoning_effort", None)
+            else:
+                payload["reasoning_effort"] = normalized
+        return
+
+    # Gemini's OpenAI-compatible endpoint accepts reasoning_effort, while other
+    # custom endpoints retain their configured OpenAI-compatible parameters.
+    if provider == "gemini":
+        supported = _capability_list(config)
+        requested = None if supported is not None and "enable_thinking" in supported else payload.pop(
+            "enable_thinking", None)
+        model_id = re.sub(r"[^a-z0-9]+", "-", config.model.lower()).strip("-")
+        levels = {str(level).lower() for level in
+                  (config.capabilities.get("reasoning_effort_levels") or [])}
+        can_disable_thinking = ("gemini-2-5" in model_id and "-pro" not in model_id) or "none" in levels
+        if requested is False and can_disable_thinking:
+            payload["reasoning_effort"] = "none"
+        if "reasoning_effort" in payload:
+            normalized = _normalize_reasoning_effort(
+                "gemini", family, payload["reasoning_effort"])
+            if ((supported is not None and "reasoning_effort" not in supported) or
+                    (levels and normalized not in levels) or
+                    (normalized == "none" and not can_disable_thinking)):
+                payload.pop("reasoning_effort", None)
+            else:
+                payload["reasoning_effort"] = normalized
+        if ((supported is not None and "reasoning_effort" not in supported) or
+                (supported is None and family != "gemini_reasoning")):
+            payload.pop("reasoning_effort", None)
+        return
+
+    # Unknown OpenAI-compatible endpoints do not all implement these vendor
+    # extensions. Keep them only when the model catalog explicitly lists them.
+    supported = _capability_list(config)
+    if supported is None or "enable_thinking" not in supported:
+        payload.pop("enable_thinking", None)
+    if "reasoning_effort" in payload and (supported is None or "reasoning_effort" not in supported):
+        payload.pop("reasoning_effort", None)
+
+
+def _normalize_reasoning_effort(provider: str, family: str, effort) -> str:
+    value = str(effort or "").strip().lower()
+    if value in ("off", "none", "disable", "disabled"):
+        return "none"
+    if provider == "deepseek":
+        return {"minimal": "low", "medium": "high", "xhigh": "max", "ultra": "max"}.get(value, value)
+    if provider == "siliconflow" and family in ("deepseek_v4", "glm"):
+        return {"minimal": "low", "medium": "high", "xhigh": "max", "ultra": "max"}.get(value, value)
+    if provider == "moonshot":
+        return {"minimal": "low", "medium": "high", "xhigh": "max", "ultra": "max"}.get(value, value)
+    if provider == "gemini":
+        return {"xhigh": "high", "max": "high", "ultra": "high"}.get(value, value)
+    if provider == "amd":
+        return {"minimal": "low", "xhigh": "medium", "ultra": "medium", "max": "high"}.get(value, value)
+    return value
 
 
 def _provider_completion_limit(base_url: str, model: str) -> int | None:
@@ -364,6 +770,7 @@ class LLMAnalyzer:
             ],
             temperature=0.2,
             max_tokens=max_tokens,
+            structured_output=True,
         )
         url = f"{self.config.base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
@@ -381,7 +788,7 @@ class LLMAnalyzer:
                 if choice.get("finish_reason") == "length":
                     log.warning("响应因 max_tokens 截断(batch=%d, max_tokens=%d)，将拆分", n, max_tokens)
                     return {}, list(videos), "truncated"
-                content = choice["message"].get("content") or ""
+                content = extract_chat_completion_content(data)
                 if not content.strip():
                     # 推理模型把预算耗在 reasoning 上 → 重试无用，交由上层拆分
                     log.warning("空正文(batch=%d, max_tokens=%d)，将拆分", n, max_tokens)
@@ -545,6 +952,7 @@ def suggest_folder_merges(config: LLMConfig, folder_profiles: list[dict]) -> lis
         ],
         temperature=0.15,
         max_tokens=min(config.max_tokens, 16000),
+        structured_output=True,
     )
     headers = {"Content-Type": "application/json"}
     if config.api_key:
@@ -552,9 +960,31 @@ def suggest_folder_merges(config: LLMConfig, folder_profiles: list[dict]) -> lis
     resp = requests.post(f"{config.base_url}/chat/completions", json=payload,
                          headers=headers, timeout=DEFAULT_TIMEOUT)
     resp.raise_for_status()
-    content = resp.json()["choices"][0]["message"].get("content") or ""
+    response_data = resp.json()
+    content = extract_chat_completion_content(response_data)
     obj = _extract_json(content)
     if not obj or not isinstance(obj.get("groups"), list):
+        choices = response_data.get("choices") if isinstance(response_data, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+        message = choice.get("message") if isinstance(choice.get("message"), dict) else {}
+        usage = response_data.get("usage") if isinstance(response_data, dict) else {}
+        usage = usage if isinstance(usage, dict) else {}
+        preview_limit = 1200
+        preview = repr(content[:preview_limit])
+        if len(content) > preview_limit:
+            preview += "…"
+        log.warning(
+            "Folder merge response was not parseable JSON: provider=%s model=%s "
+            "finish_reason=%r response_model=%r content_type=%s content_chars=%d "
+            "reasoning_chars=%d usage=%s content_preview=%s",
+            request_provider(config), config.model, choice.get("finish_reason"),
+            response_data.get("model") if isinstance(response_data, dict) else None,
+            type(message.get("content")).__name__, len(content),
+            len(str(message.get("reasoning_content") or "")),
+            {key: usage.get(key) for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+             if key in usage},
+            preview,
+        )
         raise ValueError("模型未返回可解析的合并组 JSON")
     return obj["groups"]
 
@@ -756,18 +1186,8 @@ def _profile_chat(config: LLMConfig, system: str, user: dict, max_tokens: int,
         {"role": "system", "content": system},
         {"role": "user", "content": user_text},
     ]
-    # Profile pages need compact, machine-readable JSON. These SiliconFlow model
-    # families support explicitly disabling thinking for this structured task.
-    siliconflow = "siliconflow.cn" in config.base_url.lower()
-    qwen3 = "qwen3" in config.model.lower()
-    deepseek_v4_flash = "deepseek-v4-flash" in config.model.lower()
-    extra = {}
-    if siliconflow and (qwen3 or deepseek_v4_flash):
-        extra["enable_thinking"] = False
-    if siliconflow and deepseek_v4_flash:
-        extra["response_format"] = {"type": "json_object"}
     payload = build_chat_completion_payload(
-        config, messages, max_tokens, temperature=0.2, extra=extra)
+        config, messages, max_tokens, temperature=0.2, structured_output=True)
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
@@ -841,10 +1261,7 @@ def _profile_chat(config: LLMConfig, system: str, user: dict, max_tokens: int,
             log.debug("Profile usage callback failed", exc_info=True)
     choice = (result.get("choices") or [{}])[0]
     message = choice.get("message") or {}
-    content = message.get("content") or ""
-    if isinstance(content, list):
-        content = "\n".join(str(item.get("text", "")) for item in content
-                             if isinstance(item, dict))
+    content = extract_chat_completion_content(result)
     obj = _extract_json(content)
     if not isinstance(obj, dict):
         snippet = str(content or "").strip().replace("\n", " ")[:240]

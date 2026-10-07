@@ -39,7 +39,7 @@ FOLDER_MERGE_STATE_FILE = LEGACY_DATA_DIR / "folder_merge_state.json"
 FOLDER_MERGE_DRAFT_FILE = LEGACY_DATA_DIR / "folder_merge_draft.json"
 
 _lock = threading.RLock()
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 _DATASET_DEFAULTS = {
     "analysis": {}, "plan": {}, "apply_state": {}, "scan_done": [],
     "scan_selection": [], "folder_merge_plan": [], "folder_merge_draft": [],
@@ -238,6 +238,7 @@ def _initialize():
                 provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
                 name TEXT NOT NULL, context_tokens INTEGER NOT NULL DEFAULT 32768,
                 max_output_tokens INTEGER NOT NULL DEFAULT 8192,
+                capabilities_json TEXT NOT NULL DEFAULT '{}',
                 thinking_effort TEXT NOT NULL DEFAULT '',
                 test_status TEXT NOT NULL DEFAULT 'untested',
                 test_message TEXT, test_at TEXT,
@@ -250,6 +251,8 @@ def _initialize():
             conn.execute("ALTER TABLE models ADD COLUMN context_source TEXT NOT NULL DEFAULT 'legacy_unknown'")
         if "output_source" not in model_columns:
             conn.execute("ALTER TABLE models ADD COLUMN output_source TEXT NOT NULL DEFAULT 'legacy_unknown'")
+        if "capabilities_json" not in model_columns:
+            conn.execute("ALTER TABLE models ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '{}'")
         folder_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(folders)")}
         if "status" not in folder_columns:
             conn.execute("ALTER TABLE folders ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
@@ -939,9 +942,14 @@ def _provider_row(row) -> dict:
 
 
 def _model_row(row) -> dict:
+    try:
+        capabilities = json.loads(row["capabilities_json"] or "{}")
+    except (KeyError, TypeError, ValueError):
+        capabilities = {}
     return {"id": row["id"], "provider_id": row["provider_id"], "name": row["name"],
             "context_tokens": int(row["context_tokens"] or 0),
             "max_output_tokens": int(row["max_output_tokens"] or 0),
+            "capabilities": capabilities if isinstance(capabilities, dict) else {},
             "context_source": row["context_source"] or "legacy_unknown",
             "output_source": row["output_source"] or "legacy_unknown",
             "thinking_effort": row["thinking_effort"] or "",
@@ -1029,6 +1037,7 @@ def get_model(model_id: str) -> dict | None:
 
 def create_model(provider_id: str, name: str, *, context_tokens: int | None = None,
                  max_output_tokens: int | None = None, thinking_effort: str = "",
+                 capabilities: dict | None = None,
                  context_source: str | None = None, output_source: str | None = None,
                  test_status: str = "untested", test_message: str | None = None) -> dict:
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -1036,12 +1045,12 @@ def create_model(provider_id: str, name: str, *, context_tokens: int | None = No
     with _transaction() as conn:
         conn.execute(
             """INSERT INTO models(id,provider_id,name,context_tokens,max_output_tokens,
-               thinking_effort,test_status,test_message,test_at,created_at,updated_at,
+               capabilities_json,thinking_effort,test_status,test_message,test_at,created_at,updated_at,
                context_source,output_source)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mid, str(provider_id), (name or "").strip(),
              max(0, int(context_tokens or 0)), max(0, int(max_output_tokens or 0)),
-             thinking_effort or "", test_status, test_message,
+             _json(capabilities or {}), thinking_effort or "", test_status, test_message,
              now if test_status != "untested" else None, now, now,
              context_source or ("manual" if context_tokens else "unknown"),
              output_source or ("manual" if max_output_tokens else "unknown")))
@@ -1053,12 +1062,15 @@ def update_model(model_id: str, **fields) -> dict | None:
     if not existing:
         return None
     allowed = {"name", "context_tokens", "max_output_tokens", "context_source", "output_source", "thinking_effort",
+               "capabilities",
                "test_status", "test_message", "test_at", "provider_id"}
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not updates:
         return existing
     if "name" in updates:
         updates["name"] = (updates["name"] or "").strip() or existing["name"]
+    if "capabilities" in updates:
+        updates["capabilities_json"] = _json(updates.pop("capabilities") or {})
     if "context_tokens" in updates:
         updates["context_tokens"] = max(0, int(updates["context_tokens"]))
         updates["context_source"] = "manual" if updates["context_tokens"] else "unknown"
@@ -1129,18 +1141,21 @@ def replace_provider_models(provider_id: str, models: list[dict]) -> list[dict]:
                     updates["output_source"] = item.get("output_source") or "api"
                 if item.get("thinking_effort") is not None:
                     updates["thinking_effort"] = str(item["thinking_effort"] or "")
+                if item.get("capabilities") is not None:
+                    updates["capabilities_json"] = _json(item["capabilities"] or {})
                 cols = ", ".join(f"{key}=?" for key in updates)
                 conn.execute(f"UPDATE models SET {cols} WHERE id=?",
                              (*updates.values(), old["id"]))
             else:
                 conn.execute(
                     """INSERT INTO models(id,provider_id,name,context_tokens,max_output_tokens,
-                       thinking_effort,test_status,test_message,test_at,created_at,updated_at,
+                       capabilities_json,thinking_effort,test_status,test_message,test_at,created_at,updated_at,
                        context_source,output_source)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (_new_id(), str(provider_id), name,
                      max(0, int(item.get("context_tokens") or 0)),
                      max(0, int(item.get("max_output_tokens") or 0)),
+                     _json(item.get("capabilities") or {}),
                      str(item.get("thinking_effort") or ""),
                      "untested", None, None, now, now,
                      item.get("context_source") or "unknown",
