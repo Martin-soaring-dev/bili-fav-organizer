@@ -10,6 +10,14 @@ datas = [(str(ROOT / "static"), "static")]
 binaries = []
 hiddenimports = []
 
+# Generated from the brand SVG masters by tools/brand/export_ico.py; commit the
+# .ico so CI only needs requirements.txt + pyinstaller, not Pillow or Chromium.
+APP_ICON = ROOT / "packaging" / "BiliFavOrganizer.ico"
+if not APP_ICON.exists():
+    raise FileNotFoundError(
+        f"Missing application icon {APP_ICON}. Regenerate with: python tools/brand/export_ico.py"
+    )
+
 # These packages load some implementation modules dynamically at runtime.
 for package in ("browsercookie", "qrcode", "PIL"):
     package_datas, package_binaries, package_hiddenimports = collect_all(package)
@@ -39,6 +47,7 @@ exe = EXE(
     exclude_binaries=True,
     name="BiliFavOrganizer",
     debug=False,
+    icon=str(APP_ICON),
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,

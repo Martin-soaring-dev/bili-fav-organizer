@@ -4,7 +4,7 @@
 
 ## 1. 交付边界与接入路径
 
-本次变更在 `docs/brand/` 提供规范、矢量总览与预览，在 `static/brand/` 提供可服务的资产，并在 README 展示品牌、链接规范。正式 Web 界面和 Windows 打包资源继续沿用当前实现。以下代码是可采用的接入示例，未宣称这些界面改动已经完成。
+本次变更在 `docs/brand/` 提供规范、矢量总览与预览，在 `static/brand/` 提供可服务的资产，并在 README 展示品牌、链接规范。浏览器标签图标、Web 顶栏标志和 Windows 程序图标已接入页面与打包配置，下面第 2 节和第 7 节就是实际实现，不再只是示例。业务功能图标与 `tokens.css` 令牌仍是可选项，尚未接入现有界面。
 
 `server.py` 已挂载 `/static`，新增资产以后可直接通过 `/static/brand/...` 访问。无需额外路由，无需增加 npm 或 Python 应用依赖。
 
@@ -15,7 +15,7 @@
 | Web 顶栏 24 px | 单色 sprite 标志 | 继承主题强调色 |
 | 启动展示 | 竖式标志 | 深色使用 inverse 组合 |
 | 浏览器标签 | `favicon.svg` | 固定浅底与单色轮廓 |
-| Windows 快捷方式 | 应用图标衍生的多帧 ICO | 小帧需用 compact；另行接入 `.spec` |
+| Windows 快捷方式 | 应用图标衍生的多帧 ICO | 小帧用 favicon / compact，大帧用浅色应用图标；已接入 `.spec` |
 | 发布封面 | `overview.svg` 中的品牌语言 | 用版本号与功能文案组成正式封面 |
 
 ## 2. Web 标志与 favicon
@@ -29,6 +29,8 @@
 ```
 
 图标与产品名相邻，因此空 alt 避免重复朗读。若整幅组合标志是页面唯一名称，用 `alt="BiliFav Organizer · B站收藏夹智能整理"`。深色背景搭配 HTML 产品名更稳妥；完整英文与中文组合要选择 inverse 版。
+
+顶栏选用平涂标志而不是单色 sprite：`<img>` 内的 `currentColor` 属于图像内部，平涂母版自带深浅两档青色，在浅色（`#FFFFFF` 顶栏）和深色（`#151B23` 顶栏）下都达到非文本对比要求，无需按主题换文件。尺寸由 `static/style.css` 的 `.brand-mark` 固定为 32 px 并禁止收缩。
 
 ## 3. 功能图标与 CSS
 
@@ -114,7 +116,18 @@ GitHub 不会把仓库里的 HTML 直接渲染成网页；在线审阅使用 Mar
 
 维护 SVG 作为母版；ICO 不作为设计源。推荐的多帧尺寸：16、24、32、48、64、128、256 px。前三档由 favicon / compact 导出，其余由浅色应用图标导出；如需深色桌面版本则另行提供独立文件。
 
-导出 ICO 后检查每帧实际尺寸与小尺寸清晰度，再配置 PyInstaller `icon` 或 `--icon`；包含所有帧的 ICO 不能只用一张 256 px 位图机械缩小。v1 尚未交付 ICO / PNG 发布包，也未修改 `.spec`，这项不与品牌源资产混淆。
+导出 ICO 后检查每帧实际尺寸与小尺寸清晰度，再配置 PyInstaller `icon` 或 `--icon`；包含所有帧的 ICO 不能只用一张 256 px 位图机械缩小。
+
+导出器为 `tools/brand/export_ico.py`，逐帧按目标像素尺寸从矢量重新光栅化，产物 `packaging/BiliFavOrganizer.ico` 入库，`BiliFavOrganizer.spec` 以 `icon=str(APP_ICON)` 引用：
+
+```bash
+python tools/brand/export_ico.py        # 重新生成 packaging/BiliFavOrganizer.ico
+python tools/brand/export_ico.py --check # 校验已提交 ICO 的帧集合仍符合帧计划
+```
+
+它只在维护图标时需要 Pillow 与 Playwright Chromium，两者都不是应用依赖，也不是 CI 依赖——Release 工作流只需要已提交的 `.ico`。
+
+已实测 Windows 图标加载器会按度量挑帧：`ExtractIconExW` 解析该文件返回一个图标，大度量得到 32×32、小度量得到 16×16 两个独立 HICON，说明确实按尺寸取帧而不是统一缩放。打包后的 exe 图标显示仍需在下次 Release 构建的产物上确认一次。
 
 ## 8. 维护与验收
 
@@ -123,6 +136,8 @@ GitHub 不会把仓库里的 HTML 直接渲染成网页；在线审阅使用 Mar
 ```bash
 python tools/brand/build.py
 python tools/brand/build.py --check
+python tools/brand/export_ico.py --check
+python -m unittest tests.test_brand_integration
 git diff --check
 ```
 
@@ -138,4 +153,4 @@ git diff --check
 | 主题语义 | 核对 `tokens.json` / CSS 与本规范的颜色值 |
 | 字体声明 | 保留两份字体 notice，不引入字体运行依赖 |
 
-这套资产修改不影响归类、数据库、账户读写和任务调度。后续真正接入 UI 或打包时，应另行验证静态资源路由、键盘访问、主题切换和打包后图标显示。
+这套资产修改不影响归类、数据库、账户读写和任务调度。接入界面与打包的部分已按此验证：`/static/brand/...` 路由在本地服务返回 200 且 MIME 为 `image/svg+xml`；顶栏标志在深浅两种主题下都解码成功并固定为 32×32，无控制台报错；ICO 通过 Windows 图标加载器解析并按度量取帧。仍需在下次 Release 构建后确认打包 exe 的图标显示，键盘访问尚未针对新增标志复测。

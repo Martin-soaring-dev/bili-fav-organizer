@@ -123,7 +123,7 @@ def build():
         css += ["  --bfo-icon-bg: " + values["surface"] + ";", "}"]
     css += [".bfo-icon { width: 24px; height: 24px; flex: none; color: inherit; }", ".bfo-mark { display: block; width: 32px; height: 32px; }", ""]
     add("tokens.css", "\n".join(css))
-    add("manifest.json", json.dumps({"version":"1.0.0", "masterViewBox":"0 0 512 512", "files":[str(p.relative_to(ASSETS)) for p in result if p.suffix == ".svg"]}, indent=2) + "\n")
+    add("manifest.json", json.dumps({"version":"1.0.0", "masterViewBox":"0 0 512 512", "files":[p.relative_to(ASSETS).as_posix() for p in result if p.suffix == ".svg"]}, indent=2) + "\n")
     grid = ''.join(f'<path d="M{i} 0V512M0 {i}H512"/>' for i in range(0,513,32))
     construction = f'<rect width="720" height="640" fill="#F0FDFA"/><g transform="translate(104 32)"><g stroke="#CCFBF1" stroke-width="1">{grid}</g>{mark("flat",prefix="bfo-grid")}<rect x="64" y="48" width="388" height="416" fill="none" stroke="#0F3D3A" stroke-width="1" stroke-dasharray="6 4"/><path d="M188 48V464M0 254H512" fill="none" stroke="#0F3D3A" stroke-width="1" stroke-dasharray="6 4"/><circle cx="128" cy="382" r="5" fill="#0F3D3A"/></g><g fill="#0F3D3A" font-family="sans-serif" font-size="16"><text x="104" y="580">512 × 512 master · 32-unit grid</text><text x="104" y="608">Ink bounds: x 64–452 / y 48–464 · notch: (128, 382)</text></g>'
     result[DOCS / "construction.svg"] = svg(construction,720,640,title="BiliFav Organizer construction grid",prefix="bfo-grid-root")

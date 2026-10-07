@@ -72,6 +72,8 @@ body {
   flex-wrap: wrap;
 }
 .brand { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 15px; font-weight: 700; color: var(--accent); }
+/* 平涂标志自身带色（深/亮青），深浅顶栏都够对比，无需按主题切换文件 */
+.brand-mark { display: block; width: 32px; height: 32px; flex: none; }
 .app-version, .update-status { color: var(--muted); font-size: 11px; font-weight: 400; }
 .update-status { min-width: 0; }
 .update-status.ok { color: var(--green); }
