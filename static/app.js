@@ -66,8 +66,9 @@
       let data = null;
       try { data = txt ? JSON.parse(txt) : null; } catch (_) { /* 非 JSON */ }
       if (!res.ok) {
-        const err = new Error((data && data.error) || ("HTTP " + res.status));
-        err.error = data && data.error;
+        const message = (data && (data.error || data.detail)) || ("HTTP " + res.status);
+        const err = new Error(message);
+        err.error = message;
         if (data && data.code === "scan_issue_pending") refreshScanIssues(true);
         throw err;
       }
@@ -76,6 +77,103 @@
       if (timeoutId !== null) clearTimeout(timeoutId);
     }
   }
+
+  function setUpdateStatus(message, state = "") {
+    const box = $("update-status");
+    box.className = `update-status ${state}`.trim();
+    box.textContent = message;
+  }
+
+  async function loadAppVersion() {
+    try {
+      const info = await api("GET", "/api/version");
+      $("app-version").textContent = `版本 ${info.version || "dev"}`;
+    } catch (_) { /* 服务连接状态另有提示 */ }
+  }
+
+  async function watchUpdateProgress(expectedVersion) {
+    for (let attempt = 0; attempt < 180; attempt++) {
+      let state = null;
+      try {
+        state = await api("GET", "/api/update/status", undefined, { timeoutMs: 3000 });
+      } catch (_) { /* 更新重启期间服务会暂时断开 */ }
+
+      if (state && state.status === "error") {
+        const message = state.error || "更新失败";
+        setUpdateStatus(`更新失败：${message}`, "error");
+        log(`更新失败：${message}`, "err");
+        return false;
+      }
+      if (state && state.status === "downloading") {
+        const downloaded = Number(state.downloaded_bytes || 0);
+        const total = Number(state.total_bytes || 0);
+        const progress = total ? ` ${Math.min(100, Math.floor(downloaded * 100 / total))}%` : "";
+        setUpdateStatus(`正在下载更新${progress}…`);
+      } else if (state && state.status === "installing") {
+        setUpdateStatus(`正在安装 ${expectedVersion}，应用即将重启…`);
+      }
+
+      try {
+        const info = await api("GET", "/api/version", undefined, { timeoutMs: 3000 });
+        if (info.version === expectedVersion) {
+          setUpdateStatus(`已更新到 ${expectedVersion}，正在重新载入…`, "ok");
+          setTimeout(() => window.location.reload(), 800);
+          return true;
+        }
+      } catch (_) { /* 继续等待服务重启 */ }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    setUpdateStatus("等待更新重启超时，请检查程序窗口后重试", "error");
+    log("等待更新程序重启超时", "err");
+    return false;
+  }
+
+  async function checkForUpdates() {
+    const button = $("check-updates");
+    button.disabled = true;
+    button.classList.add("checking");
+    setUpdateStatus("正在检查更新…");
+    let installing = false;
+    try {
+      const result = await api("POST", "/api/update/check", undefined, { timeoutMs: 30000 });
+      const currentVersion = result.current_version || "dev";
+      $("app-version").textContent = `版本 ${currentVersion}`;
+      if (!result.update_available) {
+        setUpdateStatus(`已是最新版本（${currentVersion}）`, "ok");
+        log(`版本检查完成：当前 ${currentVersion}，已是最新版本`, "ok");
+        return;
+      }
+
+      log(`发现新版本 ${result.latest_version}（当前 ${currentVersion}）`, "info");
+      if (!result.supports_self_update) {
+        const status = $("update-status");
+        status.className = "update-status";
+        status.replaceChildren(document.createTextNode(`发现 ${result.latest_version}。源码运行请 `));
+        const link = document.createElement("a");
+        link.href = result.release_url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = "前往下载";
+        status.appendChild(link);
+        return;
+      }
+
+      setUpdateStatus(`发现 ${result.latest_version}，正在准备更新…`);
+      await api("POST", "/api/update/install", undefined, { timeoutMs: 10000 });
+      installing = await watchUpdateProgress(result.latest_version);
+    } catch (e) {
+      const reason = e && (e.error || e.message || String(e));
+      setUpdateStatus(`检查更新失败：${reason}`, "error");
+      log(`检查更新失败：${reason}`, "err");
+    } finally {
+      if (!installing) {
+        button.disabled = false;
+        button.classList.remove("checking");
+      }
+    }
+  }
+
+  $("check-updates").addEventListener("click", checkForUpdates);
 
   // ---------- 连接状态 ----------
   async function checkConn() {
@@ -3555,6 +3653,7 @@
   function init() {
     setMode("fast");
     updateFastRunButton();
+    loadAppVersion();
     checkConn();
     loadConfig();
     loadCookieState().then(() => {

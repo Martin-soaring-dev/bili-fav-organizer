@@ -9,7 +9,13 @@
 <body>
 <div id="app">
   <header class="topbar">
-    <div class="brand">▶ B站收藏夹智能整理</div>
+    <div class="brand">
+      <span>▶ B站收藏夹智能整理</span>
+      <span id="app-version" class="app-version">版本 —</span>
+      <button id="check-updates" class="update-check-btn" type="button"
+              title="检查更新" aria-label="检查更新">↻</button>
+      <span id="update-status" class="update-status" aria-live="polite"></span>
+    </div>
     <div class="topbar-actions">
       <button id="data-import-btn" class="btn mini-btn">📥 读取项目数据</button>
       <button id="data-export-btn" class="btn mini-btn">📤 导出项目数据</button>

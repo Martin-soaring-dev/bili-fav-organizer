@@ -25,6 +25,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
 
+      - name: Embed release version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: |
+          $version = $env:RELEASE_VERSION
+          if ($version -notmatch '^v?\d+(\.\d+)*$') { throw "Unsupported release version: $version" }
+          $source = [System.IO.File]::ReadAllText("server.py")
+          $marker = 'BUILD_VERSION = "dev"'
+          if ([regex]::Matches($source, [regex]::Escape($marker)).Count -ne 1) { throw "Build version marker must appear exactly once." }
+          $source = $source.Replace($marker, ('BUILD_VERSION = "{0}"' -f $version))
+          [System.IO.File]::WriteAllText("server.py", $source, [System.Text.UTF8Encoding]::new($false))
+
       - name: Build self-contained application
         run: pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 

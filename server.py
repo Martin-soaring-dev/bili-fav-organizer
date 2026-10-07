@@ -24,13 +24,17 @@ import os
 import re
 import shutil
 import sys
+import subprocess
+import tempfile
 import threading
 import time
 import traceback
 import uuid
 import webbrowser
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 from typing import Optional
+from urllib.parse import urlsplit
 
 import requests
 import uvicorn
@@ -61,6 +65,60 @@ log = logging.getLogger("server")
 app = FastAPI(title="B站收藏夹整理")
 
 MODEL_TEST_TIMEOUT_SECONDS = 45
+BUILD_VERSION = "dev"
+
+GITHUB_REPOSITORY = "Martin-soaring-dev/bili-fav-organizer"
+GITHUB_LATEST_RELEASE_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases/latest"
+UPDATE_STATE = {
+    "status": "idle",
+    "current_version": "",
+    "latest_version": "",
+    "downloaded_bytes": 0,
+    "total_bytes": 0,
+    "error": "",
+}
+_UPDATE_LOCK = threading.Lock()
+_UPDATE_RELEASE = None
+_UPDATE_STATUS_FILE: Path | None = None
+_UVICORN_SERVER = None
+_APP_PORT = 8080
+
+
+def _app_version() -> str:
+    """The release workflow embeds its tag into the frozen application."""
+    return BUILD_VERSION
+
+
+def _version_key(version: str) -> tuple[int, ...] | None:
+    match = re.fullmatch(r"[vV]?(\d+(?:\.\d+)*)", str(version or "").strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def _is_newer_version(latest: str, current: str) -> bool:
+    latest_key, current_key = _version_key(latest), _version_key(current)
+    if latest_key is None:
+        raise ValueError(f"Release 版本标签格式不支持：{latest}")
+    if current_key is None:
+        return True
+    width = max(len(latest_key), len(current_key))
+    return latest_key + (0,) * (width - len(latest_key)) > \
+        current_key + (0,) * (width - len(current_key))
+
+
+def _update_state_snapshot() -> dict:
+    with _UPDATE_LOCK:
+        state = dict(UPDATE_STATE)
+        status_file = _UPDATE_STATUS_FILE
+    if status_file and status_file.is_file():
+        try:
+            helper_state = json.loads(status_file.read_text(encoding="utf-8-sig"))
+            if helper_state.get("status") == "error":
+                state.update(helper_state)
+        except (OSError, ValueError, AttributeError):
+            pass
+    return state
 
 # ---------- 运行状态（跨请求的全局状态） ----------
 APP = {
@@ -3643,6 +3701,345 @@ def apply_stop():
     return {"ok": False, "error": "没有运行中的执行"}
 
 
+# ============ 应用更新 ============
+def _latest_release_version() -> str:
+    # /releases/latest 会重定向到最新版本的 tag 页面，不消耗 GitHub REST API 配额。
+    with requests.get(
+        GITHUB_LATEST_RELEASE_URL,
+        headers={"User-Agent": "BiliFavOrganizer-update-check"},
+        timeout=(10, 25),
+        allow_redirects=True,
+        stream=True,
+    ) as response:
+        response.raise_for_status()
+        parsed = urlsplit(response.url)
+
+    tag_prefix = f"/{GITHUB_REPOSITORY}/releases/tag/"
+    if parsed.scheme != "https" or parsed.hostname != "github.com" or \
+            not parsed.path.startswith(tag_prefix):
+        raise ValueError("无法从 GitHub 最新 Release 页面读取版本标签")
+    tag = parsed.path[len(tag_prefix):].split("/", 1)[0]
+    if _version_key(tag) is None:
+        raise ValueError(f"最新 Release 版本标签格式不支持：{tag or '空'}")
+    return tag
+
+
+def _fetch_latest_release() -> dict:
+    tag = _latest_release_version()
+    zip_name = f"BiliFavOrganizer-Windows-x64-{tag}.zip"
+    checksum_name = f"{zip_name}.sha256"
+    download_base = f"https://github.com/{GITHUB_REPOSITORY}/releases/download/{tag}"
+    return {
+        "version": tag,
+        "release_url": f"https://github.com/{GITHUB_REPOSITORY}/releases/tag/{tag}",
+        "zip_name": zip_name,
+        "zip_url": f"{download_base}/{zip_name}",
+        "checksum_url": f"{download_base}/{checksum_name}",
+        "zip_size": 0,
+    }
+
+
+def _set_update_state(**values):
+    with _UPDATE_LOCK:
+        UPDATE_STATE.update(values)
+
+
+def _extract_release_zip(zip_path: Path, stage_dir: Path):
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path) as archive:
+        members = archive.infolist()
+        if not members or len(members) > 10000:
+            raise ValueError("Release ZIP 文件数量异常")
+        if sum(member.file_size for member in members) > 3 * 1024 * 1024 * 1024:
+            raise ValueError("Release ZIP 解压体积超过安全上限")
+
+        stage_root = stage_dir.resolve()
+        names = set()
+        for member in members:
+            name = member.filename
+            relative = PurePosixPath(name)
+            if (not name or "\\" in name or relative.is_absolute() or
+                    ".." in relative.parts or
+                    (relative.parts and ":" in relative.parts[0])):
+                raise ValueError("Release ZIP 含有不安全的文件路径")
+            if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                raise ValueError("Release ZIP 不允许包含符号链接")
+            target = (stage_dir / Path(*relative.parts)).resolve()
+            if not target.is_relative_to(stage_root):
+                raise ValueError("Release ZIP 文件路径越界")
+            names.add(name.rstrip("/"))
+
+        if "BiliFavOrganizer.exe" not in names:
+            raise ValueError("Release ZIP 缺少 BiliFavOrganizer.exe")
+        archive.extractall(stage_dir)
+
+
+_UPDATE_HELPER_SCRIPT = r'''param(
+    [int]$ParentPid,
+    [string]$WorkDir,
+    [string]$StageDir,
+    [string]$InstallDir,
+    [int]$Port,
+    [string]$Version
+)
+$ErrorActionPreference = "Stop"
+$StatusFile = Join-Path $WorkDir "status.json"
+$BackupDir = $null
+$NewProcess = $null
+$BackupMoved = $false
+
+function Write-UpdateState([string]$Status, [string]$Message = "") {
+    try {
+        @{ status = $Status; error = $Message; version = $Version } |
+            ConvertTo-Json -Compress |
+            Set-Content -LiteralPath $StatusFile -Encoding UTF8
+    } catch { }
+}
+
+try {
+    Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction SilentlyContinue
+    if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
+        throw "应用仍在运行，更新已取消。"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $StageDir "BiliFavOrganizer.exe") -PathType Leaf)) {
+        throw "更新包中找不到 BiliFavOrganizer.exe。"
+    }
+
+    $ParentDir = Split-Path -Parent $InstallDir
+    $BackupDir = Join-Path $ParentDir ((Split-Path -Leaf $InstallDir) + ".previous-" + [guid]::NewGuid().ToString("N"))
+    Move-Item -LiteralPath $InstallDir -Destination $BackupDir
+    $BackupMoved = $true
+    Move-Item -LiteralPath $StageDir -Destination $InstallDir
+
+    foreach ($OldItem in (Get-ChildItem -LiteralPath $BackupDir -Force)) {
+        $NewItemPath = Join-Path $InstallDir $OldItem.Name
+        if (-not (Test-Path -LiteralPath $NewItemPath)) {
+            Copy-Item -LiteralPath $OldItem.FullName -Destination $InstallDir -Recurse -Force
+        }
+    }
+
+    $NewExe = Join-Path $InstallDir "BiliFavOrganizer.exe"
+    if (-not (Test-Path -LiteralPath $NewExe -PathType Leaf)) {
+        throw "更新后找不到程序文件。"
+    }
+    $NewProcess = Start-Process -FilePath $NewExe `
+        -ArgumentList @("--port", [string]$Port, "--no-browser") `
+        -WorkingDirectory $InstallDir -PassThru
+    $Ready = $false
+    for ($Attempt = 0; $Attempt -lt 30; $Attempt++) {
+        $NewProcess.Refresh()
+        if ($NewProcess.HasExited) { break }
+        try {
+            $Health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/version" -TimeoutSec 2
+            if ($Health.version -eq $Version) { $Ready = $true; break }
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $Ready) {
+        throw "新版本未能启动，正在恢复旧版本。"
+    }
+
+    Write-UpdateState "complete"
+    try { Remove-Item -LiteralPath $BackupDir -Recurse -Force } catch { }
+    try { Remove-Item -LiteralPath (Join-Path $WorkDir "release.zip") -Force } catch { }
+    try { Remove-Item -LiteralPath $StatusFile -Force } catch { }
+    try { Remove-Item -LiteralPath $PSCommandPath -Force } catch { }
+    try { Remove-Item -LiteralPath $WorkDir -Force } catch { }
+} catch {
+    $Message = $_.Exception.Message
+    Write-UpdateState "error" $Message
+    if ($NewProcess -and -not $NewProcess.HasExited) {
+        try { Stop-Process -Id $NewProcess.Id -Force } catch { }
+    }
+    if ($BackupMoved -and (Test-Path -LiteralPath $BackupDir)) {
+        if (Test-Path -LiteralPath $InstallDir) {
+            $FailedDir = $InstallDir + ".failed-" + [guid]::NewGuid().ToString("N")
+            try { Move-Item -LiteralPath $InstallDir -Destination $FailedDir } catch { }
+        }
+        if (-not (Test-Path -LiteralPath $InstallDir)) {
+            try { Move-Item -LiteralPath $BackupDir -Destination $InstallDir } catch { }
+        }
+    }
+    $OldExe = Join-Path $InstallDir "BiliFavOrganizer.exe"
+    if ((Test-Path -LiteralPath $OldExe -PathType Leaf) -and
+            -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) {
+        try {
+            Start-Process -FilePath $OldExe `
+                -ArgumentList @("--port", [string]$Port, "--no-browser") `
+                -WorkingDirectory $InstallDir
+        } catch { }
+    }
+}
+'''
+
+
+def _run_update_worker(release: dict):
+    global _UPDATE_STATUS_FILE
+    work_dir = None
+    try:
+        if not getattr(sys, "frozen", False) or os.name != "nt":
+            raise RuntimeError("自动覆盖更新仅支持 Windows 便携版")
+        install_dir = APP_DIR.resolve()
+        if install_dir == install_dir.parent:
+            raise RuntimeError("程序不能从磁盘根目录自动更新，请先解压到单独的可写文件夹")
+        if not (APP_DIR / "BiliFavOrganizer.exe").is_file():
+            raise RuntimeError("当前程序目录中找不到 BiliFavOrganizer.exe")
+
+        work_dir = Path(tempfile.mkdtemp(prefix=".bfo-update-", dir=str(APP_DIR.parent)))
+        zip_path = work_dir / "release.zip"
+        stage_dir = work_dir / "stage"
+        status_file = work_dir / "status.json"
+        with _UPDATE_LOCK:
+            _UPDATE_STATUS_FILE = status_file
+        status_file.write_text(json.dumps({"status": "downloading", "error": ""}),
+                               encoding="utf-8")
+
+        checksum_response = requests.get(release["checksum_url"], timeout=(10, 30))
+        checksum_response.raise_for_status()
+        checksum_match = re.search(r"\b([0-9a-fA-F]{64})\b", checksum_response.text)
+        if not checksum_match:
+            raise ValueError("Release SHA256 文件格式无效")
+        expected_sha256 = checksum_match.group(1).lower()
+
+        downloaded = 0
+        digest = hashlib.sha256()
+        response = requests.get(release["zip_url"], stream=True, timeout=(15, 120))
+        response.raise_for_status()
+        try:
+            total = int(response.headers.get("Content-Length") or release.get("zip_size") or 0)
+            if total > 2 * 1024 * 1024 * 1024:
+                raise ValueError("更新包超过 2 GiB 安全上限")
+            _set_update_state(total_bytes=total, downloaded_bytes=0)
+            with zip_path.open("wb") as output:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if not chunk:
+                        continue
+                    output.write(chunk)
+                    digest.update(chunk)
+                    downloaded += len(chunk)
+                    _set_update_state(downloaded_bytes=downloaded)
+        finally:
+            response.close()
+
+        if release.get("zip_size") and downloaded != release["zip_size"]:
+            raise ValueError("下载大小与 GitHub Release 记录不一致")
+        if digest.hexdigest().lower() != expected_sha256:
+            raise ValueError("更新包 SHA256 校验失败，已取消覆盖")
+
+        _extract_release_zip(zip_path, stage_dir)
+        if not (stage_dir / "_internal").is_dir():
+            raise ValueError("Release ZIP 缺少应用运行环境目录")
+
+        helper_path = work_dir / "apply-update.ps1"
+        helper_path.write_text("\ufeff" + _UPDATE_HELPER_SCRIPT, encoding="utf-8")
+        _set_update_state(status="installing", downloaded_bytes=downloaded,
+                          total_bytes=downloaded, error="")
+        with _UPDATE_LOCK:
+            _UPDATE_STATUS_FILE = status_file
+
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if not powershell:
+            raise RuntimeError("找不到 Windows PowerShell，无法应用更新")
+        args = [
+            powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+            "-File", str(helper_path),
+            "-ParentPid", str(os.getpid()),
+            "-WorkDir", str(work_dir),
+            "-StageDir", str(stage_dir),
+            "-InstallDir", str(APP_DIR),
+            "-Port", str(_APP_PORT),
+            "-Version", str(release["version"]),
+        ]
+        subprocess.Popen(
+            args,
+            cwd=str(work_dir),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            close_fds=True,
+        )
+        if _UVICORN_SERVER is not None:
+            threading.Timer(2.0, lambda: setattr(_UVICORN_SERVER, "should_exit", True)).start()
+    except Exception as exc:
+        _set_update_state(status="error", error=str(exc))
+        if work_dir:
+            try:
+                (work_dir / "status.json").write_text(
+                    json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False),
+                    encoding="utf-8")
+            except OSError:
+                pass
+
+
+@app.get("/api/version")
+def app_version_get():
+    return {
+        "version": _app_version(),
+        "supports_self_update": bool(getattr(sys, "frozen", False) and os.name == "nt"),
+    }
+
+
+@app.post("/api/update/check")
+def update_check():
+    global _UPDATE_RELEASE
+    current_version = _app_version()
+    try:
+        release = _fetch_latest_release()
+        latest_version = release["version"]
+        update_available = _is_newer_version(latest_version, current_version)
+    except Exception as exc:
+        _set_update_state(status="error", current_version=current_version,
+                          latest_version="", error=str(exc))
+        raise HTTPException(status_code=502, detail=f"检查 GitHub Release 失败：{exc}") from exc
+
+    supports_self_update = bool(getattr(sys, "frozen", False) and os.name == "nt")
+    with _UPDATE_LOCK:
+        _UPDATE_RELEASE = release if update_available else None
+        UPDATE_STATE.update(
+            status="available" if update_available else "up_to_date",
+            current_version=current_version,
+            latest_version=latest_version,
+            downloaded_bytes=0,
+            total_bytes=0,
+            error="",
+        )
+    return {
+        "current_version": current_version,
+        "latest_version": latest_version,
+        "update_available": update_available,
+        "supports_self_update": supports_self_update,
+        "release_url": release["release_url"],
+    }
+
+
+@app.post("/api/update/install")
+def update_install():
+    global _UPDATE_RELEASE
+    if not getattr(sys, "frozen", False) or os.name != "nt":
+        raise HTTPException(status_code=400, detail="自动覆盖更新仅支持 Windows 便携版")
+    active_jobs = ("scan_run", "analyze_run", "apply_run", "folder_merge_run",
+                   "folder_merge_ai_run", "folder_profile_run")
+    if any(isinstance(APP.get(key), dict) and APP[key].get("running") for key in active_jobs):
+        raise HTTPException(status_code=409, detail="有任务正在运行，请任务结束后再检查更新")
+
+    with _UPDATE_LOCK:
+        if UPDATE_STATE.get("status") in ("downloading", "installing"):
+            return dict(UPDATE_STATE)
+        release = _UPDATE_RELEASE
+        if not release:
+            raise HTTPException(status_code=409, detail="请先检查是否有可用更新")
+        UPDATE_STATE.update(status="downloading", error="", downloaded_bytes=0,
+                            total_bytes=0)
+    threading.Thread(target=_run_update_worker, args=(release,), daemon=True).start()
+    return {"ok": True, "status": "downloading", "version": release["version"]}
+
+
+@app.get("/api/update/status")
+def update_status_get():
+    return _update_state_snapshot()
+
+
 # ============ 全局状态 ============
 @app.get("/api/status")
 def status():
@@ -3699,6 +4096,7 @@ def index():
 
 
 def main():
+    global _UVICORN_SERVER, _APP_PORT
     parser = argparse.ArgumentParser(description="B站收藏夹整理")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--log-file", default="server.log",
@@ -3706,6 +4104,7 @@ def main():
     parser.add_argument("--no-browser", action="store_true",
                         help="启动服务后不自动打开浏览器")
     args = parser.parse_args()
+    _APP_PORT = args.port
 
     log_path = Path(args.log_file)
     if not log_path.is_absolute():
@@ -3740,7 +4139,8 @@ def main():
 
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
-    uvicorn.Server(config).run()
+    _UVICORN_SERVER = uvicorn.Server(config)
+    _UVICORN_SERVER.run()
 
 
 if __name__ == "__main__":
