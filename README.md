@@ -1,5 +1,11 @@
 # B站收藏夹智能整理
 
+[![Release](https://img.shields.io/github/v/release/Martin-soaring-dev/bili-fav-organizer?label=release)](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)
+[![Windows](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#从源码运行开发)
+[![License: CC BY-NC 4.0](https://img.shields.io/badge/license-CC_BY--NC_4.0-lightgrey)](#许可)
+[![Windows 打包](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/workflows/release-windows.yml/badge.svg?event=push)](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/workflows/release-windows.yml)
+
 <p align="center">
   <img src="docs/images/hero.svg" alt="B站收藏夹智能整理" width="680">
 </p>
@@ -7,6 +13,8 @@
 一个本地运行的 Web 工具：用 **LLM** 按**内容**把 B 站收藏夹里的视频自动归类到合适的收藏夹，并提供收藏夹画像与合并整理能力。
 
 **核心原则**：归类方案必须人工复核后才执行；执行时先加入目标夹、成功后再从原夹删除；默认收藏夹是「未分拣收件箱」，只出不进。
+
+**第一次使用？** 阅读 [快速上手指南](docs/快速上手.md)，或下载 [PDF 版](output/pdf/快速上手.pdf)。从下载、扫码登录、配置模型，到第一次整理和常见问题，按步骤操作即可。
 
 ---
 

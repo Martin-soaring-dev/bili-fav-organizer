@@ -39,6 +39,7 @@ jobs:
           }
           Copy-Item "BiliFavOrganizer.bat" "$releaseDir/BiliFavOrganizer.bat"
           Copy-Item "packaging/使用说明.txt" "$releaseDir/使用说明.txt"
+          Copy-Item "output/pdf/快速上手.pdf" "$releaseDir/快速上手.pdf"
           $version = $env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]', '-'
           $zip = "BiliFavOrganizer-Windows-x64-$version.zip"
           $checksum = "$zip.sha256"
