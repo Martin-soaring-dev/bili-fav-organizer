@@ -55,6 +55,7 @@
       if (!res.ok) {
         const err = new Error((data && data.error) || ("HTTP " + res.status));
         err.error = data && data.error;
+        if (data && data.code === "scan_issue_pending") refreshScanIssues(true);
         throw err;
       }
       return data;
@@ -354,6 +355,206 @@
   }
 
   // ---------- 步骤1 扫描 ----------
+  let scanIssues = [];
+  let scanIssueId = "";
+  let scanRecoveryBusy = false;
+  let scanIssuesRunning = false;
+  let scanIssueFocus = null;
+  let lastScanIssuePrompt = "";
+  const scanIssueModal = $("scan-issue-modal");
+
+  function setScanRecoveryControls() {
+    const busy = scanRecoveryBusy || scanIssuesRunning;
+    const issue = scanIssues.find(row => row.media_id === scanIssueId);
+    for (const id of ["scan-issue-retry", "scan-issue-refresh", "scan-issue-select",
+                      "scan-issue-clean-consent"]) {
+      $(id).disabled = busy;
+    }
+    $("scan-issue-clean-show").disabled = busy || !!(issue && issue.cleanup_unknown);
+    $("scan-issue-clean").disabled = busy || !$("scan-issue-clean-consent").checked || !!(issue && issue.cleanup_unknown);
+    $("scan-issue-link").setAttribute("aria-disabled", String(busy));
+    scanIssueModal.setAttribute("aria-busy", String(busy));
+  }
+
+  function renderScanIssue() {
+    const issue = scanIssues.find(row => row.media_id === scanIssueId) || scanIssues[0];
+    if (!issue) return;
+    const changed = scanIssueId !== issue.media_id;
+    scanIssueId = issue.media_id;
+    $("scan-issue-title").textContent = "收藏夹数量不一致";
+    $("scan-issue-eyebrow").textContent = "扫描需要你的帮助";
+    $("scan-issue-block-note").hidden = false;
+    $("scan-issue-picker").hidden = scanIssues.length < 2;
+    $("scan-issue-select").replaceChildren(...scanIssues.map(row => {
+      const option = document.createElement("option");
+      option.value = row.media_id;
+      option.textContent = row.title;
+      option.selected = row.media_id === scanIssueId;
+      return option;
+    }));
+    $("scan-issue-description").textContent = `收藏夹「${issue.title}」的数量与本次扫描结果不一致。你可以选择以下方式处理。`;
+    $("scan-issue-expected").textContent = issue.expected_count ?? "—";
+    $("scan-issue-fetched").textContent = issue.fetched_count ?? "—";
+    $("scan-issue-unique").textContent = issue.unique_count ?? "—";
+    $("scan-issue-link").href = `https://www.bilibili.com/medialist/detail/ml${encodeURIComponent(issue.media_id)}`;
+    $("scan-issue-options").hidden = false;
+    $("scan-issue-foot-note").textContent = "关闭提示后，后续整理仍会暂停。";
+    $("scan-issue-dismiss").textContent = "暂时关闭";
+    $("scan-issue-result").className = "scan-issue-result";
+    if (!scanRecoveryBusy) $("scan-issue-result").textContent = issue.cleanup_unknown
+      ? "上次自动清理的结果不确定。请前往 B 站核对，再重试扫描；程序不会重复发送清理请求。"
+      : (issue.last_error || "");
+    if (changed) {
+      $("scan-issue-clean-consent").checked = false;
+      $("scan-issue-clean-confirm").hidden = true;
+      $("scan-issue-clean-show").setAttribute("aria-expanded", "false");
+      $("scan-issue-history").open = false;
+    }
+    const history = issue.history || [];
+    $("scan-issue-history").hidden = !history.length;
+    $("scan-issue-history-list").replaceChildren(...history.map(event => {
+      const li = document.createElement("li");
+      li.textContent = `${event.at} · ${event.text}`;
+      return li;
+    }));
+    setScanRecoveryControls();
+  }
+
+  function showScanIssue() {
+    if (!scanIssues.length) return;
+    lastScanIssuePrompt = scanIssues.map(row => `${row.media_id}:${row.scan_run_id || ""}`).join(",");
+    renderScanIssue();
+    if (scanIssueModal.style.display !== "flex") {
+      scanIssueFocus = document.activeElement;
+      scanIssueModal.style.display = "flex";
+      $("app").inert = true;
+      $("scan-issue-close").focus();
+    }
+  }
+
+  function closeScanIssue() {
+    scanIssueModal.style.display = "none";
+    $("app").inert = false;
+    if (scanIssueFocus && scanIssueFocus.isConnected) scanIssueFocus.focus();
+  }
+
+  async function refreshScanIssues(open = false) {
+    try {
+      const state = await api("GET", "/api/scan/issues");
+      scanIssues = state.issues || [];
+      scanIssuesRunning = !!state.running;
+      $("scan-issue-banner").hidden = !scanIssues.length;
+      $("scan-issue-banner-text").textContent = `${scanIssues.length} 个收藏夹扫描异常，处理后才能继续整理。`;
+      if (scanIssues.length) {
+        if (open) showScanIssue();
+        else if (scanIssueModal.style.display === "flex") renderScanIssue();
+      }
+      setScanRecoveryControls();
+      return scanIssues;
+    } catch (e) {
+      log("读取扫描异常失败：" + e.message, "warn");
+      throw e;
+    }
+  }
+
+  async function recoverScanIssue(action) {
+    if (scanRecoveryBusy || scanIssuesRunning) return;
+    if (action === "clean" && !$("scan-issue-clean-consent").checked) return;
+    const issue = scanIssues.find(row => row.media_id === scanIssueId);
+    if (!issue) return;
+    scanRecoveryBusy = true;
+    $("scan-issue-clean-consent").checked = false;
+    $("scan-issue-result").className = "scan-issue-result";
+    $("scan-issue-result").textContent = action === "clean"
+      ? "正在清理失效内容，完成后将刷新收藏夹并重新扫描…" : "正在重新读取收藏夹并扫描，请稍候…";
+    setScanRecoveryControls();
+    let recoveryError = "";
+    try {
+      const started = await api("POST", `/api/scan/issues/${encodeURIComponent(issue.media_id)}/recover`,
+        { action, confirmed: action === "clean" });
+      const deadline = Date.now() + 6 * 60 * 60 * 1000;
+      let status;
+      while (true) {
+        status = await api("GET", "/api/scan/status");
+        if (status.id === started.run_id && !status.running) break;
+        if (Date.now() > deadline) throw new Error("扫描等待超时，请查看日志和当前扫描状态。");
+        await sleep(1000);
+      }
+      const remaining = await refreshScanIssues();
+      if (!remaining.some(row => row.media_id === issue.media_id)) {
+        const message = `「${issue.title}」重新扫描验证通过。B 站数量由 ${issue.expected_count} 更新为 ${status.total} 条，本次读取 ${status.done} 条。`;
+        log(message, "ok");
+        if (!remaining.length) {
+          $("scan-issue-options").hidden = true;
+          $("scan-issue-result").className = "scan-issue-result resolved";
+          $("scan-issue-result").textContent = message + " 可以继续整理。";
+          $("scan-issue-description").textContent = "收藏夹数据已重新核对一致，扫描异常已解决。";
+          $("scan-issue-title").textContent = "扫描异常已解决";
+          $("scan-issue-eyebrow").textContent = "核对完成";
+          $("scan-issue-block-note").hidden = true;
+          $("scan-issue-expected").textContent = status.total;
+          $("scan-issue-fetched").textContent = status.done;
+          $("scan-issue-unique").textContent = status.done;
+          $("scan-issue-history").hidden = true;
+          $("scan-issue-foot-note").textContent = "验证通过，可以继续后续步骤。";
+          $("scan-issue-dismiss").textContent = "关闭";
+        } else {
+          renderScanIssue();
+          $("scan-issue-result").textContent = message + " 请继续处理其余收藏夹。";
+        }
+      } else {
+        renderScanIssue();
+        $("scan-issue-result").textContent = status.error || "数量仍不一致，请检查 B 站收藏夹后再重试。";
+      }
+      await refreshTree();
+      await refreshStats();
+      await loadFolderProfiles();
+      await refreshOrganizationReadiness();
+    } catch (e) {
+      recoveryError = e.error || e.message;
+      $("scan-issue-result").textContent = recoveryError;
+      log("处理未完成：" + (e.error || e.message), "warn");
+    } finally {
+      scanRecoveryBusy = false;
+      try { await refreshScanIssues(); } catch (_) { /* 保留错误说明供用户重试 */ }
+      if (recoveryError) $("scan-issue-result").textContent = recoveryError;
+      setScanRecoveryControls();
+    }
+  }
+
+  $("scan-issue-open").addEventListener("click", () => refreshScanIssues(true).catch(() => {}));
+  $("scan-issue-close").addEventListener("click", closeScanIssue);
+  $("scan-issue-dismiss").addEventListener("click", closeScanIssue);
+  $("scan-issue-select").addEventListener("change", () => {
+    scanIssueId = "";
+    const selected = $("scan-issue-select").value;
+    scanIssues.sort((a, b) => Number(b.media_id === selected) - Number(a.media_id === selected));
+    renderScanIssue();
+  });
+  $("scan-issue-link").addEventListener("click", event => {
+    if (scanRecoveryBusy || scanIssuesRunning) event.preventDefault();
+  });
+  $("scan-issue-retry").addEventListener("click", () => recoverScanIssue("retry"));
+  $("scan-issue-refresh").addEventListener("click", () => recoverScanIssue("refresh"));
+  $("scan-issue-clean-show").addEventListener("click", () => {
+    const panel = $("scan-issue-clean-confirm");
+    panel.hidden = !panel.hidden;
+    $("scan-issue-clean-show").setAttribute("aria-expanded", String(!panel.hidden));
+    $("scan-issue-clean-consent").checked = false;
+    setScanRecoveryControls();
+  });
+  $("scan-issue-clean-consent").addEventListener("change", setScanRecoveryControls);
+  $("scan-issue-clean").addEventListener("click", () => recoverScanIssue("clean"));
+  scanIssueModal.addEventListener("keydown", event => {
+    if (event.key === "Escape") { event.preventDefault(); closeScanIssue(); }
+    if (event.key !== "Tab") return;
+    const controls = [...scanIssueModal.querySelectorAll("a[href], button, select, input, summary")]
+      .filter(el => !el.disabled && el.getClientRects().length && el.getAttribute("aria-disabled") !== "true");
+    const first = controls[0], last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+
   $("scan-btn").addEventListener("click", async () => {
     try {
       const directory = await api("GET", "/api/folders");
@@ -1044,8 +1245,7 @@
     while (true) {
       if (fastRun.stop) throw new Error("已停止快速模式");
       if (Date.now() - started > 6 * 60 * 60 * 1000) throw new Error(`${label}超时`);
-      let ok = false;
-      try { ok = await check(); } catch (_) { ok = false; }
+      const ok = await check();
       if (ok) return;
       await sleep(1500);
     }
@@ -1069,12 +1269,16 @@
       const st = await api("GET", "/api/scan/status");
       if (fastRun.stop) throw new Error("已停止快速模式");
       if (!st || st.running !== false) return false;
-      const err = String(st.error || "");
-      if (err.includes("风控") || err.includes("出错") || err.includes("异常")) {
-        throw new Error(`扫描失败：${err}`);
+      const issues = await refreshScanIssues();
+      if (issues.length) {
+        $("fast-status").textContent = "扫描需要处理，解决异常后自动继续";
+        const promptKey = issues.map(row => `${row.media_id}:${row.scan_run_id || ""}`).join(",");
+        if (scanIssueModal.style.display !== "flex" && promptKey !== lastScanIssuePrompt) showScanIssue();
+        return false;
       }
+      const err = String(st.error || "");
       if (err.includes("停止")) throw new Error(`扫描已停止：${err}`);
-      if (err) log(`扫描结束但有告警：${err}`, "warn");
+      if (err) throw new Error(`扫描失败：${err}`);
       return true;
     }, "扫描");
   }
@@ -2555,6 +2759,7 @@
         if (folderProfileListLoaded) loadFolderProfiles();
         refreshOrganizationReadiness();
       }
+      if (ev.kind === "scan_idle") refreshScanIssues(true).catch(() => {});
 
       // 分析
       if (ev.phase === "analyze" && typeof ev.done === "number") {
@@ -3315,6 +3520,7 @@
     });
     refreshStats();
     refreshOrganizationReadiness();
+    refreshScanIssues(true).catch(() => {});
     refreshTree();
     loadFolderMerge();
     loadFolderProfiles();

@@ -168,6 +168,10 @@
           <div class="bar"><div class="fill" id="scan-fill"></div></div>
           <span class="prog-text" id="scan-text"></span>
         </div>
+        <div id="scan-issue-banner" class="scan-issue-banner" hidden>
+          <span id="scan-issue-banner-text"></span>
+          <button id="scan-issue-open" class="btn ghost" type="button">查看处理提示</button>
+        </div>
       </section>
 
       <div class="route-stack">
@@ -455,6 +459,51 @@
 </div>
 
 <!-- 快速模式完成提示 -->
+<div id="scan-issue-modal" class="modal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="scan-issue-title" aria-describedby="scan-issue-description">
+  <div class="modal-box scan-issue-box">
+    <div class="scan-issue-head">
+      <div><span id="scan-issue-eyebrow" class="scan-issue-eyebrow">扫描需要你的帮助</span><h2 id="scan-issue-title">收藏夹数量不一致</h2></div>
+      <button id="scan-issue-close" class="mini" type="button" aria-label="关闭扫描异常提示">✕</button>
+    </div>
+    <div class="modal-body scan-issue-body">
+      <label id="scan-issue-picker" class="scan-issue-picker" hidden>待处理收藏夹<select id="scan-issue-select"></select></label>
+      <p id="scan-issue-description" class="scan-issue-description"></p>
+      <div class="scan-issue-counts">
+        <div><span>B 站显示</span><strong id="scan-issue-expected">—</strong><small>条</small></div>
+        <div><span>本次读取</span><strong id="scan-issue-fetched">—</strong><small>条</small></div>
+        <div><span>去重后</span><strong id="scan-issue-unique">—</strong><small>条</small></div>
+      </div>
+      <p id="scan-issue-block-note" class="scan-issue-block-note">为保证整理结果准确，请先解决这个问题，再继续画像、分类、移动或合并。</p>
+      <div id="scan-issue-options" class="scan-issue-options">
+        <section class="scan-issue-option scan-issue-manual">
+          <div class="scan-option-title"><span class="scan-option-number">1</span><h3>去 B 站手动清理</h3><span class="scan-option-badge">推荐</span></div>
+          <p>打开对应收藏夹，检查并清理失效内容。处理完成后，回到这里重试扫描。</p>
+          <div class="scan-option-actions"><a id="scan-issue-link" class="btn primary" target="_blank" rel="noopener noreferrer">前往 B 站清理 ↗</a><button id="scan-issue-retry" class="btn ghost" type="button">我已处理，重试扫描</button></div>
+        </section>
+        <section class="scan-issue-option">
+          <div class="scan-option-title"><span class="scan-option-number">2</span><h3>由程序自动清理</h3><span class="scan-option-badge scan-option-caution">不推荐</span></div>
+          <p class="scan-auto-warning">会修改你在 B 站的收藏夹，移除 B 站判定为失效的内容。建议先手动检查。</p>
+          <button id="scan-issue-clean-show" class="btn ghost" type="button" aria-expanded="false" aria-controls="scan-issue-clean-confirm">查看自动清理选项</button>
+          <div id="scan-issue-clean-confirm" class="scan-clean-confirm" hidden>
+            <p>数量不一致不一定由失效视频引起。清理会直接修改远端收藏夹，本工具无法撤销此操作；清理后仍可能需要进一步排查。</p>
+            <label><input id="scan-issue-clean-consent" type="checkbox">我理解上述风险，同意修改这个 B 站收藏夹</label>
+            <button id="scan-issue-clean" class="btn danger" type="button" disabled>确认自动清理并重扫</button>
+          </div>
+        </section>
+        <section class="scan-issue-option scan-issue-refresh">
+          <div class="scan-option-title"><span class="scan-option-number">3</span><h3>刷新收藏夹后重扫</h3></div>
+          <p>如果只是 B 站数量暂未同步，可以尝试刷新。此操作不会清理任何内容。</p>
+          <button id="scan-issue-refresh" class="btn ghost" type="button">刷新收藏夹并重扫</button>
+        </section>
+      </div>
+      <div id="scan-issue-result" class="scan-issue-result" role="status" aria-live="polite"></div>
+      <details id="scan-issue-history" class="scan-issue-history" hidden><summary>查看处理记录</summary><ol id="scan-issue-history-list"></ol></details>
+      <div class="scan-issue-causes"><strong>为什么会出现这个问题？</strong><p>收藏夹可能存在隐藏的失效或不可访问内容，也可能是数量尚未同步、扫描期间内容变化，或临时网络 / 接口异常。数量差异本身不能确定原因。</p></div>
+    </div>
+    <div class="modal-foot scan-issue-foot"><span id="scan-issue-foot-note">关闭提示后，后续整理仍会暂停。</span><button id="scan-issue-dismiss" class="btn ghost" type="button">暂时关闭</button></div>
+  </div>
+</div>
+
 <div id="fast-done-modal" class="modal" style="display:none">
   <div class="modal-box compact-modal">
     <div class="modal-head"><span id="fast-done-title">快速模式已完成</span><button id="fast-done-close" class="mini">关闭</button></div>
