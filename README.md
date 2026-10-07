@@ -229,6 +229,17 @@ bili-fav-organizer/
 
 ## 更新日志
 
+### [v0.206](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.206)（2026-10-08）
+
+**接入品牌标识：浏览器标签、界面顶栏与程序图标都显示自己的 logo。**
+
+- 浏览器标签显示 `favicon.svg`；界面左上角原先的「▶」文字占位换成真正的标志图形加产品名，深浅两种主题都保持清晰对比。
+- Windows 便携包的 `BiliFavOrganizer.exe` 首次带上多帧图标（16 / 24 / 32 / 48 / 64 / 128 / 256 px），小尺寸改用单色版以保证缩小后仍可辨认。
+- Release 标题与摘要改为从本更新日志对应段落读取，不再依赖 GitHub 按 commit message 自动生成的摘要。
+- 修复 `tools/brand/build.py` 在 Windows 下把 `manifest.json` 写成反斜杠路径的问题；此前按规范执行 `--check` 会误报资产过期。
+
+新增 **9 项回归测试全部通过**。全量 71 项测试中另有 4 项失败（`test_batch_executor` 2 项、`test_folder_organize_plan` 2 项），失败样例与本次改动前的基线完全相同，未引入回归。Windows 侧已用系统图标加载器确认按尺寸取帧（大度量取 32×32、小度量取 16×16）；打包产物中 exe 的实际图标显示以本次 Release 构建为准。
+
 ### [v0.205](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.205)（2026-10-08）
 
 **新增快速更新目录模式，并改进模型连接与应用更新体验。**

@@ -41,6 +41,32 @@ jobs:
       - name: Build self-contained application
         run: pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 
+      - name: Resolve release title and summary from README
+        id: notes
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $lines = @(Get-Content -Encoding UTF8 README.md)
+          $start = -1
+          $end = $lines.Count
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            $m = [regex]::Match($lines[$i], '^### \[([^\]]+)\]')
+            if (-not $m.Success) { continue }
+            if ($start -lt 0 -and $m.Groups[1].Value -eq $tag) { $start = $i + 1; continue }
+            if ($start -ge 0) { $end = $i; break }
+          }
+          if ($start -lt 0) { throw "README 更新日志没有 $tag 段落，无法生成 Release 标题与摘要。" }
+          if ($end -le $start) { throw "README 的 $tag 段落为空。" }
+          $section = ($lines[$start..($end - 1)] -join "`n").Trim("`r`n ")
+          $bold = [regex]::Match($section, '^\*\*(.+?)\*\*', 'Singleline')
+          if (-not $bold.Success) { throw "README 的 $tag 段落缺少加粗摘要行，无法生成 Release 标题。" }
+          $title = "$tag $($bold.Groups[1].Value.TrimEnd([char[]]@('。', '.')))"
+          # Base64 keeps the Chinese summary intact across the output file and the later env read.
+          $notesB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($section))
+          "title=$title" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "notes_b64=$notesB64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Release title: $title"
+
       - name: Create portable ZIP
         id: package
         shell: pwsh
@@ -68,11 +94,15 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET_NAME: ${{ steps.package.outputs.asset_name }}
           CHECKSUM_NAME: ${{ steps.package.outputs.checksum_name }}
+          RELEASE_TITLE: ${{ steps.notes.outputs.title }}
+          RELEASE_NOTES_B64: ${{ steps.notes.outputs.notes_b64 }}
         run: |
           $tag = $env:GITHUB_REF_NAME
+          $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload $tag $env:ASSET_NAME $env:CHECKSUM_NAME --clobber
+            gh release edit $tag --title $env:RELEASE_TITLE --notes $notes
           } else {
-            gh release create $tag $env:ASSET_NAME $env:CHECKSUM_NAME --generate-notes
+            gh release create $tag $env:ASSET_NAME $env:CHECKSUM_NAME --title $env:RELEASE_TITLE --notes $notes
           }
