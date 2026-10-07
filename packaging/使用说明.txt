@@ -8,6 +8,10 @@
 本便携包已包含运行环境，无需另外安装 Python 或执行 pip。
 首次启动后，浏览器打开 http://127.0.0.1:8080 。如浏览器未自动打开，请手动访问此地址。
 
+第一次使用
+请打开同一文件夹中的“快速上手.pdf”，按步骤完成扫码登录、模型配置、扫描、画像、分析、人工复核与执行。
+在线指南：https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/快速上手.md
+
 数据位置
 配置、Cookie、模型供应商和收藏数据保存在当前 Windows 用户的：
 %LOCALAPPDATA%\BiliFavOrganizer\
@@ -24,4 +28,4 @@
 
 注意
 GitHub 页面自动生成的“Source code”压缩包是源代码，不是便携程序。
-请下载本次 Release 中带当前版本标签的附件，例如：BiliFavOrganizer-Windows-x64-v0.106.zip。
+请下载本次 Release 中带当前版本标签的附件，例如：BiliFavOrganizer-Windows-x64-v0.204.zip。
