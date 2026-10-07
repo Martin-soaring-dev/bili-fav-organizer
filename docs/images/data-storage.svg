@@ -1,52 +1,40 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 300" role="img" aria-label="数据落盘">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 374" role="img" aria-labelledby="title description">
+  <title id="title">数据落盘</title>
+  <desc id="description">用户数据目录独立于程序，分别保存配置、Cookie、SQLite 数据库与日志；数据库可在线备份，导出不含凭据。</desc>
   <defs>
-    <marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 1 L 8 5 L 0 9" fill="none" stroke="#0F766E" stroke-width="1.2" stroke-linecap="round"/>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#0F766E" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
     </marker>
-    <style>
-      .t-h { font: 600 13px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #0F3D3A; }
-      .t-b { font: 500 12px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #1E293B; }
-      .t-s { font: 400 11px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #64748B; }
-      .t-badge { font: 500 10px -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #FFFFFF; }
-    </style>
+    <style>text { font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; }</style>
   </defs>
-
-  <rect width="680" height="300" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
-  <text x="28" y="32" class="t-h">数据落盘 · 与程序目录分离</text>
-  <text x="28" y="50" class="t-s">Windows 默认：%LOCALAPPDATA%\BiliFavOrganizer\　可用 BILI_FAV_ORGANIZER_DATA_DIR 覆盖</text>
-
-  <!-- 目录树 -->
-  <rect x="36" y="72" width="300" height="200" rx="10" fill="#F8FAFC" stroke="#CBD5E1"/>
-  <text x="56" y="98" class="t-b">BiliFavOrganizer/</text>
-  <text x="68" y="122" class="t-s">├─ config.json</text>
-  <rect x="210" y="108" width="52" height="18" rx="9" fill="#64748B"/>
-  <text x="236" y="121" text-anchor="middle" class="t-badge">低敏</text>
-
-  <text x="68" y="148" class="t-s">├─ secrets.json</text>
-  <rect x="210" y="134" width="52" height="18" rx="9" fill="#DC2626"/>
-  <text x="236" y="147" text-anchor="middle" class="t-badge">Cookie</text>
-
-  <text x="68" y="174" class="t-s">├─ data/library.sqlite3</text>
-  <rect x="250" y="160" width="52" height="18" rx="9" fill="#DC2626"/>
-  <text x="276" y="173" text-anchor="middle" class="t-badge">API Key</text>
-
-  <text x="68" y="200" class="t-s">└─ server.log</text>
-  <rect x="210" y="186" width="52" height="18" rx="9" fill="#D97706"/>
-  <text x="236" y="199" text-anchor="middle" class="t-badge">运行日志</text>
-
-  <text x="56" y="240" class="t-s">升级 / 移动程序不会清除这些数据</text>
-  <text x="56" y="256" class="t-s">请勿分享该目录或提交到网上</text>
-
-  <!-- 右侧说明 -->
-  <rect x="360" y="72" width="290" height="88" rx="10" fill="#F0FDFA" stroke="#5EEAD4"/>
-  <text x="380" y="98" class="t-b">library.sqlite3 主要内容</text>
-  <text x="380" y="118" class="t-s">folders / videos / folder_items 索引</text>
-  <text x="380" y="136" class="t-s">folder_profiles 画像 · analyses / plans</text>
-  <text x="380" y="152" class="t-s">providers / models（含供应商 API Key）</text>
-
-  <rect x="360" y="172" width="290" height="100" rx="10" fill="#FFFBEB" stroke="#FCD34D"/>
-  <text x="380" y="198" class="t-b">迁移与备份</text>
-  <text x="380" y="218" class="t-s">首次启动自动迁移到用户数据目录</text>
-  <text x="380" y="236" class="t-s">SQLite 在线备份，旧库保留可回滚</text>
-  <text x="380" y="254" class="t-s">导出 bundle 不含 Cookie / API Key</text>
+  <rect x="0.5" y="0.5" width="679" height="373" rx="14" fill="#FFFFFF" stroke="#E2E8F0"/>
+  <text x="28" y="35" font-size="18" font-weight="600" fill="#0F3D3A">数据落盘 · 与程序目录分离</text>
+  <text x="28" y="59" font-size="13" font-weight="400" fill="#475569">Windows 默认：%LOCALAPPDATA%\BiliFavOrganizer</text>
+  <text x="28" y="80" font-size="13" font-weight="400" fill="#475569">可用 BILI_FAV_ORGANIZER_DATA_DIR 覆盖默认目录</text>
+  <rect x="28" y="102" width="302" height="244" rx="10" fill="#F8FAFC" stroke="#CBD5E1"/>
+  <text x="48" y="132" font-size="14" font-weight="600" fill="#1E293B">BiliFavOrganizer/</text>
+  <text x="48" y="163" font-size="13" font-weight="400" fill="#475569">├─ config.json</text>
+  <rect x="244" y="146" width="66" height="23" rx="11.5" fill="#64748B"/>
+  <text x="277" y="162" font-size="12" font-weight="500" fill="#FFFFFF" text-anchor="middle">低敏</text>
+  <text x="48" y="195" font-size="13" font-weight="400" fill="#475569">├─ secrets.json</text>
+  <rect x="244" y="178" width="66" height="23" rx="11.5" fill="#DC2626"/>
+  <text x="277" y="194" font-size="12" font-weight="500" fill="#FFFFFF" text-anchor="middle">Cookie</text>
+  <text x="48" y="227" font-size="13" font-weight="400" fill="#475569">├─ data/library.sqlite3</text>
+  <rect x="244" y="210" width="66" height="23" rx="11.5" fill="#DC2626"/>
+  <text x="277" y="226" font-size="12" font-weight="500" fill="#FFFFFF" text-anchor="middle">API Key</text>
+  <text x="48" y="259" font-size="13" font-weight="400" fill="#475569">└─ server.log</text>
+  <rect x="244" y="242" width="66" height="23" rx="11.5" fill="#B45309"/>
+  <text x="277" y="258" font-size="12" font-weight="500" fill="#FFFFFF" text-anchor="middle">运行日志</text>
+  <text x="48" y="307" font-size="12.5" font-weight="400" fill="#475569">升级 / 移动程序不会清除这些数据</text>
+  <text x="48" y="328" font-size="12.5" font-weight="400" fill="#475569">请勿分享该目录或提交到网上</text>
+  <rect x="352" y="102" width="300" height="122" rx="10" fill="#F0FDFA" stroke="#5EEAD4"/>
+  <text x="372" y="131" font-size="14" font-weight="600" fill="#1E293B">library.sqlite3 主要内容</text>
+  <text x="372" y="158" font-size="13" font-weight="400" fill="#475569">folders / videos / folder_items 索引</text>
+  <text x="372" y="181" font-size="13" font-weight="400" fill="#475569">folder_profiles 画像 · analyses / plans</text>
+  <text x="372" y="204" font-size="13" font-weight="400" fill="#475569">providers / models（含供应商 API Key）</text>
+  <rect x="352" y="238" width="300" height="108" rx="10" fill="#FFFBEB" stroke="#FCD34D"/>
+  <text x="372" y="267" font-size="14" font-weight="600" fill="#1E293B">迁移与备份</text>
+  <text x="372" y="291" font-size="13" font-weight="400" fill="#475569">首次启动自动迁移到用户数据目录</text>
+  <text x="372" y="311" font-size="13" font-weight="400" fill="#475569">SQLite 在线备份，旧库保留可回滚</text>
+  <text x="372" y="331" font-size="13" font-weight="400" fill="#475569">导出 bundle 不含 Cookie / API Key</text>
 </svg>
