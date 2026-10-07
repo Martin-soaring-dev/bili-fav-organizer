@@ -302,6 +302,7 @@ def resolved_llm_settings(cfg: dict | None = None) -> dict:
         out["model"] = model.get("name") or out.get("model") or ""
         out["_provider_id"] = provider.get("id")
         out["_provider_name"] = provider.get("name")
+        out["model_capabilities"] = dict(model.get("capabilities") or {})
         # 模型记录的规格是权威来源：只要模型上写了值就采用，
         # 不再按 context_source/output_source 的来源标记放行，避免界面兜底值
         # 长期压过模型真实规格（例如把上下文抬到 1,000,000）。
@@ -324,7 +325,9 @@ def make_llm_config(cfg: dict | None = None) -> llm_analyzer.LLMConfig:
         model=resolved.get("model", "qwen3-8b"),
         params=dict(resolved.get("llm_params") or {}),
         max_tokens=int(resolved.get("analyze_max_tokens", 32768) or 32768),
-        context_window_tokens=int(resolved.get("model_context_tokens", 32768) or 32768))
+        context_window_tokens=int(resolved.get("model_context_tokens", 32768) or 32768),
+        provider_name=resolved.get("_provider_name", ""),
+        capabilities=dict(resolved.get("model_capabilities") or {}))
 
 
 def _bootstrap_providers_from_legacy_config() -> None:
@@ -558,6 +561,7 @@ class ModelIn(BaseModel):
     context_tokens: Optional[int] = None
     max_output_tokens: Optional[int] = None
     thinking_effort: str = ""
+    capabilities: dict = Field(default_factory=dict)
 
 
 class ModelUpdateIn(BaseModel):
@@ -568,6 +572,7 @@ class ModelUpdateIn(BaseModel):
     output_source: Optional[str] = None
     thinking_effort: Optional[str] = None
     provider_id: Optional[str] = None
+    capabilities: Optional[dict] = None
 
 
 class ModelSyncIn(BaseModel):
@@ -686,7 +691,8 @@ def models_create(body: ModelIn):
         body.provider_id, name,
         context_tokens=body.context_tokens,
         max_output_tokens=body.max_output_tokens,
-        thinking_effort=body.thinking_effort or "")
+        thinking_effort=body.thinking_effort or "",
+        capabilities=body.capabilities or {})
     return {"ok": True, "model": _effective_model_rows([model])[0]}
 
 
@@ -699,6 +705,7 @@ def models_update(model_id: str, body: ModelUpdateIn):
         max_output_tokens=body.max_output_tokens,
         context_source=body.context_source, output_source=body.output_source,
         thinking_effort=body.thinking_effort,
+        capabilities=body.capabilities,
         provider_id=body.provider_id)
     if not model:
         return JSONResponse({"ok": False, "error": "模型不存在"}, status_code=404)
@@ -718,7 +725,7 @@ def models_delete(model_id: str):
 
 
 def _remote_model_record(item) -> dict:
-    """Keep the common capability fields exposed by OpenAI-compatible model APIs."""
+    """Normalize model limits and request capabilities exposed by model catalogs."""
     if isinstance(item, dict):
         name = str(item.get("model_id") or item.get("id") or
                    item.get("model") or item.get("name") or "").strip()
@@ -730,7 +737,7 @@ def _remote_model_record(item) -> dict:
         return {}
     record = {"name": name}
     metadata_sources = [source]
-    for key in ("model_info", "metadata", "limits", "top_provider"):
+    for key in ("model_info", "metadata", "limits", "top_provider", "capabilities"):
         nested = source.get(key)
         if isinstance(nested, dict):
             metadata_sources.append(nested)
@@ -755,11 +762,51 @@ def _remote_model_record(item) -> dict:
                 break
     for metadata in metadata_sources:
         for key in ("thinking_effort", "reasoning_effort"):
-            if metadata.get(key) is not None:
-                record["thinking_effort"] = str(metadata[key] or "")
+            value = metadata.get(key)
+            if isinstance(value, str):
+                record["thinking_effort"] = value
                 break
         if "thinking_effort" in record:
             break
+    capabilities = {}
+    for metadata in metadata_sources:
+        supported = metadata.get("supported_parameters")
+        if isinstance(supported, list):
+            capabilities["supported_parameters"] = [str(value) for value in supported]
+            break
+        if isinstance(supported, dict):
+            capabilities["supported_parameters"] = [
+                str(key) for key, enabled in supported.items() if enabled]
+            break
+    for target, aliases in {
+        "json_output": ("json_output", "supports_json_output"),
+        "structured_outputs": ("structured_outputs",),
+    }.items():
+        for metadata in metadata_sources:
+            for key in aliases:
+                value = metadata.get(key)
+                if isinstance(value, bool):
+                    capabilities[target] = value
+                    break
+            if target in capabilities:
+                break
+    for metadata in metadata_sources:
+        reasoning = metadata.get("reasoning")
+        nested_levels = reasoning.get("effort_levels") if isinstance(reasoning, dict) else None
+        levels = (metadata.get("reasoning_effort_levels") or
+                  metadata.get("supported_reasoning_efforts") or
+                  metadata.get("reasoning_efforts") or nested_levels or
+                  metadata.get("reasoning_effort"))
+        if isinstance(levels, (list, tuple)) and all(isinstance(value, (str, int, float)) for value in levels):
+            capabilities["reasoning_effort_levels"] = [str(value) for value in levels]
+            break
+    for metadata in metadata_sources:
+        field = metadata.get("completion_token_field") or metadata.get("max_tokens_field")
+        if field in ("max_tokens", "max_completion_tokens"):
+            capabilities["completion_token_field"] = field
+            break
+    if capabilities:
+        record["capabilities"] = capabilities
     return record
 
 
@@ -953,14 +1000,24 @@ def models_sync(body: ModelSyncIn):
         for record in records:
             name = record["name"]
             selected_match = mode == "add_new" or name in selected_names
-            if selected_match and name not in local_by_name:
-                store.create_model(
-                    body.provider_id, name,
-                    context_tokens=record.get("context_tokens"),
-                    max_output_tokens=record.get("max_output_tokens"),
-                    context_source=record.get("context_source", "unknown"),
-                    output_source=record.get("output_source", "unknown"),
-                    thinking_effort=record.get("thinking_effort", ""))
+            if not selected_match:
+                continue
+            existing = local_by_name.get(name)
+            if existing:
+                # Refresh request capabilities even when the model was already
+                # present; catalog capability changes affect how future calls
+                # must be shaped, while local token limits remain user-owned.
+                if record.get("capabilities") is not None:
+                    store.update_model(existing["id"], capabilities=record["capabilities"])
+                continue
+            store.create_model(
+                body.provider_id, name,
+                context_tokens=record.get("context_tokens"),
+                max_output_tokens=record.get("max_output_tokens"),
+                context_source=record.get("context_source", "unknown"),
+                output_source=record.get("output_source", "unknown"),
+                thinking_effort=record.get("thinking_effort", ""),
+                capabilities=record.get("capabilities") or {})
     return {"ok": True, "models": _effective_model_rows(store.list_models(body.provider_id))}
 
 
@@ -983,12 +1040,18 @@ def models_test(model_id: str):
             api_key=provider.get("api_key") or "",
             model=model["name"],
             params=_thinking_params(model.get("thinking_effort") or ""),
-            max_tokens=16,
+            max_tokens=256,
+            provider_name=provider.get("name", ""),
+            capabilities=dict(model.get("capabilities") or {}),
         )
         payload = llm_analyzer.build_chat_completion_payload(
             test_config,
-            messages=[{"role": "user", "content": "Reply OK only."}],
-            max_tokens=16,
+            messages=[
+                {"role": "system", "content": "Return only a valid JSON object."},
+                {"role": "user", "content": 'Return exactly {"ok":true}.'},
+            ],
+            max_tokens=256,
+            structured_output=True,
         )
         r = requests.post(url, json=payload, headers=headers, timeout=45)
         if not r.ok:
@@ -996,9 +1059,15 @@ def models_test(model_id: str):
             store.update_model(model_id, test_status="fail", test_message=msg,
                                test_at=time.strftime("%Y-%m-%d %H:%M:%S"))
             return {"ok": False, "error": msg, "model": store.get_model(model_id)}
-        store.update_model(model_id, test_status="ok", test_message="连接正常",
+        content = llm_analyzer.extract_chat_completion_content(r.json())
+        if not isinstance(llm_analyzer.extract_json_object(content), dict):
+            msg = "接口可连接，但模型未返回可解析的 JSON 对象"
+            store.update_model(model_id, test_status="fail", test_message=msg,
+                               test_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+            return {"ok": False, "error": msg, "model": store.get_model(model_id)}
+        store.update_model(model_id, test_status="ok", test_message="连接正常，JSON 输出有效",
                            test_at=time.strftime("%Y-%m-%d %H:%M:%S"))
-        return {"ok": True, "message": "连接正常", "model": store.get_model(model_id)}
+        return {"ok": True, "message": "连接正常，JSON 输出有效", "model": store.get_model(model_id)}
     except Exception as exc:
         store.update_model(model_id, test_status="fail", test_message=str(exc)[:200],
                            test_at=time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -2066,13 +2135,21 @@ def test_llm(body: Optional[ModelTestIn] = None):
             headers["Authorization"] = "Bearer " + cfg["api_key"]
         test_config = llm_analyzer.LLMConfig(
             base_url=cfg["base_url"], api_key=cfg.get("api_key", ""),
-            model=cfg["model"], params=cfg.get("llm_params") or {}, max_tokens=16)
+            model=cfg["model"], params=cfg.get("llm_params") or {}, max_tokens=256,
+            provider_name=cfg.get("_provider_name", ""),
+            capabilities=dict(cfg.get("model_capabilities") or {}))
         payload = llm_analyzer.build_chat_completion_payload(
-            test_config, [{"role": "user", "content": "ping"}], max_tokens=16)
+            test_config,
+            [{"role": "system", "content": "Return only a valid JSON object."},
+             {"role": "user", "content": 'Return exactly {"ok":true}.'}],
+            max_tokens=256, structured_output=True)
         r = _rq.post(url, json=payload, headers=headers, timeout=30)
         if not r.ok:
             return {"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}
-        return {"ok": True, "message": f"模型连接成功（{cfg['model']}）"}
+        content = llm_analyzer.extract_chat_completion_content(r.json())
+        if not isinstance(llm_analyzer.extract_json_object(content), dict):
+            return {"ok": False, "error": "接口可连接，但模型未返回可解析的 JSON 对象"}
+        return {"ok": True, "message": f"模型连接成功，JSON 输出有效（{cfg['model']}）"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
