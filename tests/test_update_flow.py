@@ -9,8 +9,11 @@ import tempfile
 import threading
 import time
 import unittest
+import hashlib
 from pathlib import Path
 from unittest.mock import patch
+
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -258,6 +261,85 @@ class EventStreamShutdownTests(unittest.TestCase):
         self.assertFalse(reader.is_alive(), "SSE 流没有在 10 秒内结束：退出会被长连接拖住")
         self.assertNotIn("error", result, result.get("error"))
         self.assertTrue(result.get("ended"), "SSE 流应以正常结束返回")
+
+
+class _FakeResponse:
+    """只提供 _download_release_asset 用到的那几个接口。"""
+
+    def __init__(self, chunks, status_code, content_length):
+        self._chunks = chunks
+        self.status_code = status_code
+        self.headers = {"Content-Length": str(content_length)}
+
+    def raise_for_status(self):
+        return None
+
+    def iter_content(self, chunk_size=0):
+        for chunk in self._chunks:
+            yield chunk
+
+    def close(self):
+        return None
+
+
+class DownloadResumeTests(unittest.TestCase):
+    """下载被掐断时要续传，而不是整次失败（国内代理访问 GitHub 资源常断）。"""
+
+    def setUp(self):
+        self.snapshot = dict(server.UPDATE_STATE)
+        self.addCleanup(server.UPDATE_STATE.update, self.snapshot)
+
+    def _run(self, fake_get, payload):
+        with tempfile.TemporaryDirectory() as base:
+            dest = Path(base) / "asset.bin"
+            expected = hashlib.sha256(payload).hexdigest()
+            with patch.object(server.requests, "get", side_effect=fake_get):
+                size = server._download_release_asset("https://example.invalid/asset",
+                                                      dest, expected, "测试包",
+                                                      attempts=3, retry_delay_seconds=0)
+            self.assertEqual(len(payload), size)
+            self.assertEqual(expected, hashlib.sha256(dest.read_bytes()).hexdigest())
+
+    def test_resumes_after_broken_connection(self):
+        payload = bytes(range(256)) * 4096          # 1 MiB
+        cut = 300 * 1024
+        offsets = []
+
+        def fake_get(url, stream=False, timeout=None, headers=None):
+            rng = (headers or {}).get("Range")
+            offset = int(rng.split("=")[1].split("-")[0]) if rng else 0
+            offsets.append(offset)
+            if offset == 0:
+                def chunks():
+                    yield payload[:cut]
+                    raise requests.exceptions.ChunkedEncodingError(
+                        f"Connection broken: IncompleteRead({cut} bytes read, "
+                        f"{len(payload) - cut} more expected)")
+                return _FakeResponse(chunks(), 200, len(payload))
+            rest = payload[offset:]
+            return _FakeResponse([rest], 206, len(rest))
+
+        self._run(fake_get, payload)
+        self.assertEqual([0, cut], offsets, "第二次必须带 Range 从断点续下")
+
+    def test_restarts_when_server_ignores_range(self):
+        payload = bytes(range(256)) * 4096
+        cut = 100 * 1024
+        offsets = []
+
+        def fake_get(url, stream=False, timeout=None, headers=None):
+            rng = (headers or {}).get("Range")
+            offsets.append(int(rng.split("=")[1].split("-")[0]) if rng else 0)
+            if len(offsets) == 1:
+                def chunks():
+                    yield payload[:cut]
+                    raise requests.exceptions.ChunkedEncodingError("IncompleteRead")
+                return _FakeResponse(chunks(), 200, len(payload))
+            # 服务器忽略 Range：返回 200 与完整内容，客户端应丢掉残片重下
+            return _FakeResponse([payload], 200, len(payload))
+
+        self._run(fake_get, payload)
+        self.assertEqual([0, cut], offsets)
 
 
 if __name__ == "__main__":

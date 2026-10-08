@@ -4035,6 +4035,88 @@ try {
 '''
 
 
+def _sha256_file(path: Path) -> str:
+    """分块算文件摘要，避免把几十 MB 一次读进内存。"""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fetch_expected_sha256(checksum_url: str, label: str) -> str:
+    """下载前先拿到 Release 里 .sha256 文件的期望摘要（续传后要靠它校验整体）。"""
+    response = requests.get(checksum_url, timeout=(10, 30))
+    response.raise_for_status()
+    match = re.search(r"\b([0-9a-fA-F]{64})\b", response.text)
+    if not match:
+        raise ValueError(f"{label} SHA256 文件格式无效")
+    return match.group(1).lower()
+
+
+def _download_release_asset(url: str, dest: Path, expected_sha256: str, label: str,
+                            *, attempts: int = 5, retry_delay_seconds: float = 2.0) -> int:
+    """把 Release 资源下载到 dest，连接被掐断时用 Range 续下。
+
+    每轮结束后校验整体 SHA256：通过才算成功；服务器忽略 Range（返回 200）时从头重下；
+    连续 attempts 轮都没成功就抛错。取消请求会立刻中断。
+    """
+    max_bytes = 2 * 1024 * 1024 * 1024
+    last_error: object = None
+    for attempt in range(1, attempts + 1):
+        if _UPDATE_CANCEL.is_set():
+            raise _UpdateCancelled()
+        have = dest.stat().st_size if dest.exists() else 0
+        headers = {"Range": f"bytes={have}-"} if have else {}
+        try:
+            response = requests.get(url, stream=True, timeout=(15, 60), headers=headers)
+            response.raise_for_status()
+            try:
+                if have and response.status_code == 200:
+                    # 服务器不支持断点续传：只能把已下的丢掉重来
+                    log.info("%s 不支持断点续传，从头下载", label)
+                    have = 0
+                    dest.unlink(missing_ok=True)
+                content_length = int(response.headers.get("Content-Length") or 0)
+                total = have + content_length if content_length else 0
+                if total > max_bytes:
+                    raise ValueError(f"{label}超过 2 GiB 安全上限")
+                _set_update_state(total_bytes=total, downloaded_bytes=have)
+                written = have
+                with dest.open("ab") as output:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if _UPDATE_CANCEL.is_set():
+                            raise _UpdateCancelled()
+                        if not chunk:
+                            continue
+                        output.write(chunk)
+                        written += len(chunk)
+                        _set_update_state(downloaded_bytes=written)
+                if written <= have:
+                    raise requests.exceptions.ChunkedEncodingError("本次没有收到新数据")
+            finally:
+                response.close()
+        except _UpdateCancelled:
+            raise
+        except ValueError:
+            raise                      # 尺寸/格式类硬错误不重试
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+            log.warning("%s 下载中断（第 %d/%d 次）：%s", label, attempt, attempts, exc)
+
+        if dest.exists() and _sha256_file(dest) == expected_sha256:
+            return dest.stat().st_size
+        if dest.exists() and dest.stat().st_size:
+            if attempt >= attempts:
+                raise ValueError(f"{label} SHA256 校验失败，已取消更新")
+            log.warning("%s 尚未下载完整（第 %d/%d 次），继续续传", label, attempt, attempts)
+        elif attempt >= attempts:
+            break
+        if attempt < attempts:
+            time.sleep(retry_delay_seconds * attempt)
+    raise RuntimeError(f"{label}下载失败：{last_error or '多次尝试均未完成'}")
+
+
 def _run_update_worker(release: dict):
     global _UPDATE_STATUS_FILE
     work_dir = None
@@ -4057,41 +4139,11 @@ def _run_update_worker(release: dict):
         status_file.write_text(json.dumps({"status": "downloading", "error": ""}),
                                encoding="utf-8")
 
-        checksum_response = requests.get(release["checksum_url"], timeout=(10, 30))
-        checksum_response.raise_for_status()
-        checksum_match = re.search(r"\b([0-9a-fA-F]{64})\b", checksum_response.text)
-        if not checksum_match:
-            raise ValueError("Release SHA256 文件格式无效")
-        expected_sha256 = checksum_match.group(1).lower()
-
-        downloaded = 0
-        digest = hashlib.sha256()
-        response = requests.get(release["zip_url"], stream=True, timeout=(15, 120))
-        response.raise_for_status()
-        try:
-            total = int(response.headers.get("Content-Length") or release.get("zip_size") or 0)
-            if total > 2 * 1024 * 1024 * 1024:
-                raise ValueError("更新包超过 2 GiB 安全上限")
-            _set_update_state(total_bytes=total, downloaded_bytes=0)
-            with zip_path.open("wb") as output:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if _UPDATE_CANCEL.is_set():
-                        raise _UpdateCancelled()
-                    if not chunk:
-                        continue
-                    output.write(chunk)
-                    digest.update(chunk)
-                    downloaded += len(chunk)
-                    _set_update_state(downloaded_bytes=downloaded)
-        finally:
-            response.close()
-
+        expected_sha256 = _fetch_expected_sha256(release["checksum_url"], "更新包")
+        downloaded = _download_release_asset(release["zip_url"], zip_path,
+                                             expected_sha256, "更新包")
         if _UPDATE_CANCEL.is_set():
             raise _UpdateCancelled()
-        if release.get("zip_size") and downloaded != release["zip_size"]:
-            raise ValueError("下载大小与 GitHub Release 记录不一致")
-        if digest.hexdigest().lower() != expected_sha256:
-            raise ValueError("更新包 SHA256 校验失败，已取消覆盖")
 
         if _UPDATE_CANCEL.is_set():
             raise _UpdateCancelled()
@@ -4231,39 +4283,11 @@ def _run_installer_update_worker(release: dict, info: dict):
         status_file.write_text(json.dumps({"status": "downloading", "error": ""}),
                                encoding="utf-8")
 
-        checksum_response = requests.get(release["setup_checksum_url"], timeout=(10, 30))
-        checksum_response.raise_for_status()
-        checksum_match = re.search(r"\b([0-9a-fA-F]{64})\b", checksum_response.text)
-        if not checksum_match:
-            raise ValueError("安装包 SHA256 文件格式无效")
-        expected_sha256 = checksum_match.group(1).lower()
-
-        downloaded = 0
-        digest = hashlib.sha256()
-        response = requests.get(release["setup_url"], stream=True, timeout=(15, 120))
-        response.raise_for_status()
-        try:
-            total = int(response.headers.get("Content-Length") or 0)
-            if total > 2 * 1024 * 1024 * 1024:
-                raise ValueError("安装包超过 2 GiB 安全上限")
-            _set_update_state(total_bytes=total, downloaded_bytes=0)
-            with setup_path.open("wb") as output:
-                for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if _UPDATE_CANCEL.is_set():
-                        raise _UpdateCancelled()
-                    if not chunk:
-                        continue
-                    output.write(chunk)
-                    digest.update(chunk)
-                    downloaded += len(chunk)
-                    _set_update_state(downloaded_bytes=downloaded)
-        finally:
-            response.close()
-
+        expected_sha256 = _fetch_expected_sha256(release["setup_checksum_url"], "安装包")
+        downloaded = _download_release_asset(release["setup_url"], setup_path,
+                                             expected_sha256, "安装包")
         if _UPDATE_CANCEL.is_set():
             raise _UpdateCancelled()
-        if digest.hexdigest().lower() != expected_sha256:
-            raise ValueError("安装包 SHA256 校验失败，已取消更新")
 
         helper_path = work_dir / "apply-installer-update.ps1"
         helper_path.write_text("\ufeff" + _INSTALLER_UPDATE_HELPER_SCRIPT, encoding="utf-8")
