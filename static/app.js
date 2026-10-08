@@ -84,10 +84,44 @@
     box.textContent = message;
   }
 
+  // 下载阶段的「停止下载」按钮：只在下载中出现，进入替换阶段后收起（那时无法中止）。
+  let updateStopButton = null;
+
+  function renderDownloadProgress(text) {
+    const box = $("update-status");
+    box.className = "update-status";
+    if (!updateStopButton) {
+      updateStopButton = document.createElement("button");
+      updateStopButton.type = "button";
+      updateStopButton.className = "mini";
+      updateStopButton.style.marginLeft = "6px";
+      updateStopButton.textContent = "停止下载";
+      updateStopButton.addEventListener("click", cancelUpdate);
+    }
+    box.replaceChildren(document.createTextNode(text), updateStopButton);
+  }
+
+  function clearUpdateStopButton() {
+    updateStopButton = null;
+  }
+
+  async function cancelUpdate() {
+    if (updateStopButton) updateStopButton.disabled = true;
+    try {
+      await api("POST", "/api/update/cancel", undefined, { timeoutMs: 10000 });
+      log("已请求取消更新下载", "info");
+    } catch (e) {
+      const reason = e && (e.error || e.message || String(e));
+      if (updateStopButton) updateStopButton.disabled = false;
+      log(`取消更新失败：${reason}`, "err");
+    }
+  }
+
   async function loadAppVersion() {
     try {
       const info = await api("GET", "/api/version");
-      $("app-version").textContent = `版本 ${info.version || "dev"}`;
+      const commit = info.commit ? ` (${info.commit})` : "";
+      $("app-version").textContent = `版本 ${info.version || "dev"}${commit}`;
     } catch (_) { /* 服务连接状态另有提示 */ }
   }
 
@@ -100,22 +134,31 @@
 
       if (state && state.status === "error") {
         const message = state.error || "更新失败";
+        clearUpdateStopButton();
         setUpdateStatus(`更新失败：${message}`, "error");
         log(`更新失败：${message}`, "err");
+        return false;
+      }
+      if (state && state.status === "cancelled") {
+        clearUpdateStopButton();
+        setUpdateStatus("已取消更新下载", "ok");
+        log("已取消更新下载", "info");
         return false;
       }
       if (state && state.status === "downloading") {
         const downloaded = Number(state.downloaded_bytes || 0);
         const total = Number(state.total_bytes || 0);
         const progress = total ? ` ${Math.min(100, Math.floor(downloaded * 100 / total))}%` : "";
-        setUpdateStatus(`正在下载更新${progress}…`);
+        renderDownloadProgress(`正在下载更新${progress}…`);
       } else if (state && state.status === "installing") {
+        clearUpdateStopButton();
         setUpdateStatus(`正在安装 ${expectedVersion}，应用即将重启…`);
       }
 
       try {
         const info = await api("GET", "/api/version", undefined, { timeoutMs: 3000 });
         if (info.version === expectedVersion) {
+          clearUpdateStopButton();
           setUpdateStatus(`已更新到 ${expectedVersion}，正在重新载入…`, "ok");
           setTimeout(() => window.location.reload(), 800);
           return true;
@@ -123,6 +166,7 @@
       } catch (_) { /* 继续等待服务重启 */ }
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
+    clearUpdateStopButton();
     setUpdateStatus("等待更新重启超时，请检查程序窗口后重试", "error");
     log("等待更新程序重启超时", "err");
     return false;
@@ -138,6 +182,11 @@
       const result = await api("POST", "/api/update/check", undefined, { timeoutMs: 30000 });
       const currentVersion = result.current_version || "dev";
       $("app-version").textContent = `版本 ${currentVersion}`;
+      if (result.version_comparable === false) {
+        setUpdateStatus(`当前是开发构建（${currentVersion}），不做版本比较`, "");
+        log(`当前 ${currentVersion} 不是正式发布版本，跳过更新比较；如需正式版请手动下载 Release 包`, "info");
+        return;
+      }
       if (!result.update_available) {
         setUpdateStatus(`已是最新版本（${currentVersion}）`, "ok");
         log(`版本检查完成：当前 ${currentVersion}，已是最新版本`, "ok");
@@ -155,6 +204,22 @@
         link.rel = "noopener noreferrer";
         link.textContent = "前往下载";
         status.appendChild(link);
+        return;
+      }
+
+      // 由用户决定是否更新：不再"点了检查就自动下载覆盖"。
+      const modeNote = result.install_mode === "installed"
+        ? "· 当前是安装版：会下载安装包并静默运行（全机安装时会弹一次 UAC 确认）。\n"
+        : "";
+      const agreed = confirm(
+        `发现新版本 ${result.latest_version}（当前 ${currentVersion}）。\n\n` +
+        "现在下载并安装？\n" +
+        modeNote +
+        "· 下载阶段可以点「停止下载」取消；\n" +
+        "· 下载完成后会替换程序文件并自动重启，该阶段无法中止。");
+      if (!agreed) {
+        setUpdateStatus(`已跳过 ${result.latest_version}，可随时点 ↻ 重新检查`, "");
+        log(`已跳过更新 ${result.latest_version}`, "info");
         return;
       }
 

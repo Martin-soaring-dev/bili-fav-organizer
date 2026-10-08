@@ -10,7 +10,7 @@
 [![Release](https://img.shields.io/github/v/release/Martin-soaring-dev/bili-fav-organizer?label=release)](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)
 [![Windows](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#从源码运行开发)
-[![License: CC BY-NC 4.0](https://img.shields.io/badge/license-CC_BY--NC_4.0-lightgrey)](#许可)
+[![License: PolyForm NC 1.0.0](https://img.shields.io/badge/license-PolyForm_Noncommercial_1.0.0-blue)](#许可)
 [![Windows 打包](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/workflows/release-windows.yml/badge.svg?event=push)](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/workflows/release-windows.yml)
 
 <p align="center">
@@ -43,7 +43,15 @@
 
 ## 快速开始
 
-### Windows 便携版（推荐）
+### Windows 安装版
+
+1. 打开 [Releases](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases)，下载 `BiliFavOrganizer-Setup-<版本标签>.exe`
+2. 运行安装包：向导里会让你**选择安装范围**（仅当前用户免管理员 / 为所有用户需 UAC），并需要勾选接受许可协议
+3. 安装完成后从开始菜单（可选桌面快捷方式）启动；卸载在 Windows「应用和功能」里，卸载时会询问是否同时删除个人数据
+
+安装版在应用内更新时改为"下载新安装包并静默运行"，由安装程序完成替换与重启。两种形态的数据目录相同（`%LOCALAPPDATA%\BiliFavOrganizer`），切换安装方式不会丢数据。
+
+### Windows 便携版
 
 1. 打开 [Releases](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases)，下载 `BiliFavOrganizer-Windows-x64-<版本标签>.zip`
 2. 解压后双击 **`BiliFavOrganizer.exe`**（或 `BiliFavOrganizer.bat`）
@@ -229,6 +237,22 @@ bili-fav-organizer/
 
 ## 更新日志
 
+### [v0.207](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.207)（2026-10-08）
+
+**署名牌 + 更新流程加固 + Windows 安装包：界面、控制台、exe 属性与发布包都带上作者与许可信息；许可更换为 PolyForm Noncommercial 1.0.0；应用内更新改为"用户确认 + 可取消 + 能真正结束旧进程"；新增 Inno Setup 安装包。**
+
+- **新增 Windows 安装包**（`BiliFavOrganizer-Setup-<标签>.exe`）：安装向导让你选择安装范围（仅当前用户免管理员／为所有用户需 UAC）、勾选接受许可协议（摘要页 + 随包 `LICENSE.txt` 全文）；写入注册表安装标记与 Windows「应用和功能」卸载项（发布者 Martin-soaring-dev），创建开始菜单与可选桌面快捷方式；卸载时询问是否同时删除个人数据（默认保留）。安装包自身的属性也写入公司名与版权。
+- **许可由 CC BY-NC 4.0 更换为 [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)**：仍是"允许非商业使用、保留署名"，但换成面向软件写的许可——含专利授权，并把"非商业"写成可判定的许可用途清单（个人学习/研究/爱好，以及非营利机构、教育、公共研究、公共安全与卫生、环保、政府机构的非商业使用）。
+- 新增 `NOTICE`（`Required Notice:` 行 + 署名与品牌声明），并要求再分发时随附 `LICENSE` 全文与 `NOTICE`；发布 ZIP 内含 `LICENSE.txt` 与 `NOTICE.txt`，缺少任一项时构建直接失败。
+- 项目名称、产品名、标志与图标不在许可授权范围内，不得用于修改版或二次分发版本的命名与宣传。
+- 界面顶栏显示「© Martin-soaring-dev」并链接到仓库；版本号后附构建提交短哈希，便于核对手上的包来自哪次构建。
+- 启动时把作者、仓库与许可写入控制台窗口标题和日志；`/api/version` 新增 `author` / `homepage` / `license` / `copyright` / `commit` / `build_date`。
+- Windows 便携包的 exe 属性（右键→属性→详细信息）写入公司名与版权；发布流程同时注入构建提交与日期。
+- **修正更新流程三处逻辑**：① 开发构建（`dev`）不参与版本比较，不再被当成"比任何正式版都旧"而自动下载覆盖，`/api/update/install` 也直接拒绝；② 发现新版本后由用户确认才开始下载安装，不再"点了检查就自动覆盖"；③ 下载阶段提供「停止下载」（新增 `POST /api/update/cancel`），随时可取消。
+- **修正更新替换阶段卡住**：替换前主动断开 SSE 长连接、给 uvicorn 设 5 秒优雅退出上限，并留 15 秒硬退兜底；更新助手等待 20 秒后会强制结束仍在运行的旧进程，不再因"应用仍在运行"而超时取消。
+
+新增 **11 项署名回归测试**（`tests/test_attribution.py`）与 **7 项更新流程测试**（`tests/test_update_flow.py`），连同既有品牌集成测试 9 项共 **27 项全部通过**；更新交互另用真实 Chromium 端到端验证过（dev 不比较版本、确认框、停止下载三条路径）。
+
 ### [v0.206](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.206)（2026-10-08）
 
 **接入品牌标识：浏览器标签、界面顶栏与程序图标都显示自己的 logo。**
@@ -301,4 +325,17 @@ pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 
 ## 许可
 
-This work is licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/nc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">
+本作品按 **[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)** 授权；许可全文见 [`LICENSE`](LICENSE)，随附的署名与品牌声明见 [`NOTICE`](NOTICE)。
+
+© 2026 [Martin-soaring-dev](https://github.com/Martin-soaring-dev) · 作者署名与版权声明保留。
+
+| | |
+|---|---|
+| **允许** | 个人学习、研究、实验、爱好等非商业用途；慈善机构、教育机构、公共研究机构、公共安全与卫生机构、环保机构、政府机构的非商业使用（不论其资金来源）。可修改，可分发修改后的新作品。 |
+| **禁止** | 任何商业用途。企业用于自身经营目的的部署不属于许可用途。 |
+| **必须** | 任何拿到副本的人都要同时拿到 `LICENSE` 全文与 `NOTICE` 中以 `Required Notice:` 开头的行；不得移除程序内的作者署名与版权声明（界面顶栏、控制台输出、`/api/version` 与发布包内的 `LICENSE.txt`）。 |
+| **品牌** | 项目名称、产品名、标志与图标不在本许可授权范围内，不得用于修改版或二次分发版本的命名与宣传，也不得暗示其来自作者或经作者认可。 |
+
+需要商业授权或其它授权方式，请联系作者另行协商。
+
+> 2026-10-08 起由 CC BY-NC 4.0 更换为本许可。此前发布的版本仍按其发布时的许可（CC BY-NC 4.0）授权——CC 许可不可撤销，已分发的副本继续适用该版本许可。

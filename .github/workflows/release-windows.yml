@@ -33,9 +33,20 @@ jobs:
           $version = $env:RELEASE_VERSION
           if ($version -notmatch '^v?\d+(\.\d+)*$') { throw "Unsupported release version: $version" }
           $source = [System.IO.File]::ReadAllText("server.py")
-          $marker = 'BUILD_VERSION = "dev"'
-          if ([regex]::Matches($source, [regex]::Escape($marker)).Count -ne 1) { throw "Build version marker must appear exactly once." }
-          $source = $source.Replace($marker, ('BUILD_VERSION = "{0}"' -f $version))
+          $commit = $env:GITHUB_SHA.Substring(0, 7)
+          $buildDate = (& git log -1 --format=%ad --date=short).Trim()
+          # 每个标记都要求恰好出现一次，避免替换到注释或别的代码行。
+          $fill = [ordered]@{
+            'BUILD_VERSION = "dev"' = ('BUILD_VERSION = "{0}"' -f $version)
+            'BUILD_COMMIT = ""'     = ('BUILD_COMMIT = "{0}"' -f $commit)
+            'BUILD_DATE = ""'       = ('BUILD_DATE = "{0}"' -f $buildDate)
+          }
+          foreach ($marker in $fill.Keys) {
+            if ([regex]::Matches($source, [regex]::Escape($marker)).Count -ne 1) {
+              throw "Build marker '$marker' must appear exactly once."
+            }
+            $source = $source.Replace($marker, $fill[$marker])
+          }
           [System.IO.File]::WriteAllText("server.py", $source, [System.Text.UTF8Encoding]::new($false))
 
       - name: Build self-contained application
@@ -79,6 +90,11 @@ jobs:
           Copy-Item "BiliFavOrganizer.bat" "$releaseDir/BiliFavOrganizer.bat"
           Copy-Item "packaging/使用说明.txt" "$releaseDir/使用说明.txt"
           Copy-Item "output/pdf/快速上手.pdf" "$releaseDir/快速上手.pdf"
+          # 便携包必须随附许可全文与 Required Notice，署名与授权条款才算真正交付给使用者。
+          if (-not (Test-Path "LICENSE")) { throw "LICENSE is missing; refusing to publish a package without the license text." }
+          if (-not (Test-Path "NOTICE")) { throw "NOTICE is missing; refusing to publish a package without the required notice." }
+          Copy-Item "LICENSE" "$releaseDir/LICENSE.txt"
+          Copy-Item "NOTICE" "$releaseDir/NOTICE.txt"
           $version = $env:GITHUB_REF_NAME -replace '[^A-Za-z0-9._-]', '-'
           $zip = "BiliFavOrganizer-Windows-x64-$version.zip"
           $checksum = "$zip.sha256"
@@ -88,12 +104,37 @@ jobs:
           "asset_name=$zip" >> $env:GITHUB_OUTPUT
           "checksum_name=$checksum" >> $env:GITHUB_OUTPUT
 
+      - name: Build installer (Inno Setup)
+        id: installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Host "未找到 ISCC，尝试用 choco 安装 Inno Setup..."
+            choco install innosetup --no-progress -y
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup 不可用，无法生成安装包。" }
+          $tag = $env:GITHUB_REF_NAME
+          # Inno 的文件版本必须是数字四段：v0.207 -> 0.207.0.0
+          $fileVersion = ((($tag.TrimStart('v','V') -split '\.') + @('0','0','0','0'))[0..3]) -join '.'
+          & $iscc "/DAppVersion=$tag" "/DFileVersion=$fileVersion" "packaging\BiliFavOrganizer.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败（退出码 $LASTEXITCODE）。" }
+          $setup = "dist\BiliFavOrganizer-Setup-$tag.exe"
+          if (-not (Test-Path $setup)) { throw "安装包未生成：$setup" }
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $setup)" | Set-Content "$setup.sha256" -Encoding ascii
+          "setup_name=$setup" >> $env:GITHUB_OUTPUT
+          "setup_checksum=$setup.sha256" >> $env:GITHUB_OUTPUT
+
       - name: Publish release assets
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET_NAME: ${{ steps.package.outputs.asset_name }}
           CHECKSUM_NAME: ${{ steps.package.outputs.checksum_name }}
+          SETUP_NAME: ${{ steps.installer.outputs.setup_name }}
+          SETUP_CHECKSUM: ${{ steps.installer.outputs.setup_checksum }}
           RELEASE_TITLE: ${{ steps.notes.outputs.title }}
           RELEASE_NOTES_B64: ${{ steps.notes.outputs.notes_b64 }}
         run: |
@@ -101,8 +142,8 @@ jobs:
           $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
           gh release view $tag *> $null
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $env:ASSET_NAME $env:CHECKSUM_NAME --clobber
+            gh release upload $tag $env:ASSET_NAME $env:CHECKSUM_NAME $env:SETUP_NAME $env:SETUP_CHECKSUM --clobber
             gh release edit $tag --title $env:RELEASE_TITLE --notes $notes
           } else {
-            gh release create $tag $env:ASSET_NAME $env:CHECKSUM_NAME --title $env:RELEASE_TITLE --notes $notes
+            gh release create $tag $env:ASSET_NAME $env:CHECKSUM_NAME $env:SETUP_NAME $env:SETUP_CHECKSUM --title $env:RELEASE_TITLE --notes $notes
           }

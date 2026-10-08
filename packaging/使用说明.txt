@@ -26,6 +26,13 @@
 升级
 下载新版本便携 ZIP 并解压到新的文件夹，然后启动新版本。原用户数据会继续使用。
 
+版权与来源
+作者：Martin-soaring-dev　源码与最新版本：https://github.com/Martin-soaring-dev/bili-fav-organizer
+本工具为非官方工具，与哔哩哔哩及其运营方无任何关联，亦未获其授权或认可。
+本工具按 PolyForm Noncommercial License 1.0.0 许可发布：个人学习、研究、实验、爱好等非商业用途可用，慈善、教育、公共研究、公共安全与卫生、环保及政府机构也可非商业使用；可修改、可再分发，但任何商业用途都不被许可。许可全文见本包内 LICENSE.txt，署名与品牌声明见 NOTICE.txt。
+再分发时请随附 LICENSE.txt 与 NOTICE.txt 并保留程序内的作者署名；项目名称、标志与图标不随许可授权，不得用于修改版或二次分发版本的命名与宣传。
+请从上述 GitHub 仓库的 Releases 下载本工具；其它渠道（网盘、公众号、论坛等）分发的包与作者无关，也不受作者支持。
+
 注意
 GitHub 页面自动生成的“Source code”压缩包是源代码，不是便携程序。
 请下载本次 Release 中带当前版本标签的附件，例如：BiliFavOrganizer-Windows-x64-v0.206.zip。

@@ -1,0 +1,188 @@
+"""更新流程的三条守卫：版本比较、用户确认后才安装、随时可取消。
+
+这里是服务端行为；前端「确认框 / 停止下载」按钮由 Playwright 端到端验证。
+"""
+import os
+import sqlite3
+import sys
+import time
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# 只在自己最先导入 server 时隔离数据目录；若别的测试已导入则复用，不改变其行为。
+if "server" not in sys.modules:
+    TEST_ROOT = Path(__file__).resolve().parent / ".test-data" / "update-flow"
+    TEST_ROOT.mkdir(parents=True, exist_ok=True)
+    os.environ["BILI_FAV_ORGANIZER_DATA_DIR"] = str(TEST_ROOT)
+    os.environ["LOCALAPPDATA"] = str(TEST_ROOT)
+    settings = TEST_ROOT / "BiliFavOrganizer"
+    settings.mkdir(exist_ok=True)
+    for filename in ("config.json", "secrets.json"):
+        (settings / filename).write_text("{}", encoding="utf-8")
+    with sqlite3.connect(TEST_ROOT / "library.sqlite3") as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations"
+                     "(version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
+        conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6, 'test')")
+
+import server
+from fastapi.testclient import TestClient
+
+FAKE_RELEASE = {
+    "version": "v9.9.9",
+    "release_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v9.9.9",
+    "zip_name": "x.zip",
+    "zip_url": "https://example.invalid/x.zip",
+    "checksum_url": "https://example.invalid/x.zip.sha256",
+    "setup_name": "BiliFavOrganizer-Setup-v9.9.9.exe",
+    "setup_url": "https://example.invalid/BiliFavOrganizer-Setup-v9.9.9.exe",
+    "setup_checksum_url": "https://example.invalid/BiliFavOrganizer-Setup-v9.9.9.exe.sha256",
+    "zip_size": 0,
+}
+
+
+class VersionComparisonTests(unittest.TestCase):
+    def test_newer_release_is_detected(self):
+        self.assertTrue(server._is_newer_version("v0.207", "v0.206"))
+        self.assertFalse(server._is_newer_version("v0.206", "v0.207"))
+        self.assertFalse(server._is_newer_version("v0.206", "v0.206"))
+
+
+class UpdateCheckTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(server.app)
+        self.addCleanup(setattr, server, "_UPDATE_RELEASE", None)
+
+    def test_dev_build_never_reports_an_available_update(self):
+        """开发构建（dev）解析不出版本号：不比较、不提示、更不能开始下载。"""
+        with patch.object(server, "_fetch_latest_release", return_value=dict(FAKE_RELEASE)):
+            body = self.client.post("/api/update/check").json()
+        self.assertEqual("dev", body["current_version"])
+        self.assertFalse(body["version_comparable"])
+        self.assertFalse(body["update_available"])
+        self.assertIsNone(server._UPDATE_RELEASE,
+                          "dev 构建被标记为可更新时，一点检查就会下载并覆盖当前程序")
+
+    def test_release_build_still_offers_the_newer_version(self):
+        with patch.object(server, "_fetch_latest_release", return_value=dict(FAKE_RELEASE)), \
+                patch.object(server, "BUILD_VERSION", "v0.206"):
+            body = self.client.post("/api/update/check").json()
+        self.assertTrue(body["version_comparable"])
+        self.assertTrue(body["update_available"])
+        self.assertEqual("v9.9.9", body["latest_version"])
+        self.assertIsNotNone(server._UPDATE_RELEASE)
+
+
+class UpdateInstallGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(server.app)
+        self.addCleanup(setattr, server, "_UPDATE_RELEASE", None)
+
+    def test_dev_build_refuses_in_app_update(self):
+        """即使前端被绕过，服务端也不给开发构建做覆盖更新。"""
+        with patch.object(server.sys, "frozen", True, create=True):
+            response = self.client.post("/api/update/install")
+        self.assertEqual(400, response.status_code)
+        self.assertIn("开发构建", response.json()["detail"])
+
+
+class UpdateCancelTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(server.app)
+        self.state_snapshot = dict(server.UPDATE_STATE)
+        self.addCleanup(server.UPDATE_STATE.update, self.state_snapshot)
+        self.addCleanup(server._UPDATE_CANCEL.clear)
+
+    def test_cancel_without_a_download_is_rejected(self):
+        server.UPDATE_STATE.update(status="idle", error="")
+        self.assertEqual(409, self.client.post("/api/update/cancel").status_code)
+
+    def test_cancel_during_download_stops_the_worker(self):
+        server._UPDATE_CANCEL.clear()
+        server.UPDATE_STATE.update(status="downloading", error="")
+        response = self.client.post("/api/update/cancel")
+        self.assertEqual(200, response.status_code)
+        self.assertTrue(server._UPDATE_CANCEL.is_set(), "下载循环依赖这个标志中止")
+        self.assertEqual("cancelled", server.UPDATE_STATE["status"])
+
+    def test_cancel_after_replacement_started_is_refused(self):
+        server.UPDATE_STATE.update(status="installing", error="")
+        response = self.client.post("/api/update/cancel")
+        self.assertEqual(409, response.status_code)
+        self.assertIn("无法中止", response.json()["error"])
+
+
+class InstallModeTests(unittest.TestCase):
+    def test_missing_registry_marker_means_portable(self):
+        """没有安装包写入的注册表标记时，必须按便携版处理。"""
+        import winreg
+        with patch.object(winreg, "OpenKey", side_effect=OSError("no key")):
+            self.assertIsNone(server._installed_info())
+
+    def test_version_endpoint_reports_install_mode(self):
+        client = TestClient(server.app)
+        with patch.object(server, "_installed_info", return_value=None):
+            self.assertEqual("portable", client.get("/api/version").json()["install_mode"])
+        with patch.object(server, "_installed_info",
+                          return_value={"install_dir": r"C:\x", "scope": "current-user"}):
+            self.assertEqual("installed", client.get("/api/version").json()["install_mode"])
+
+    def test_update_check_reports_install_mode(self):
+        with patch.object(server, "_fetch_latest_release", return_value=dict(FAKE_RELEASE)), \
+                patch.object(server, "BUILD_VERSION", "v0.206"), \
+                patch.object(server, "_installed_info",
+                             return_value={"install_dir": r"C:\x", "scope": "current-user"}):
+            body = TestClient(server.app).post("/api/update/check").json()
+        self.assertEqual("installed", body["install_mode"])
+
+
+class InstalledModeUpdateTests(unittest.TestCase):
+    """安装版必须走安装包更新；便携版仍走 ZIP 覆盖。"""
+
+    def setUp(self):
+        self.client = TestClient(server.app)
+        self.state_snapshot = dict(server.UPDATE_STATE)
+        self.addCleanup(server.UPDATE_STATE.update, self.state_snapshot)
+        self.addCleanup(setattr, server, "_UPDATE_RELEASE", None)
+
+    def _install_and_wait(self, calls):
+        server._UPDATE_RELEASE = dict(FAKE_RELEASE)
+        with patch.object(server.sys, "frozen", True, create=True), \
+                patch.object(server, "BUILD_VERSION", "v0.206"):
+            response = self.client.post("/api/update/install")
+        deadline = time.monotonic() + 3
+        while not calls and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return response
+
+    def test_installed_build_downloads_and_runs_the_installer(self):
+        calls = []
+        with patch.object(server, "_installed_info",
+                          return_value={"install_dir": r"C:\x", "scope": "current-user"}), \
+                patch.object(server, "_run_installer_update_worker",
+                             side_effect=lambda rel, info: calls.append(
+                                 ("installer", rel["version"], info["scope"]))), \
+                patch.object(server, "_run_update_worker",
+                             side_effect=lambda rel: calls.append(("zip", rel["version"]))):
+            response = self._install_and_wait(calls)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("installed", response.json()["install_mode"])
+        self.assertEqual([("installer", "v9.9.9", "current-user")], calls)
+
+    def test_portable_build_keeps_the_zip_worker(self):
+        calls = []
+        with patch.object(server, "_installed_info", return_value=None), \
+                patch.object(server, "_run_installer_update_worker",
+                             side_effect=lambda rel, info: calls.append(("installer", rel["version"]))), \
+                patch.object(server, "_run_update_worker",
+                             side_effect=lambda rel: calls.append(("zip", rel["version"]))):
+            response = self._install_and_wait(calls)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual("portable", response.json()["install_mode"])
+        self.assertEqual([("zip", "v9.9.9")], calls)
+
+
+if __name__ == "__main__":
+    main()

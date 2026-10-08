@@ -65,28 +65,115 @@ log = logging.getLogger("server")
 app = FastAPI(title="B站收藏夹整理")
 
 MODEL_TEST_TIMEOUT_SECONDS = 45
+
+# 发布流程按下面三个标记注入真实构建信息（见 .github/workflows/release-windows.yml）。
+# 版本那一行必须保持原样且全文件只出现一次，工作流替换失败会直接终止发布。
 BUILD_VERSION = "dev"
+BUILD_COMMIT = ""
+BUILD_DATE = ""
 
 GITHUB_REPOSITORY = "Martin-soaring-dev/bili-fav-organizer"
 GITHUB_LATEST_RELEASE_URL = f"https://github.com/{GITHUB_REPOSITORY}/releases/latest"
+
+# 署名与版权：界面、控制台、/api/version 与 exe 属性都会带上，
+# 让被改名重打包的副本要么显示来源，要么必须显式删除这些字段。
+AUTHOR = "Martin-soaring-dev"
+HOMEPAGE = f"https://github.com/{GITHUB_REPOSITORY}"
+LICENSE_NAME = "PolyForm Noncommercial License 1.0.0"
+COPYRIGHT = f"© 2026 {AUTHOR}"
 UPDATE_STATE = {
     "status": "idle",
     "current_version": "",
     "latest_version": "",
+    "version_comparable": True,
     "downloaded_bytes": 0,
     "total_bytes": 0,
     "error": "",
 }
 _UPDATE_LOCK = threading.Lock()
 _UPDATE_RELEASE = None
+_UPDATE_CANCEL = threading.Event()   # 用户点「停止下载」时置位，下载循环据此中止
+_SHUTDOWN = threading.Event()        # 更新替换前置位，用来断开 SSE 长连接
 _UPDATE_STATUS_FILE: Path | None = None
 _UVICORN_SERVER = None
 _APP_PORT = 8080
 
 
+class _UpdateCancelled(Exception):
+    """用户主动取消更新下载（不是失败）。"""
+
+
+def _force_exit_if_alive():
+    """更新替换阶段的兜底硬退。
+
+    只要还有一个 SSE 长连接没断，uvicorn 的优雅退出就可能一直等下去，
+    更新助手会因"应用仍在运行"而超时取消——所以这里留一个硬退上限。
+    正常情况下服务早已退出，走不到这一行。
+    """
+    log.warning("服务未在预期时间内退出，强制结束进程以完成更新替换")
+    os._exit(0)
+
+
 def _app_version() -> str:
     """The release workflow embeds its tag into the frozen application."""
     return BUILD_VERSION
+
+
+INSTALL_REGISTRY_KEY = r"Software\Martin-soaring-dev\BiliFavOrganizer"
+
+
+def _installed_info() -> dict | None:
+    """安装版标记（由安装包写入注册表）；便携版没有，返回 None。
+
+    安装版更新时改为"下载安装包并静默运行"，便携版仍走 ZIP 覆盖。
+    """
+    if os.name != "nt":
+        return None
+    try:
+        import winreg
+    except ImportError:
+        return None
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, INSTALL_REGISTRY_KEY) as key:
+                mode = str(winreg.QueryValueEx(key, "InstallMode")[0] or "").lower()
+                if mode != "installed":
+                    continue
+
+                def read(name: str, default: str = "") -> str:
+                    try:
+                        return str(winreg.QueryValueEx(key, name)[0] or default)
+                    except OSError:
+                        return default
+
+                return {
+                    "install_dir": read("InstallDir"),
+                    "scope": read("Scope", "current-user"),
+                    "version": read("Version"),
+                }
+        except OSError:
+            continue
+    return None
+
+
+def _log_attribution():
+    """在控制台窗口与日志里留一条署名记录。
+
+    便携版按说明会一直开着这个控制台窗口，署名因此始终可见；
+    改名重打包的副本若要去掉它，必须显式改源码。
+    """
+    build = f"（提交 {BUILD_COMMIT}，{BUILD_DATE}）" if BUILD_COMMIT else ""
+    log.info("BiliFavOrganizer %s%s", _app_version(), build)
+    log.info("%s · %s · 许可 %s（保留署名与来源，不得商用）",
+             COPYRIGHT, HOMEPAGE, LICENSE_NAME)
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetConsoleTitleW(
+                f"BiliFavOrganizer {_app_version()} · {AUTHOR}")
+        except Exception:
+            pass
 
 
 def _version_key(version: str) -> tuple[int, ...] | None:
@@ -1276,6 +1363,8 @@ async def events_stream(since: int = 0):
                 yield f"data: {json.dumps(e, ensure_ascii=False)}\n\n"
         while True:
             await asyncio.sleep(0.4)
+            if _SHUTDOWN.is_set():
+                return      # 更新替换前主动断开长连接，否则 uvicorn 退不出去
             with _evt_lock:
                 new = [e for e in APP["events"] if e["id"] > last]
             for e in new:
@@ -3728,6 +3817,8 @@ def _fetch_latest_release() -> dict:
     tag = _latest_release_version()
     zip_name = f"BiliFavOrganizer-Windows-x64-{tag}.zip"
     checksum_name = f"{zip_name}.sha256"
+    setup_name = f"BiliFavOrganizer-Setup-{tag}.exe"
+    setup_checksum_name = f"{setup_name}.sha256"
     download_base = f"https://github.com/{GITHUB_REPOSITORY}/releases/download/{tag}"
     return {
         "version": tag,
@@ -3735,6 +3826,9 @@ def _fetch_latest_release() -> dict:
         "zip_name": zip_name,
         "zip_url": f"{download_base}/{zip_name}",
         "checksum_url": f"{download_base}/{checksum_name}",
+        "setup_name": setup_name,
+        "setup_url": f"{download_base}/{setup_name}",
+        "setup_checksum_url": f"{download_base}/{setup_checksum_name}",
         "zip_size": 0,
     }
 
@@ -3797,9 +3891,15 @@ function Write-UpdateState([string]$Status, [string]$Message = "") {
 }
 
 try {
-    Wait-Process -Id $ParentPid -Timeout 120 -ErrorAction SilentlyContinue
+    Wait-Process -Id $ParentPid -Timeout 20 -ErrorAction SilentlyContinue
     if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
-        throw "应用仍在运行，更新已取消。"
+        # 应用会先自己退出（并主动断开 SSE 长连接）；仍未退出就强制结束，
+        # 否则替换会一直等一个不会退出的旧进程，表现为"更新卡住"。
+        Stop-Process -Id $ParentPid -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+    if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
+        throw "无法结束正在运行的应用进程，更新已取消。"
     }
     if (-not (Test-Path -LiteralPath (Join-Path $StageDir "BiliFavOrganizer.exe") -PathType Leaf)) {
         throw "更新包中找不到 BiliFavOrganizer.exe。"
@@ -3879,6 +3979,7 @@ def _run_update_worker(release: dict):
     try:
         if not getattr(sys, "frozen", False) or os.name != "nt":
             raise RuntimeError("自动覆盖更新仅支持 Windows 便携版")
+        _UPDATE_CANCEL.clear()
         install_dir = APP_DIR.resolve()
         if install_dir == install_dir.parent:
             raise RuntimeError("程序不能从磁盘根目录自动更新，请先解压到单独的可写文件夹")
@@ -3912,6 +4013,8 @@ def _run_update_worker(release: dict):
             _set_update_state(total_bytes=total, downloaded_bytes=0)
             with zip_path.open("wb") as output:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if _UPDATE_CANCEL.is_set():
+                        raise _UpdateCancelled()
                     if not chunk:
                         continue
                     output.write(chunk)
@@ -3921,11 +4024,15 @@ def _run_update_worker(release: dict):
         finally:
             response.close()
 
+        if _UPDATE_CANCEL.is_set():
+            raise _UpdateCancelled()
         if release.get("zip_size") and downloaded != release["zip_size"]:
             raise ValueError("下载大小与 GitHub Release 记录不一致")
         if digest.hexdigest().lower() != expected_sha256:
             raise ValueError("更新包 SHA256 校验失败，已取消覆盖")
 
+        if _UPDATE_CANCEL.is_set():
+            raise _UpdateCancelled()
         _extract_release_zip(zip_path, stage_dir)
         if not (stage_dir / "_internal").is_dir():
             raise ValueError("Release ZIP 缺少应用运行环境目录")
@@ -3959,8 +4066,165 @@ def _run_update_worker(release: dict):
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
             close_fds=True,
         )
+        # 先断开 SSE 长连接，再请求退出；15 秒后仍未退出则硬退，
+        # 保证更新助手不会因为"应用仍在运行"而卡住或超时取消。
+        _SHUTDOWN.set()
         if _UVICORN_SERVER is not None:
             threading.Timer(2.0, lambda: setattr(_UVICORN_SERVER, "should_exit", True)).start()
+            threading.Timer(15.0, _force_exit_if_alive).start()
+    except _UpdateCancelled:
+        log.info("更新下载已取消")
+        _set_update_state(status="cancelled", error="", downloaded_bytes=0, total_bytes=0)
+        if work_dir:
+            shutil.rmtree(work_dir, ignore_errors=True)
+    except Exception as exc:
+        _set_update_state(status="error", error=str(exc))
+        if work_dir:
+            try:
+                (work_dir / "status.json").write_text(
+                    json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False),
+                    encoding="utf-8")
+            except OSError:
+                pass
+
+
+_INSTALLER_UPDATE_HELPER_SCRIPT = r'''param(
+    [int]$ParentPid,
+    [string]$SetupPath,
+    [string]$InstallDir,
+    [int]$Port,
+    [string]$Version,
+    [string]$Scope
+)
+$ErrorActionPreference = "Stop"
+try {
+    Wait-Process -Id $ParentPid -Timeout 20 -ErrorAction SilentlyContinue
+    if (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue) {
+        Stop-Process -Id $ParentPid -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+    }
+    $arguments = @("/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS")
+    if ($Scope -eq "all-users") {
+        $arguments += "/ALLUSERS"
+    } else {
+        $arguments += "/CURRENTUSER"
+    }
+    $startArgs = @{ FilePath = $SetupPath; ArgumentList = $arguments; Wait = $true; PassThru = $true }
+    if ($Scope -eq "all-users") {
+        # 全机安装需要管理员权限：这里会弹一次 UAC，用户拒绝则安装包返回非零。
+        $startArgs["Verb"] = "RunAs"
+    }
+    $setup = Start-Process @startArgs
+    if ($setup.ExitCode -ne 0) {
+        throw "安装包返回退出码 $($setup.ExitCode)，更新未完成。"
+    }
+    $exe = Join-Path $InstallDir "BiliFavOrganizer.exe"
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+        throw "更新后找不到程序文件：$exe"
+    }
+    Start-Process -FilePath $exe -ArgumentList @("--port", [string]$Port, "--no-browser") `
+        -WorkingDirectory $InstallDir
+} catch {
+    # 安装失败时把旧程序拉起来，别让用户什么都打不开
+    $exe = Join-Path $InstallDir "BiliFavOrganizer.exe"
+    if ((Test-Path -LiteralPath $exe -PathType Leaf) -and
+            -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) {
+        try {
+            Start-Process -FilePath $exe -ArgumentList @("--port", [string]$Port, "--no-browser") `
+                -WorkingDirectory $InstallDir
+        } catch { }
+    }
+}
+'''
+
+
+def _run_installer_update_worker(release: dict, info: dict):
+    """安装版更新：下载新安装包 → 校验 SHA256 → 静默运行，由安装程序完成替换与重启。"""
+    global _UPDATE_STATUS_FILE
+    work_dir = None
+    try:
+        if not getattr(sys, "frozen", False) or os.name != "nt":
+            raise RuntimeError("自动覆盖更新仅支持 Windows 便携版")
+        install_dir = str((info or {}).get("install_dir") or "").strip()
+        if not install_dir or not Path(install_dir).is_dir():
+            raise RuntimeError("注册表记录的安装目录不存在，请重新运行安装包修复安装")
+        scope = str((info or {}).get("scope") or "current-user")
+
+        _UPDATE_CANCEL.clear()
+        work_dir = Path(tempfile.mkdtemp(prefix=".bfo-setup-"))
+        setup_path = work_dir / release["setup_name"]
+        status_file = work_dir / "status.json"
+        with _UPDATE_LOCK:
+            _UPDATE_STATUS_FILE = status_file
+        status_file.write_text(json.dumps({"status": "downloading", "error": ""}),
+                               encoding="utf-8")
+
+        checksum_response = requests.get(release["setup_checksum_url"], timeout=(10, 30))
+        checksum_response.raise_for_status()
+        checksum_match = re.search(r"\b([0-9a-fA-F]{64})\b", checksum_response.text)
+        if not checksum_match:
+            raise ValueError("安装包 SHA256 文件格式无效")
+        expected_sha256 = checksum_match.group(1).lower()
+
+        downloaded = 0
+        digest = hashlib.sha256()
+        response = requests.get(release["setup_url"], stream=True, timeout=(15, 120))
+        response.raise_for_status()
+        try:
+            total = int(response.headers.get("Content-Length") or 0)
+            if total > 2 * 1024 * 1024 * 1024:
+                raise ValueError("安装包超过 2 GiB 安全上限")
+            _set_update_state(total_bytes=total, downloaded_bytes=0)
+            with setup_path.open("wb") as output:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if _UPDATE_CANCEL.is_set():
+                        raise _UpdateCancelled()
+                    if not chunk:
+                        continue
+                    output.write(chunk)
+                    digest.update(chunk)
+                    downloaded += len(chunk)
+                    _set_update_state(downloaded_bytes=downloaded)
+        finally:
+            response.close()
+
+        if _UPDATE_CANCEL.is_set():
+            raise _UpdateCancelled()
+        if digest.hexdigest().lower() != expected_sha256:
+            raise ValueError("安装包 SHA256 校验失败，已取消更新")
+
+        helper_path = work_dir / "apply-installer-update.ps1"
+        helper_path.write_text("\ufeff" + _INSTALLER_UPDATE_HELPER_SCRIPT, encoding="utf-8")
+        _set_update_state(status="installing", downloaded_bytes=downloaded,
+                          total_bytes=downloaded, error="")
+        powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+        if not powershell:
+            raise RuntimeError("找不到 Windows PowerShell，无法应用更新")
+        subprocess.Popen(
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", str(helper_path),
+             "-ParentPid", str(os.getpid()),
+             "-SetupPath", str(setup_path),
+             "-InstallDir", install_dir,
+             "-Port", str(_APP_PORT),
+             "-Version", str(release["version"]),
+             "-Scope", scope],
+            cwd=str(work_dir),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            close_fds=True,
+        )
+        _SHUTDOWN.set()
+        if _UVICORN_SERVER is not None:
+            threading.Timer(2.0, lambda: setattr(_UVICORN_SERVER, "should_exit", True)).start()
+            threading.Timer(15.0, _force_exit_if_alive).start()
+    except _UpdateCancelled:
+        log.info("更新下载已取消")
+        _set_update_state(status="cancelled", error="", downloaded_bytes=0, total_bytes=0)
+        if work_dir:
+            shutil.rmtree(work_dir, ignore_errors=True)
     except Exception as exc:
         _set_update_state(status="error", error=str(exc))
         if work_dir:
@@ -3976,6 +4240,13 @@ def _run_update_worker(release: dict):
 def app_version_get():
     return {
         "version": _app_version(),
+        "commit": BUILD_COMMIT,
+        "build_date": BUILD_DATE,
+        "author": AUTHOR,
+        "homepage": HOMEPAGE,
+        "license": LICENSE_NAME,
+        "copyright": COPYRIGHT,
+        "install_mode": "installed" if _installed_info() else "portable",
         "supports_self_update": bool(getattr(sys, "frozen", False) and os.name == "nt"),
     }
 
@@ -3987,7 +4258,11 @@ def update_check():
     try:
         release = _fetch_latest_release()
         latest_version = release["version"]
-        update_available = _is_newer_version(latest_version, current_version)
+        # 开发构建（dev）等解析不出版本号的，不做版本比较、也不提供应用内更新：
+        # 否则会被当成"比任何正式版都旧"，一点检查就开始下载并覆盖当前程序。
+        version_comparable = _version_key(current_version) is not None
+        update_available = (version_comparable and
+                            _is_newer_version(latest_version, current_version))
     except Exception as exc:
         _set_update_state(status="error", current_version=current_version,
                           latest_version="", error=str(exc))
@@ -4000,6 +4275,7 @@ def update_check():
             status="available" if update_available else "up_to_date",
             current_version=current_version,
             latest_version=latest_version,
+            version_comparable=version_comparable,
             downloaded_bytes=0,
             total_bytes=0,
             error="",
@@ -4008,7 +4284,9 @@ def update_check():
         "current_version": current_version,
         "latest_version": latest_version,
         "update_available": update_available,
+        "version_comparable": version_comparable,
         "supports_self_update": supports_self_update,
+        "install_mode": "installed" if _installed_info() else "portable",
         "release_url": release["release_url"],
     }
 
@@ -4018,6 +4296,11 @@ def update_install():
     global _UPDATE_RELEASE
     if not getattr(sys, "frozen", False) or os.name != "nt":
         raise HTTPException(status_code=400, detail="自动覆盖更新仅支持 Windows 便携版")
+    if _version_key(_app_version()) is None:
+        # 与 update_check 一致：开发构建不参与版本比较，也就不能用应用内更新覆盖。
+        raise HTTPException(
+            status_code=400,
+            detail=f"当前是开发构建（{_app_version()}），不提供应用内更新；请手动下载 Release 包")
     active_jobs = ("scan_run", "analyze_run", "apply_run", "folder_merge_run",
                    "folder_merge_ai_run", "folder_profile_run")
     if any(isinstance(APP.get(key), dict) and APP[key].get("running") for key in active_jobs):
@@ -4031,8 +4314,34 @@ def update_install():
             raise HTTPException(status_code=409, detail="请先检查是否有可用更新")
         UPDATE_STATE.update(status="downloading", error="", downloaded_bytes=0,
                             total_bytes=0)
-    threading.Thread(target=_run_update_worker, args=(release,), daemon=True).start()
-    return {"ok": True, "status": "downloading", "version": release["version"]}
+    # 安装版走"下载安装包并静默运行"，便携版走原有的 ZIP 覆盖。
+    installed = _installed_info()
+    if installed:
+        threading.Thread(target=_run_installer_update_worker,
+                         args=(release, installed), daemon=True).start()
+    else:
+        threading.Thread(target=_run_update_worker, args=(release,), daemon=True).start()
+    return {"ok": True, "status": "downloading", "version": release["version"],
+            "install_mode": "installed" if installed else "portable"}
+
+
+@app.post("/api/update/cancel")
+def update_cancel():
+    """取消正在进行的更新下载；已进入替换阶段后无法中止。"""
+    with _UPDATE_LOCK:
+        status = UPDATE_STATE.get("status")
+        if status == "installing":
+            return JSONResponse(
+                {"ok": False,
+                 "error": "已经开始替换程序文件，无法中止；替换完成后程序会自动重启"},
+                status_code=409)
+        if status != "downloading":
+            return JSONResponse({"ok": False, "error": "当前没有正在进行的更新下载"},
+                                status_code=409)
+        _UPDATE_CANCEL.set()
+        UPDATE_STATE.update(status="cancelled", error="", downloaded_bytes=0, total_bytes=0)
+    log.info("已请求取消更新下载")
+    return {"ok": True, "status": "cancelled"}
 
 
 @app.get("/api/update/status")
@@ -4114,7 +4423,8 @@ def main():
     # 先把 uvicorn 的日志配置建好，再建自己的 handler：
     # uvicorn.Config 内部会 dictConfig，而 dictConfig 会关掉此前创建的所有 handler
     # （stream 被置空、再写入就无效），所以自己的 handler 只能在它之后创建。
-    config = uvicorn.Config(app, host="127.0.0.1", port=args.port, log_level="info")
+    config = uvicorn.Config(app, host="127.0.0.1", port=args.port, log_level="info",
+                            timeout_graceful_shutdown=5)
 
     # 服务自己的日志（logger 名 server）：dictConfig 之后 root 已没有可用 handler，这里补回控制台
     root = logging.getLogger()
@@ -4139,6 +4449,7 @@ def main():
 
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
+    _log_attribution()
     _UVICORN_SERVER = uvicorn.Server(config)
     _UVICORN_SERVER.run()
 

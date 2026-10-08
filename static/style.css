@@ -75,6 +75,9 @@ body {
 /* 平涂标志自身带色（深/亮青），深浅顶栏都够对比，无需按主题切换文件 */
 .brand-mark { display: block; width: 32px; height: 32px; flex: none; }
 .app-version, .update-status { color: var(--muted); font-size: 11px; font-weight: 400; }
+/* 顶栏署名：可点击直达仓库，尺寸与版本号一致，不抢视觉重心 */
+.brand-credit { color: var(--muted); font-size: 11px; font-weight: 400; text-decoration: none; }
+.brand-credit:hover { color: var(--accent); text-decoration: underline; }
 .update-status { min-width: 0; }
 .update-status.ok { color: var(--green); }
 .update-status.error { color: var(--danger); }
