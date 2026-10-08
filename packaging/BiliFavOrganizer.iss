@@ -92,6 +92,7 @@ var
   ExistingInstall: Boolean;
   Operation: Integer;     {0=安装/更新 1=修复 2=卸载}
   DeleteUserData: Boolean;
+  UninstallDone: Boolean;
 
 function ExistingInstallDir(): string;
 begin
@@ -105,6 +106,7 @@ begin
   Result := True;
   Operation := 0;
   DeleteUserData := False;
+  UninstallDone := False;
   ExistingInstall := (ExistingInstallDir() <> '') and DirExists(ExistingInstallDir());
 end;
 
@@ -162,7 +164,7 @@ end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 var
-  UninstExe, Params: string;
+  UninstExe, Params, DataDir: string;
   ResultCode: Integer;
 begin
   Result := True;
@@ -181,6 +183,7 @@ begin
   if CurPageID = DataPage.ID then
   begin
     DeleteUserData := DataPage.Values[1];
+    DataDir := ExpandConstant('{localappdata}\BiliFavOrganizer');
     UninstExe := AddBackslash(ExistingInstallDir()) + 'unins000.exe';
     if FileExists(UninstExe) then
     begin
@@ -192,14 +195,33 @@ begin
         RegWriteStringValue(HKCU, '{#AppKey}', 'UninstallData', 'keep');
       Exec(UninstExe, '/SILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_SHOW,
            ewWaitUntilTerminated, ResultCode);
+      if ResultCode <> 0 then
+        MsgBox('卸载程序返回代码 ' + IntToStr(ResultCode) + '，卸载可能没有完成。',
+               mbError, MB_OK)
+      else if DeleteUserData then
+        MsgBox('卸载完成：程序文件已删除，个人数据也已按你的选择清除。',
+               mbInformation, MB_OK)
+      else
+        MsgBox('卸载完成：程序文件已删除，个人数据保留在：' + #13#10 + DataDir,
+               mbInformation, MB_OK);
     end
     else
       MsgBox('找不到卸载程序：' + UninstExe + #13#10 +
              '可以在 Windows「应用和功能」里卸载。', mbError, MB_OK);
-    Result := False;      {卸载交给卸载程序，不再继续安装流程}
-    WizardForm.Close;
+    {卸载已经执行：这里退出安装向导。直接调用 Cancel 的处理函数走 Inno 正常收尾，
+     比 WizardForm.Close 可靠（本机实测 Close 在本页事件里不生效）。}
+    UninstallDone := True;
+    Result := False;
+    WizardForm.CancelButton.OnClick(nil);
     Exit;
   end;
+end;
+
+procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
+begin
+  {选了"卸载"：这不是"安装未完成"，收尾时不要再弹那句确认}
+  if UninstallDone or (Operation = 2) then
+    Confirm := False;
 end;
 
 function GetScopeName(Param: string): string;
