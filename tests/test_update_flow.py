@@ -1,10 +1,12 @@
-"""更新流程的三条守卫：版本比较、用户确认后才安装、随时可取消。
+"""更新流程的守卫：版本比较、用户确认后才安装、随时可取消、收尾清理与失败可见性。
 
 这里是服务端行为；前端「确认框 / 停止下载」按钮由 Playwright 端到端验证。
 """
 import os
 import sqlite3
 import sys
+import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -182,6 +184,80 @@ class InstalledModeUpdateTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual("portable", response.json()["install_mode"])
         self.assertEqual([("zip", "v9.9.9")], calls)
+
+
+class UpdateCleanupTests(unittest.TestCase):
+    """更新收尾清理与失败可见性：不能留下上百 MB 临时目录，也不能把错误吞掉。"""
+
+    def test_sweep_removes_only_stale_leftovers(self):
+        with tempfile.TemporaryDirectory() as base:
+            app_parent = Path(base) / "app-parent"
+            temp_dir = Path(base) / "sys-temp"
+            app_parent.mkdir()
+            temp_dir.mkdir()
+            stale_update = app_parent / ".bfo-update-stale"
+            fresh_update = app_parent / ".bfo-update-fresh"
+            # 备份目录名是「应用目录名.previous-随机」，与助手脚本一致
+            stale_backup = app_parent / f"{server.APP_DIR.name}.previous-abc"
+            stale_setup = temp_dir / ".bfo-setup-stale"
+            unrelated = app_parent / "unrelated-dir"
+            for path in (stale_update, fresh_update, stale_backup, stale_setup, unrelated):
+                path.mkdir()
+            old = time.time() - 3 * 3600
+            for path in (stale_update, stale_backup, stale_setup):
+                os.utime(path, (old, old))
+
+            removed = server._cleanup_stale_update_leftovers(app_parent, temp_dir,
+                                                             min_age_hours=2.0)
+
+            self.assertEqual(3, removed)
+            self.assertFalse(stale_update.exists(), "超时的便携更新目录要删掉")
+            self.assertFalse(stale_backup.exists(), "超时的旧程序备份要删掉")
+            self.assertFalse(stale_setup.exists(), "超时的安装版更新目录要删掉")
+            self.assertTrue(fresh_update.exists(), "正在进行的更新目录不能误删")
+            self.assertTrue(unrelated.exists(), "模式外的目录不能动")
+
+    def test_failure_is_exposed_from_fixed_file_and_cleared_by_next_check(self):
+        client = TestClient(server.app)
+        server._write_update_error("测试用失败原因")
+        self.addCleanup(lambda: server.UPDATE_ERROR_FILE.unlink(missing_ok=True))
+
+        state = client.get("/api/update/status").json()
+        self.assertEqual("error", state["status"])
+        self.assertIn("测试用失败原因", state["error"],
+                      "失败原因写在固定文件里，重启后也要能显示")
+
+        with patch.object(server, "_fetch_latest_release", return_value=dict(FAKE_RELEASE)), \
+                patch.object(server, "BUILD_VERSION", "v0.206"):
+            body = client.post("/api/update/check").json()
+        self.assertTrue(body["update_available"])
+        self.assertFalse(server.UPDATE_ERROR_FILE.exists(), "检查更新成功后应清掉旧失败记录")
+
+
+class EventStreamShutdownTests(unittest.TestCase):
+    """SSE 长连接不能拖住退出——否则替换程序时旧进程不退出，表现为「更新卡住」。"""
+
+    def test_event_stream_ends_once_shutdown_is_set(self):
+        client = TestClient(server.app)
+        server._SHUTDOWN.set()
+        self.addCleanup(server._SHUTDOWN.clear)
+        result = {}
+
+        def read_stream():
+            try:
+                with client.stream("GET", "/api/events/stream?since=0") as response:
+                    for _ in response.iter_lines():
+                        pass
+                result["ended"] = True
+            except Exception as exc:  # noqa: BLE001 - 记录任何异常交给断言判断
+                result["error"] = repr(exc)
+
+        reader = threading.Thread(target=read_stream, daemon=True)
+        reader.start()
+        reader.join(timeout=10)
+        self.assertFalse(reader.is_alive(), "SSE 流没有在 10 秒内结束：退出会被长连接拖住")
+        self.assertNotIn("error", result, result.get("error"))
+        self.assertTrue(result.get("ended"), "SSE 流应以正常结束返回")
 
 
 if __name__ == "__main__":

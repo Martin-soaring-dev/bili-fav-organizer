@@ -123,6 +123,14 @@
       const commit = info.commit ? ` (${info.commit})` : "";
       $("app-version").textContent = `版本 ${info.version || "dev"}${commit}`;
     } catch (_) { /* 服务连接状态另有提示 */ }
+    // 上次更新失败的原因（写在固定文件里，重启后还能看到）
+    try {
+      const state = await api("GET", "/api/update/status");
+      if (state && state.status === "error" && state.error) {
+        setUpdateStatus(`上次更新失败：${state.error}`, "error");
+        log(`上次更新失败：${state.error}`, "err");
+      }
+    } catch (_) { /* 没有失败记录时是 idle，忽略 */ }
   }
 
   async function watchUpdateProgress(expectedVersion) {

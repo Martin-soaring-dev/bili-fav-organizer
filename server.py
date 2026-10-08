@@ -55,6 +55,7 @@ else:
     USER_DATA_DIR = Path.home() / ".local" / "share" / "BiliFavOrganizer"
 CONFIG_FILE = USER_DATA_DIR / "config.json"
 SECRETS_FILE = USER_DATA_DIR / "secrets.json"  # 凭据单独存放（api_key / cookie_string）
+UPDATE_ERROR_FILE = USER_DATA_DIR / "update-error.json"  # 上次更新失败原因（临时目录会被清掉，所以存固定位置）
 SECRET_KEYS = ("api_key", "cookie_string")
 STATIC_DIR = HERE / "static"
 
@@ -112,6 +113,35 @@ def _force_exit_if_alive():
     """
     log.warning("服务未在预期时间内退出，强制结束进程以完成更新替换")
     os._exit(0)
+
+
+def _cleanup_stale_update_leftovers(app_parent: Path, system_temp: Path,
+                                    min_age_hours: float = 2.0) -> int:
+    """清掉更新失败/中断留下的临时目录；成功的路径由更新助手自己清。
+
+    只删超过 min_age_hours 的，避免误删正在进行中的更新；只匹配这三个模式：
+    便携更新的工作目录、旧程序备份目录、安装版更新的工作目录。
+    """
+    patterns = ((app_parent, ".bfo-update-*"),
+                (app_parent, f"{APP_DIR.name}.previous-*"),
+                (system_temp, ".bfo-setup-*"))
+    removed = 0
+    for base, pattern in patterns:
+        try:
+            candidates = [p for p in base.glob(pattern) if p.is_dir()]
+        except OSError:
+            continue
+        for path in candidates:
+            try:
+                if time.time() - path.stat().st_mtime < min_age_hours * 3600:
+                    continue
+                shutil.rmtree(path, ignore_errors=True)
+                removed += 1
+            except OSError:
+                continue
+    if removed:
+        log.info("已清理 %d 个更新残留目录（超过 %g 小时未收尾）", removed, min_age_hours)
+    return removed
 
 
 def _app_version() -> str:
@@ -194,6 +224,19 @@ def _is_newer_version(latest: str, current: str) -> bool:
         current_key + (0,) * (width - len(current_key))
 
 
+def _write_update_error(message: str) -> None:
+    """把更新失败原因写到固定文件。
+
+    临时目录在收尾时会被整套删掉、进程也可能被替换流程重启，
+    所以内存里的错误（以及助手里的错误）必须落到固定位置才有人看得到。
+    """
+    try:
+        UPDATE_ERROR_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(UPDATE_ERROR_FILE, {"status": "error", "error": message})
+    except OSError as exc:
+        log.warning("无法记录更新失败原因：%s", exc)
+
+
 def _update_state_snapshot() -> dict:
     with _UPDATE_LOCK:
         state = dict(UPDATE_STATE)
@@ -203,6 +246,13 @@ def _update_state_snapshot() -> dict:
             helper_state = json.loads(status_file.read_text(encoding="utf-8-sig"))
             if helper_state.get("status") == "error":
                 state.update(helper_state)
+        except (OSError, ValueError, AttributeError):
+            pass
+    if not state.get("error") and UPDATE_ERROR_FILE.is_file():
+        try:
+            saved = json.loads(UPDATE_ERROR_FILE.read_text(encoding="utf-8-sig"))
+            if isinstance(saved, dict) and saved.get("error"):
+                state.update({"status": saved.get("status", "error"), "error": str(saved["error"])})
         except (OSError, ValueError, AttributeError):
             pass
     return state
@@ -3941,10 +3991,10 @@ try {
 
     Write-UpdateState "complete"
     try { Remove-Item -LiteralPath $BackupDir -Recurse -Force } catch { }
-    try { Remove-Item -LiteralPath (Join-Path $WorkDir "release.zip") -Force } catch { }
-    try { Remove-Item -LiteralPath $StatusFile -Force } catch { }
+    # 工作目录里是 release.zip 与解压出的 stage：必须整套删（旧代码只删了文件又漏了 -Recurse，
+    # 任何一步失败就会留下上百 MB）。先删本脚本自身，再删整个目录。
     try { Remove-Item -LiteralPath $PSCommandPath -Force } catch { }
-    try { Remove-Item -LiteralPath $WorkDir -Force } catch { }
+    try { Remove-Item -LiteralPath $WorkDir -Recurse -Force } catch { }
 } catch {
     $Message = $_.Exception.Message
     Write-UpdateState "error" $Message
@@ -3969,6 +4019,18 @@ try {
                 -WorkingDirectory $InstallDir
         } catch { }
     }
+    # 失败原因写到固定位置（工作目录马上要整套删掉，重启后的应用靠它显示原因）
+    try {
+        $ErrorDir = Join-Path $env:LOCALAPPDATA "BiliFavOrganizer"
+        if (-not (Test-Path -LiteralPath $ErrorDir)) {
+            New-Item -ItemType Directory -Force -Path $ErrorDir | Out-Null
+        }
+        @{ status = "error"; error = $Message } | ConvertTo-Json -Compress |
+            Set-Content -LiteralPath (Join-Path $ErrorDir "update-error.json") -Encoding UTF8
+    } catch { }
+    # 收尾：不管回滚成不成，临时目录都要删干净
+    try { Remove-Item -LiteralPath $PSCommandPath -Force } catch { }
+    try { Remove-Item -LiteralPath $WorkDir -Recurse -Force } catch { }
 }
 '''
 
@@ -4079,13 +4141,9 @@ def _run_update_worker(release: dict):
             shutil.rmtree(work_dir, ignore_errors=True)
     except Exception as exc:
         _set_update_state(status="error", error=str(exc))
+        _write_update_error(str(exc))
         if work_dir:
-            try:
-                (work_dir / "status.json").write_text(
-                    json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False),
-                    encoding="utf-8")
-            except OSError:
-                pass
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 _INSTALLER_UPDATE_HELPER_SCRIPT = r'''param(
@@ -4124,6 +4182,9 @@ try {
     }
     Start-Process -FilePath $exe -ArgumentList @("--port", [string]$Port, "--no-browser") `
         -WorkingDirectory $InstallDir
+    # 安装包已经跑完：把下载下来的安装包与脚本整套删掉（旧代码从不清理，每次留 25 MB）
+    try { Remove-Item -LiteralPath $PSCommandPath -Force } catch { }
+    try { Remove-Item -LiteralPath $WorkDir -Recurse -Force } catch { }
 } catch {
     # 安装失败时把旧程序拉起来，别让用户什么都打不开
     $exe = Join-Path $InstallDir "BiliFavOrganizer.exe"
@@ -4134,6 +4195,17 @@ try {
                 -WorkingDirectory $InstallDir
         } catch { }
     }
+    # 失败原因写到固定位置（临时目录马上要删掉）
+    try {
+        $ErrorDir = Join-Path $env:LOCALAPPDATA "BiliFavOrganizer"
+        if (-not (Test-Path -LiteralPath $ErrorDir)) {
+            New-Item -ItemType Directory -Force -Path $ErrorDir | Out-Null
+        }
+        @{ status = "error"; error = $_.Exception.Message } | ConvertTo-Json -Compress |
+            Set-Content -LiteralPath (Join-Path $ErrorDir "update-error.json") -Encoding UTF8
+    } catch { }
+    try { Remove-Item -LiteralPath $PSCommandPath -Force } catch { }
+    try { Remove-Item -LiteralPath $WorkDir -Recurse -Force } catch { }
 }
 '''
 
@@ -4227,13 +4299,9 @@ def _run_installer_update_worker(release: dict, info: dict):
             shutil.rmtree(work_dir, ignore_errors=True)
     except Exception as exc:
         _set_update_state(status="error", error=str(exc))
+        _write_update_error(str(exc))
         if work_dir:
-            try:
-                (work_dir / "status.json").write_text(
-                    json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False),
-                    encoding="utf-8")
-            except OSError:
-                pass
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @app.get("/api/version")
@@ -4268,6 +4336,11 @@ def update_check():
                           latest_version="", error=str(exc))
         raise HTTPException(status_code=502, detail=f"检查 GitHub Release 失败：{exc}") from exc
 
+    # 检查成功：上一次留下的失败记录可以清掉了
+    try:
+        UPDATE_ERROR_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
     supports_self_update = bool(getattr(sys, "frozen", False) and os.name == "nt")
     with _UPDATE_LOCK:
         _UPDATE_RELEASE = release if update_available else None
@@ -4450,6 +4523,7 @@ def main():
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
     _log_attribution()
+    _cleanup_stale_update_leftovers(APP_DIR.parent, Path(tempfile.gettempdir()))
     _UVICORN_SERVER = uvicorn.Server(config)
     _UVICORN_SERVER.run()
 
