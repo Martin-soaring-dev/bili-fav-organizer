@@ -783,18 +783,8 @@ function Write-Ascii([string]$s) {
 }
 try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
-  # Win32（非 UWP）必须走 Interop + HWND，不能用 UWP 的 VerifyAsync
-  $null = [Windows.Security.Credentials.UI.UserConsentVerifierInterop,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
-  Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class Win32Hwnd {
-  [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
-  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-}
-"@ -ErrorAction SilentlyContinue
-  $hwnd = [Win32Hwnd]::GetForegroundWindow()
-  if ($hwnd -eq [IntPtr]::Zero) { $hwnd = [Win32Hwnd]::GetDesktopWindow() }
+  # 此机上的 WinRT 投影暴露的是 RequestVerificationAsync（不是 VerifyAsync）
+  $null = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
 
   $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync('Verify to unlock local data')
   $deadline = (Get-Date).AddSeconds(45)
