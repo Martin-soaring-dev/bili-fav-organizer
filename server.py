@@ -781,29 +781,30 @@ $ErrorActionPreference = 'Stop'
 try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime
   $null = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
-  $null = [Windows.Security.Credentials.UI.ConsentResult,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
 
-  # IAsyncOperation`1 → Task 的 AsTask 扩展
   $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
     $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1
   } | Select-Object -First 1
-  if (-not $asTask) { Write-Output 'unsupported:AsTask扩展不可用'; exit 0 }
+  if (-not $asTask) { Write-Output 'unsupported:AsTask extension missing'; exit 0 }
 
-  $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::VerifyAsync('验证以解锁本机数据')
-  $generic = $asTask.MakeGenericMethod($op.GetType().GetGenericArguments()[0])
-  $task = $generic.Invoke($null, @($op))
-  if (-not $task.Wait(30000)) { Write-Output 'cancel'; exit 0 }
+  $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::VerifyAsync('Verify to unlock local data')
+  $t = $op.GetType()
+  $argType = $null
+  if ($t.IsGenericType) { $argType = $t.GetGenericArguments()[0] }
+  if (-not $argType) { Write-Output 'unsupported:cannot resolve async result type'; exit 0 }
+  $task = $asTask.MakeGenericMethod($argType).Invoke($null, @($op))
+  if (-not $task.Wait([TimeSpan]::FromSeconds(30))) { Write-Output 'cancel'; exit 0 }
 
-  $result = $task.Result
-  # ConsentResult 枚举
-  $name = $result.ToString()
-  if ($name -eq 'Allow') { Write-Output 'ok'; exit 0 }
-  if ($name -eq 'UserCancelled') { Write-Output 'cancel'; exit 0 }
-  Write-Output ("deny:" + $name)
+  $name = $task.Result.ToString()
+  switch -Regex ($name) {
+    '^(Verified|Allow)$' { Write-Output 'ok'; exit 0 }
+    '^(UserCancelled|UserCanceled)$' { Write-Output 'cancel'; exit 0 }
+    default { Write-Output ('deny:' + $name) }
+  }
 } catch {
-  $msg = $_.Exception.Message -replace '[\r\n]+', ' '
-  if ($msg -match 'not contain a method') { Write-Output ('unsupported:' + $msg) }
-  else { Write-Output ('unsupported:' + $msg) }
+  $msg = ($_.Exception.Message -replace '[\r\n]+', ' ')
+  $msg = ($msg -replace '[^\x20-\x7E]', '?')
+  Write-Output ('unsupported:' + $msg)
 }
 '''
     try:
@@ -2221,6 +2222,11 @@ async def local_api_guard(request, call_next):
                                  "error": "金库已锁定，请先解锁"}, status_code=403)
     need_token = (method not in ("GET", "HEAD", "OPTIONS") or
                   path in ("/api/data/export", "/api/cookie"))
+    # 解锁引导路径：仍校验 Origin，但不强制页面 token（锁屏/Hello 在启动瞬间可能尚未同步）
+    token_exempt = path in (
+        "/api/vault/hello-verify", "/api/vault/unlock",
+        "/api/vault/unlock-device", "/api/app-lock/unlock",
+    ) or path.startswith("/api/app-lock/")
     if need_token:
         origin = request.headers.get("origin")
         if origin and not _origin_allowed(origin, request.url.port or _APP_PORT):
@@ -2228,8 +2234,7 @@ async def local_api_guard(request, call_next):
         sfs = request.headers.get("sec-fetch-site")
         if sfs and sfs not in ("same-origin", "none"):
             return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
-        # 仅开发/测试钩子跳过 token；生产始终校验
-        if not _insecure_local() and not _token_ok(request):
+        if not token_exempt and not _insecure_local() and not _token_ok(request):
             return JSONResponse({"ok": False, "error": "缺少或无效的本地 API token"},
                                 status_code=403)
     return await call_next(request)

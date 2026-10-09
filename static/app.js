@@ -4635,12 +4635,43 @@
       log(collapsed ? "日志已收起，点「日志」展开" : "日志已展开", "info");
     });
   }
+  // 钉住：钉住=固定在布局；未钉住=悬浮，鼠标移开自动缩回
+  let logPinned = false;
+  let logHideTimer = null;
+  function applyLogPin() {
+    const area = $("log-area");
+    const btn = $("pin-log");
+    if (!area) return;
+    document.body.classList.toggle("logs-floating", !logPinned);
+    if (btn) btn.classList.toggle("is-on", logPinned);
+    if (btn) btn.title = logPinned ? "已钉住（点击取消，取消后悬停显示）" : "未钉住（点击钉住固定）";
+    if (logPinned) {
+      area.classList.remove("log-hide");
+      if (logHideTimer) clearTimeout(logHideTimer);
+    }
+  }
   if ($("pin-log")) {
     $("pin-log").addEventListener("click", () => {
-      const area = $("log-area");
-      if (!area) return;
-      const on = area.classList.toggle("pinned");
-      log(on ? "日志窗已钉住" : "已取消钉住", "info");
+      logPinned = !logPinned;
+      applyLogPin();
+      log(logPinned ? "日志已钉住" : "已取消钉住，鼠标移入显示、移开收起", "info");
+    });
+  }
+  // 默认未钉住（悬浮）
+  applyLogPin();
+  const logAreaEl = $("log-area");
+  if (logAreaEl) {
+    logAreaEl.addEventListener("mouseenter", () => {
+      if (logPinned) return;
+      if (logHideTimer) clearTimeout(logHideTimer);
+      logAreaEl.classList.remove("log-hide");
+    });
+    logAreaEl.addEventListener("mouseleave", () => {
+      if (logPinned) return;
+      if (logHideTimer) clearTimeout(logHideTimer);
+      logHideTimer = setTimeout(() => {
+        if (!logPinned) logAreaEl.classList.add("log-hide");
+      }, 700);
     });
   }
   if ($("settings-opacity")) {
