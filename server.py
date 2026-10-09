@@ -783,11 +783,21 @@ function Write-Ascii([string]$s) {
 }
 try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
-  $null = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+  # Win32（非 UWP）必须走 Interop + HWND，不能用 UWP 的 VerifyAsync
+  $null = [Windows.Security.Credentials.UI.UserConsentVerifierInterop,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+  Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32Hwnd {
+  [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+"@ -ErrorAction SilentlyContinue
+  $hwnd = [Win32Hwnd]::GetForegroundWindow()
+  if ($hwnd -eq [IntPtr]::Zero) { $hwnd = [Win32Hwnd]::GetDesktopWindow() }
 
-  $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::VerifyAsync('Verify to unlock local data')
-  # IAsyncOperation：轮询 Status，避免 AsTask / ConsentResult 类型问题
-  $deadline = (Get-Date).AddSeconds(40)
+  $op = [Windows.Security.Credentials.UI.UserConsentVerifierInterop]::RequestVerificationForWindowAsync($hwnd, 'Verify to unlock local data')
+  $deadline = (Get-Date).AddSeconds(45)
   $status = [string]$op.Status
   while ($status -eq 'Started' -or $status -eq '0') {
     if ((Get-Date) -gt $deadline) { Write-Output 'cancel'; exit 0 }
