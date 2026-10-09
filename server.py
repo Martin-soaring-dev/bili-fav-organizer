@@ -3608,9 +3608,11 @@ def apply_start():
                 # 明确业务失败：记账后继续后续批次。
                 fail_entries(entries, f"批次 {bn} 失败：{e}")
                 return True
-            except Exception as e:
-                fail_entries(entries, f"批次 {bn} 异常：{e}")
+            except (requests.RequestException, OSError) as e:
+                # 网络/IO：记账后继续，避免一次抖动卡死整次执行。
+                fail_entries(entries, f"批次 {bn} 网络/IO 异常：{e}")
                 return True
+            # 未预期异常不再吞掉继续写：交给外层停止整次执行，避免带病写库。
 
         try:
             if migrated:
@@ -3779,7 +3781,7 @@ def apply_start():
                         emit("err", state["error"], phase="apply", kind="apply_end",
                              done=state["done"], total=total)
                         return
-                    except Exception as e:
+                    except (bili_api.BiliApiError, requests.RequestException, OSError) as e:
                         fail_entries(entries, f"新建收藏夹「{name}」失败：{e}")
                         continue
                 # 同一新夹的条目仍需按来源夹分组。

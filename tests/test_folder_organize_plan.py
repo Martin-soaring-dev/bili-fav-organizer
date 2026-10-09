@@ -1,4 +1,5 @@
 import unittest
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
 import server
@@ -12,11 +13,32 @@ class FolderOrganizePlanTests(unittest.TestCase):
         {"media_id": "3", "title": "来源B", "count": 5},
     ]
 
+    profile_contexts = [
+        {"id": "1", "name": "目标", "revision": "1"},
+        {"id": "2", "name": "来源A", "revision": "1"},
+        {"id": "3", "name": "来源B", "revision": "1"},
+    ]
+
+    @contextmanager
+    def _patches(self, extra):
+        readiness = {"ready": True, "message": "ok"}
+        base = [
+            patch.object(server.store, "load_folders", return_value=self.folders),
+            patch.object(server, "_organization_profile_readiness", return_value=readiness),
+            patch.object(server, "_current_folder_profile_contexts",
+                         return_value=self.profile_contexts),
+        ]
+        with ExitStack() as stack:
+            for p in base + list(extra):
+                stack.enter_context(p)
+            yield
+
     def test_rejects_target_as_source(self):
         body = server.FolderMergePlanIn(groups=[server.FolderMergeGroupIn(
             target_id="1", source_ids=["1"], final_name="合并")])
-        with patch.object(server.store, "load_folders", return_value=self.folders), \
-             patch.object(server.store, "load_folder_merge_plan", return_value=[]):
+        with self._patches([
+            patch.object(server.store, "load_folder_merge_plan", return_value=[]),
+        ]):
             result = server.folder_organize_plan(body)
         self.assertEqual(400, result.status_code)
 
@@ -26,10 +48,11 @@ class FolderOrganizePlanTests(unittest.TestCase):
         saved = {}
         body = server.FolderMergePlanIn(groups=[server.FolderMergeGroupIn(
             target_id="1", source_ids=["3", "2"], final_name="合并")])
-        with patch.object(server.store, "load_folders", return_value=self.folders), \
-             patch.object(server.store, "load_folder_merge_plan", return_value=old), \
-             patch.object(server.store, "save_folder_merge_plan",
-                          side_effect=lambda groups: saved.setdefault("groups", groups)):
+        with self._patches([
+            patch.object(server.store, "load_folder_merge_plan", return_value=old),
+            patch.object(server.store, "save_folder_merge_plan",
+                         side_effect=lambda groups: saved.setdefault("groups", groups)),
+        ]):
             result = server.folder_organize_plan(body)
         self.assertTrue(result["ok"])
         self.assertEqual("done", saved["groups"][0]["status"])

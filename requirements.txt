@@ -1,10 +1,14 @@
 # B站收藏夹智能整理 —— 依赖清单
 # 安装：pip install -r requirements.txt
+#
+# 版本已锁定（2026-10-09，Windows / Python 3.12 实测可跑通测试与服务）。
+# 升级依赖时请同步改版本号并跑 `python -m unittest discover -s tests -v`。
 
-fastapi
-uvicorn
-requests
-pydantic
-qrcode[pil]         # 扫码登录生成 PNG 二维码（安装 Pillow 图像后端）
-browsercookie       # （可选）从浏览器自动读 cookie；新版 Chrome 的 ABE 加密会失败，可退化用扫码登录
-pycryptodomex       # browsercookie 的依赖
+fastapi==0.141.1
+uvicorn==0.53.0
+requests==2.34.2
+pydantic==2.13.5
+qrcode[pil]==8.2          # 扫码登录生成 PNG 二维码（Pillow 由 extra 拉入）
+pillow==12.3.0            # qrcode 的图像后端；显式锁版本避免漂移
+browsercookie==0.8.2      # （可选）从浏览器自动读 cookie；新版 Chrome 的 ABE 加密会失败，可退化用扫码登录
+pycryptodomex==3.23.0     # browsercookie 的依赖

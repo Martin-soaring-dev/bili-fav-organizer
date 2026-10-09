@@ -1,7 +1,7 @@
 # 项目梳理 · B站收藏夹智能整理
 
-> 整理日期：2026-09-26  
-> 代码版本：`main` @ `22c8ee4`（Merge pull request #1 from Martin-soaring-dev/mimo-beta）  
+> 整理日期：2026-10-09  
+> 代码版本：`fix/write-path-tests-and-hardening`（基于 `main` @ `b39d7af`）  
 > 仓库：https://github.com/Martin-soaring-dev/bili-fav-organizer
 
 ---
@@ -27,28 +27,28 @@
 
 ```
 bili-fav-organizer/
-├── server.py              # FastAPI 主程序（~3530 行）· HTTP API + 后台任务编排
-├── bili_api.py            # B 站网页 API 封装（~960 行）· 会话、节流、收藏夹读写
-├── llm_analyzer.py        # LLM 归类与画像生成（~1200 行）· 批处理/上下文预算/限流
-├── store.py               # SQLite 数据层（~1240 行）· 迁移/索引/画像/供应商模型
+├── server.py              # FastAPI 主程序（~4556 行）· HTTP API + 后台任务编排
+├── bili_api.py            # B 站网页 API 封装（~944 行）· 会话、节流、收藏夹读写
+├── llm_analyzer.py        # LLM 归类与画像生成（~1645 行）· 批处理/上下文预算/限流
+├── store.py               # SQLite 数据层（~1277 行）· 迁移/索引/画像/供应商模型
 ├── static/                # 前端（原生 HTML/CSS/JS，无构建）
-│   ├── index.html         # 单页 UI（~30 KB）
-│   ├── app.js             # 交互逻辑（~142 KB）
-│   └── style.css          # 样式（~32 KB）
-├── tests/                 # 单元测试（unittest，26 个用例）
+│   ├── index.html         # 单页 UI（~37 KB）
+│   ├── app.js             # 交互逻辑（~176 KB）
+│   └── style.css          # 样式（~41 KB）
+├── tests/                 # 单元测试（unittest，121 个用例）
 ├── docs/
 │   ├── design/            # 实施方案（扫描/SQLite、持久索引、供应商兼容）
 │   └── project-overview.md        # 本文档
-├── packaging/使用说明.txt  # Windows 便携版说明
+├── packaging/使用说明.txt  # Windows 便携版 / 安装包说明
 ├── .github/workflows/release-windows.yml   # tag 触发 PyInstaller 打包
 ├── BiliFavOrganizer.bat/ps1   # Windows 启动脚本
 ├── BiliFavOrganizer.spec   # PyInstaller 配置
 ├── config.json            # 应用设置（运行时在用户数据目录）
 ├── secrets.json           # B 站 Cookie（运行时在用户数据目录）
-└── requirements.txt       # fastapi / uvicorn / requests / qrcode / browsercookie …
+└── requirements.txt       # 已锁版本：fastapi / uvicorn / requests / qrcode / browsercookie …
 ```
 
-**体量**：后端约 5700 行 Python，前端约 1700 行 JS + HTML/CSS，测试约 350 行。
+**体量**：后端约 8400 行 Python，前端约 5300 行 JS + HTML/CSS，测试约 121 个用例。
 
 ---
 
@@ -170,7 +170,7 @@ SQLite（WAL 模式），表结构：
 | `providers` / `models` | LLM 供应商与模型配置（含 API Key） | `id` |
 | `app_state` | 各类任务状态 JSON（扫描选择/执行状态/合并草稿…） | `name` |
 
-Schema 版本迁移：`schema_migrations` 表 + 启动时幂等升级（当前 v6：分析 `status`/`dependent_ids`）。
+Schema 版本迁移：`schema_migrations` 表 + 启动时幂等升级（当前 v7）。
 
 ### 4.5 前端 `static/`
 
@@ -235,22 +235,30 @@ flowchart LR
 
 ```
 tests/
-├── test_batch_api.py           7 用例 · 批量请求 payload / 错误分类  ✅
-├── test_batch_executor.py      2 用例 · 分组执行 / uncertain 停止   ❌ 2 ERROR
-├── test_default_folder_inbox.py 12 用例 · 默认夹检测/守卫/就绪/删画像 ✅
-├── test_folder_organize_plan.py 3 用例 · 合并计划                    ⚠️ 1 ERROR + 1 FAIL
-└── test_scan_selection.py      1 用例 · 扫描选择往返                 ✅
+├── test_attribution.py              11 用例 · 署名/许可/版本端点
+├── test_batch_api.py                 7 用例 · 批量请求 payload / 错误分类
+├── test_batch_executor.py            2 用例 · 分组执行 / uncertain 停止
+├── test_apply_safety_contracts.py    9 用例 · 画像门禁 / 默认夹 / unknown / 风控  ★ 新增
+├── test_brand_integration.py         9 用例 · 图标 / favicon / 顶栏品牌
+├── test_default_folder_inbox.py     12 用例 · 默认夹检测/守卫/就绪/删画像
+├── test_folder_organize_plan.py      3 用例 · 合并计划
+├── test_llm_request_adapters.py     20 用例 · 供应商请求方言适配
+├── test_scan_selection.py            1 用例 · 扫描选择往返
+├── test_scan_troubleshooting.py     18 用例 · 扫描异常恢复
+├── test_store_and_llm_budget.py     13 用例 · schema 迁移 / stale / 上下文拆批  ★ 新增
+└── test_update_flow.py              16 用例 · 应用内更新 / 断点续传 / 安装模式
 ```
 
-**汇总：26 个用例，22 通过，1 失败，3 错误。**
+**汇总：121 个用例，全部通过（2026-10-09）。**
 
-| 问题 | 用例 | 现象 | 可能原因 |
-|------|------|------|----------|
-| ERROR | `test_groups_and_executes_in_batches`<br/>`test_uncertain_batch_stops_and_requires_review` | `server.APP["apply_run"]` 为 `None` | 测试未正确初始化 `APP["apply_run"]`，或执行器入口签名/初始化方式已变 |
-| ERROR | `test_preserves_completed_identical_group` | 返回 `JSONResponse` 不可下标 | 测试仍按 dict 断言，接口已改成 FastAPI `JSONResponse` |
-| FAIL | `test_rejects_target_as_source` | 期望 400，实际 409 | 冲突语义改为 409，测试未同步 |
+写路径相关的失败测试已修复，并补齐契约与覆盖缺口：
 
-> 这些是**测试与实现不同步**，不是核心业务逻辑回归的直接证据；但执行器与合并计划属于高风险写路径，建议优先修复。
+| 历史问题 | 处理 |
+|----------|------|
+| `test_batch_executor` 2 ERROR | mock 画像就绪 / 分析 current / 收藏夹成员关系；`bad` 改为过期关系失败，避免被全局目标画像门禁整单拦下 |
+| `test_folder_organize_plan` 2 问题 | mock 画像就绪与 profile contexts；`target in sources` 仍为 400 |
+| 缺执行器契约 | 新增 `test_apply_safety_contracts.py`（门禁拒绝启动、unknown 不重发、风控停、业务失败整批 failed） |
+| 缺 store/LLM 预算 | 新增 `test_store_and_llm_budget.py`（schema v7 幂等、stale 保留 dependent_ids、拆批与 length 截断不采纳） |
 
 ---
 
@@ -289,24 +297,29 @@ tests/
 
 ## 10. 技术债与改进建议
 
+### 已处理（2026-10-09，分支 `fix/write-path-tests-and-hardening`）
+
+1. ~~修复失败测试（4 个）~~ → 已修复，并补 21 个写路径 / 迁移 / 拆批用例，全量 121 通过。
+2. ~~测试覆盖缺口：`llm_analyzer` 拆批、`store` 迁移、stale 生命周期~~ → 已补 `test_store_and_llm_budget.py`。
+3. ~~依赖版本未锁定~~ → `requirements.txt` 已按实测版本 `==` 锁定。
+
 ### 高优先级（影响正确性/可维护性）
 
-1. **修复失败测试**（4 个）：`test_batch_executor` 初始化 `APP["apply_run"]`、`test_folder_organize_plan` 适配 `JSONResponse` 与 409 语义。写路径没有测试保护风险较高。
-2. **`server.py` 过大**（3500+ 行）：建议按路由域拆分（auth / config / scan / profile / analyze / plan / merge / apply），便于测试与协作。
-3. **`app.js` 过大**（142 KB / 570+ 函数级定义）：可按 UI 分区拆模块，或至少用 IIFE/模块化分段。
+4. **`server.py` 过大**（4500+ 行）：建议按路由域拆分（auth / config / scan / profile / analyze / plan / merge / apply / update），便于测试与协作。
+5. **`app.js` 过大**（176 KB）：可按 UI 分区拆模块，或至少用 IIFE/模块化分段。
 
 ### 中优先级
 
-4. **前端无类型/无构建**：功能少时够用，但状态同步（`APP` 运行态、方案状态、画像新鲜度）已较复杂，可考虑轻量框架或至少 JSDoc 类型。
-5. **测试覆盖缺口**：缺 `llm_analyzer`（上下文预算/拆批/截断处理）、`store` 迁移、画像门槛、扫描状态机的单测。
-6. **手动测试依赖真实 B 站 / LLM**：可加 mock 层或契约测试，减少实机回归成本。
+6. **本地 API 无鉴权 / 无 CSRF 防护**：绑定 `127.0.0.1` 已隔离外网，但浏览器恶意页面仍可向本机端口发简单 POST。建议校验 `Origin`/`Host` 或启动随机 token。
+7. **前端无类型/无构建**：功能少时够用，但状态同步（`APP` 运行态、方案状态、画像新鲜度）已较复杂，可考虑轻量框架或至少 JSDoc 类型。
+8. **手动测试依赖真实 B 站 / LLM**：可加 mock 层或契约测试，减少实机回归成本。
 
 ### 低优先级
 
-7. **`data/` 目录残留 JSON**（`analysis.json`、`folders.json` 等）：迁移后可能只是历史兼容，可确认后清理或在文档标注「仅迁移用」。
-8. **`server.log` 在仓库中**：建议加入 `.gitignore`（当前已有 `secrets.json`/`data/` 忽略规则，需确认 log）。
-9. **依赖版本未锁定**：`requirements.txt` 无版本号，便携版构建结果可能随上游漂移，CI 可考虑 `pip freeze` 产物或 `requirements.lock`。
-10. **文档语言混杂**：`provider-api-compatibility.md` 为英文，其余为中文；统一或双语皆可，建议在每篇文档开头标明语言。
+9. **`data/` 目录残留 JSON**（`analysis.json`、`folders.json` 等）：迁移后可能只是历史兼容，可确认后清理或在文档标注「仅迁移用」。
+10. **`server.log` 在仓库中**：`.gitignore` 已忽略 `*.log`，确认历史是否仍被跟踪即可。
+11. **文档语言混杂**：`provider-api-compatibility.md` 为英文，其余为中文；统一或双语皆可，建议在每篇文档开头标明语言。
+12. **关键写路径仍有宽泛 `except Exception`**（约 60+ 处）：可对 move/delete/apply 初始化收窄异常类型。
 
 ---
 
@@ -335,11 +348,14 @@ BiliFavOrganizer.bat
 |------|------|
 | 核心四阶段流程 | ✅ 完整可用 |
 | 收藏夹画像 + 合并整理 | ✅ 已实现 |
-| SQLite 迁移 + 持久索引 | ✅ 已实施 |
+| SQLite 迁移 + 持久索引 | ✅ 已实施（schema v7） |
 | 默认夹收件箱规则 | ✅ 有测试保护 |
-| Windows 便携发布 | ✅ CI 自动化 |
-| 测试通过率 | ⚠️ 22/26（4 个需修） |
-| 模块化/可维护性 | ⚠️ 后端单文件过大 |
+| 写路径契约测试 | ✅ apply 门禁 / unknown / 风控 |
+| Windows 便携 + 安装包发布 | ✅ CI 自动化 |
+| 测试通过率 | ✅ 121/121 |
+| 依赖锁定 | ✅ requirements.txt 已 pin |
+| 模块化/可维护性 | ⚠️ 后端/前端单文件仍偏大 |
+| 本地 API 防护 | ⚠️ 无 CSRF/Origin 校验 |
 | 供应商兼容层 | ✅ 有设计文档 + 特判 |
 
 ---
