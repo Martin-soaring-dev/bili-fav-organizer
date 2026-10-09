@@ -183,6 +183,7 @@
   }
 
   function finishUnlock() {
+    vaultUnlockedCached = true;
     const errBox = $("app-lock-error");
     if (errBox) errBox.textContent = "";
     showLockScreen(false);
@@ -227,6 +228,7 @@
       const st = await api("GET", "/api/app-lock/status");
       const vs = await api("GET", "/api/vault/status");
       const vaultLocked = !!(vs && vs.configured && vs.onboarding_complete && !vs.unlocked);
+      vaultUnlockedCached = !vaultLocked;
       const appLocked = !!(st.password_set && !st.unlocked);
       showLockScreen(vaultLocked || appLocked);
       const statusText = $("app-lock-status-text");
@@ -4518,6 +4520,7 @@
     $("lock-now-btn").addEventListener("click", async () => {
       try {
         await api("POST", "/api/vault/lock", {});
+        vaultUnlockedCached = false;
         await refreshAppLock();
         showLockScreen(true);
         log("已锁定", "warn");
@@ -4621,10 +4624,14 @@
     if (btn) {
       btn.title = THEME_TITLE[v] || THEME_TITLE.system;
       btn.querySelectorAll(".theme-ico").forEach((svg) => {
-        const kind = (svg.className.baseVal || "").includes("auto") ? "system"
-          : (svg.className.baseVal || "").includes("light") ? "light"
+        const kind = svg.classList.contains("theme-ico-auto") ? "system"
+          : svg.classList.contains("theme-ico-light") ? "light"
           : "dark";
-        svg.hidden = kind !== v;
+        const show = kind === v;
+        svg.hidden = !show;
+        svg.style.display = show ? "" : "none";
+        if (show) svg.removeAttribute("hidden");
+        else svg.setAttribute("hidden", "");
       });
     }
     document.querySelectorAll(".theme-pick").forEach((el) => {
@@ -4693,32 +4700,22 @@
 
 
   // 数据：整目录 zip 导出
-  async function downloadExportZip() {
-    try {
-      const res = await fetch("/api/data/export-zip", {
-        headers: API_TOKEN ? { "X-BiliFav-Token": API_TOKEN } : {},
-      });
-      if (res.status === 403) {
-        const body = await res.text();
-        log("导出失败：金库已锁定，请先解锁", "err");
-        const screen = document.getElementById("app-lock-screen");
-        if (screen) screen.hidden = false;
-        return;
-      }
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "bili_fav_data_" + Date.now() + ".zip";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      log("已开始下载数据目录 zip", "ok");
-    } catch (e) {
-      log("导出失败：" + (e.message || e), "err");
+  let vaultUnlockedCached = true;
+  function downloadExportZip() {
+    // 在用户点击手势内同步发起下载（await 会丢失手势，浏览器会静默拦截）
+    if (!vaultUnlockedCached) {
+      log("导出失败：金库已锁定，请先解锁", "err");
+      const screen = document.getElementById("app-lock-screen");
+      if (screen) screen.hidden = false;
+      return;
     }
+    log("正在导出数据目录 zip…", "info");
+    const f = document.createElement("iframe");
+    f.hidden = true;
+    f.src = "/api/data/export-zip?t=" + Date.now();
+    document.body.appendChild(f);
+    setTimeout(() => { f.remove(); }, 30000);
+    log("已请求下载 zip（若未出现下载条，请看浏览器下载列表）", "ok");
   }
   if ($("settings-data-export")) {
     $("settings-data-export").onclick = downloadExportZip;

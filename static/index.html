@@ -91,7 +91,7 @@
           </div>
           <div class="log-body" id="log-body"></div>
           <div class="terminal-body" id="terminal-body" hidden>
-            <div class="term-status muted" id="term-status">输入命令，回车执行</div>
+            <div class="term-status" id="term-status">PowerShell · 输入命令后回车执行</div>
             <div class="term-output" id="term-output"></div>
             <input id="term-input" class="term-input" type="text" spellcheck="false"
                    placeholder="输入命令，回车执行（工作目录：数据目录）">
@@ -99,6 +99,7 @@
         </aside>
         <div class="sidebar-tabs" id="sidebar-tabs">
           <button type="button" class="sidebar-tab sidebar-pin is-on" id="pin-log" title="钉住侧栏" aria-label="钉住">📌</button>
+          <span class="tab-sep" aria-hidden="true"></span>
           <button type="button" class="sidebar-tab active" data-panel="log" title="运行日志">日志</button>
           <button type="button" class="sidebar-tab" data-panel="term" title="终端">终端</button>
         </div>
