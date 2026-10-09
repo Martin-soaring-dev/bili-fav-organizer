@@ -1107,9 +1107,9 @@ body.logs-collapsed .settings-panel { left: 0 !important; }
   position: absolute;
   left: 320px;
   top: 0;
-  width: 36px;
-  height: 78px;
-  padding: 6px 0;
+  width: 28px;
+  height: 72px;
+  padding: 4px 0;
   border: 1px solid var(--border, #bbb);
   border-left: none;
   background: var(--panel, #fff);
@@ -1214,3 +1214,7 @@ body.logs-floating .logs { pointer-events: auto; }
 .show-log-tab { pointer-events: auto; }
 svg.theme-ico[hidden] { display: none !important; }
 .theme-pick.active { outline: 2px solid var(--accent, #0a7); background: rgba(120,180,120,.18); font-weight: 700; }
+
+/* 日志页签更窄 */
+.show-log-tab { width: 26px !important; }
+.show-log-tab-text { letter-spacing: 0.08em; font-size: 12px; }

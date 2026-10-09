@@ -670,18 +670,28 @@ def vault_onboarding(body: VaultInitIn):
             **_vault_status_payload()}
 
 
+class VaultUnlockDeviceIn(BaseModel):
+    skip_hello: bool = False
+
+
 @app.post("/api/vault/unlock-device")
-def vault_unlock_device():
-    """Windows Hello 验证通过后，用 DPAPI 中的设备材料解 DEK。"""
-    if not VAULT.state.has_device_wrap:
-        return JSONResponse({"ok": False, "error": "未绑定本机验证，请使用应用密码"},
-                            status_code=400)
-    hello = vault_hello_verify()
-    if not hello.get("ok"):
-        return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
-                            status_code=403)
+def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
+    """Hello 验证后解锁：无设备包装则现场绑定，再用设备材料解 DEK。"""
+    skip_hello = bool(body and body.skip_hello)
+    if not skip_hello:
+        hello = vault_hello_verify()
+        if not hello.get("ok"):
+            return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
+                                status_code=403)
     try:
-        secret = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes()).decode("utf-8")
+        if APP_UNLOCK_BLOB.is_file():
+            secret = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes()).decode("utf-8")
+        else:
+            secret = secrets.token_urlsafe(32)
+            USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+            APP_UNLOCK_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
+        if not VAULT.state.has_device_wrap:
+            VAULT.bind_device_blob(secret)
         VAULT.unlock_with_secret("device", secret)
     except (OSError, ValueError, vault_mod.VaultError) as exc:
         return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"}, status_code=400)
@@ -1439,32 +1449,18 @@ def data_open_folder():
     try:
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if sys.platform == "win32":
-            # 启动资源管理器并抢前台（多枚举几轮窗口）
             path = str(USER_DATA_DIR)
-            subprocess.Popen(["explorer", path])
-            try:
-                import ctypes
-                import ctypes.wintypes as wintypes
-                time.sleep(0.5)
-                user32 = ctypes.windll.user32
-                hwnd = user32.FindWindowW("CabinetWClass", None)
-                if not hwnd:
-                    # 扩展：枚举顶层窗口找资源管理器
-                    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-                    def _cb(h, _):
-                        cls = ctypes.create_unicode_buffer(256)
-                        user32.GetClassNameW(h, cls, 256)
-                        if cls.value == "CabinetWClass":
-                            globals()["_explorer_hwnd"] = h
-                        return True
-                    globals()["_explorer_hwnd"] = None
-                    user32.EnumWindows(_cb, 0)
-                    hwnd = globals().get("_explorer_hwnd") or 0
-                if hwnd:
-                    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                    user32.SetForegroundWindow(hwnd)
-            except Exception:
-                pass
+            # Shell.Application.Explore 通常会把窗口带到前台
+            ps = f'''
+$ErrorActionPreference = "SilentlyContinue"
+$shell = New-Object -ComObject Shell.Application
+$shell.Explore("{path}")
+Start-Sleep -Milliseconds 800
+$wshell = New-Object -ComObject WScript.Shell
+$null = $wshell.AppActivate("BiliFavOrganizer")
+'''
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps],
+                           capture_output=True, timeout=15)
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(USER_DATA_DIR)])
         else:

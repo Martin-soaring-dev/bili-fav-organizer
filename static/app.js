@@ -160,20 +160,13 @@
     const errBox = $("app-lock-error");
     const vs = await api("GET", "/api/vault/status");
     if (opts && opts.useHello) {
-      // Hello 成功：直接用设备包装解 DEK（若已绑定）或会话已由服务端处理
-      const helloOk = await api("POST", "/api/vault/hello-verify", {}, { timeoutMs: 35000 });
-      if (!helloOk || !helloOk.ok) {
-        if (errBox) errBox.textContent = (helloOk && helloOk.message) || "Windows Hello 验证失败";
-        setLockMode("password");
-        return;
-      }
+      // Hello 已在上一步验证过：只解 DEK，不再弹第二次
       try {
-        // 服务端设备包装若存在则尝试 unlock-with-device；否则仍需密码
-        await api("POST", "/api/vault/unlock-device", {});
+        await api("POST", "/api/vault/unlock-device", { skip_hello: true });
         finishUnlock();
         return;
       } catch (e) {
-        if (errBox) errBox.textContent = "验证通过，但仍需应用密码解密数据";
+        if (errBox) errBox.textContent = e.error || e.message || "解锁失败，请使用应用密码";
         setLockMode("password");
         return;
       }
