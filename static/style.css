@@ -1218,3 +1218,38 @@ svg.theme-ico[hidden] { display: none !important; }
 /* 日志页签更窄 */
 .show-log-tab { width: 26px !important; }
 .show-log-tab-text { letter-spacing: 0.08em; font-size: 12px; }
+
+/* ===== 侧栏 shell：内容 + 右缘页签 ===== */
+.sidebar-shell { display: flex; min-height: 0; flex-shrink: 0; position: relative; }
+.sidebar-shell .logs { width: 320px; min-width: 240px; }
+.panel-title { padding: 4px 10px !important; min-height: 32px; }
+.sidebar-tabs {
+  width: 28px; display: flex; flex-direction: column; gap: 6px;
+  padding: 6px 2px; align-items: center;
+  border-left: 1px solid var(--border);
+  background: var(--panel, #f7f7f7);
+  flex-shrink: 0;
+}
+.sidebar-tab {
+  writing-mode: vertical-rl; text-orientation: upright;
+  padding: 10px 2px; border: none; border-radius: 6px;
+  background: transparent; color: var(--muted); cursor: pointer;
+  font-size: 12px; font-weight: 700; letter-spacing: .12em;
+}
+.sidebar-tab:hover { background: rgba(127,127,127,.12); color: var(--text); }
+.sidebar-tab.active {
+  background: var(--accent, #0a7); color: #fff;
+}
+.terminal-body {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+}
+.terminal-body[hidden] { display: none !important; }
+.term-output { flex: 1; overflow: auto; padding: 8px 10px; white-space: pre-wrap; word-break: break-all; }
+.term-input {
+  border: none; border-top: 1px solid var(--border); padding: 8px 10px;
+  background: var(--bg, #111); color: var(--text); font-family: inherit; font-size: 12px;
+}
+body.logs-collapsed .sidebar-shell { display: none !important; }
+body.logs-collapsed .sidebar-tabs { display: none !important; }
+body.logs-collapsed .show-log-tab { display: flex; }

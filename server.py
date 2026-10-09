@@ -2074,6 +2074,122 @@ class DataIn(BaseModel):
     scopes: list[str] = []
 
 
+class TermExecIn(BaseModel):
+    cmd: str = ""
+
+
+TERM_OUT: list[str] = []
+_TERM_LOCK = threading.Lock()
+
+
+@app.get("/api/terminal/output")
+def terminal_output(since: int = 0):
+    with _TERM_LOCK:
+        lines = TERM_OUT[since:]
+        return {"ok": True, "since": since, "next": since + len(lines), "lines": lines}
+
+
+@app.post("/api/terminal/exec")
+def terminal_exec(body: TermExecIn):
+    cmd = (body.cmd or "").strip()
+    if not cmd:
+        return JSONResponse({"ok": False, "error": "命令为空"}, status_code=400)
+    cwd = str(USER_DATA_DIR if USER_DATA_DIR.exists() else HERE)
+
+    def _run():
+        try:
+            p = subprocess.run(
+                cmd, shell=True, cwd=cwd,
+                capture_output=True, text=True, timeout=60,
+                encoding="utf-8", errors="replace",
+            )
+            out = (p.stdout or "")
+            err = (p.stderr or "")
+        except subprocess.TimeoutExpired:
+            out, err = "", "命令超时（60s）\n"
+        except OSError as exc:
+            out, err = "", f"执行失败：{exc}\n"
+        with _TERM_LOCK:
+            TERM_OUT.append(f"$ {cmd}\n")
+            if out:
+                TERM_OUT.append(out if out.endswith("\n") else out + "\n")
+            if err:
+                TERM_OUT.append(err if err.endswith("\n") else err + "\n")
+        emit("info", f"终端：{cmd}", phase="terminal")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/api/data/export-zip")
+def data_export_zip():
+    """导出整个数据目录为 zip（排除 runtime 与备份超大目录可选保留）。"""
+    import zipfile
+    import io
+    buf = io.BytesIO()
+    fn = "bili_fav_data_" + time.strftime("%Y%m%d_%H%M%S") + ".zip"
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        base = USER_DATA_DIR
+        if not base.exists():
+            base = HERE
+        for p in base.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(base)
+            if any(part in ("runtime", "backups") for part in rel.parts):
+                continue
+            zf.writestr(str(rel).replace("\\", "/"), p.read_bytes())
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+    )
+
+
+class ZipImportIn(BaseModel):
+    zip_b64: str = ""
+
+
+@app.post("/api/data/import-zip")
+def data_import_zip(body: ZipImportIn):
+    """导入完整数据目录 zip；明文旧库自动迁移加密。"""
+    import base64
+    import zipfile
+    import io
+    if not body.zip_b64:
+        return JSONResponse({"ok": False, "error": "未收到 zip"}, status_code=400)
+    bk = _autobackup_data("before-import-zip")
+    try:
+        raw = base64.b64decode(body.zip_b64)
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"zip 无法读取：{e}"}, status_code=400)
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    extracted = 0
+    with zf:
+        for name in zf.namelist():
+            if name.endswith("/"):
+                continue
+            # 防 zip-slip
+            rel = Path(name)
+            if rel.is_absolute() or ".." in rel.parts:
+                continue
+            dest = USER_DATA_DIR / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(zf.read(name))
+            extracted += 1
+    # 旧明文库 → 加密
+    migrated = None
+    try:
+        if VAULT.is_unlocked():
+            migrated = _vault_migrate_plain_db_if_needed()
+    except Exception:
+        migrated = None
+    emit("warn", f"已导入数据目录 zip（{extracted} 个文件）；原数据已备份到 {bk}")
+    return {"ok": True, "files": extracted, "backup": bk, "migrated": migrated}
+
+
 @app.get("/api/data/export")
 def data_export():
     """导出全部项目数据为一个 JSON 文件下载（不含 cookie / api_key）。"""

@@ -4743,6 +4743,77 @@
     refreshUsage();
   }, 60000);
 
+
+  // ===== 侧栏：日志/终端切换、默认锁定 =====
+  (function sidebar() {
+    const title = $("sidebar-title");
+    const clearBtn = $("clear-log");
+    const pinBtn = $("pin-log");
+    const logBody = $("log-body");
+    const termBody = $("terminal-body");
+    // 默认锁定
+    logPinned = true;
+    if (pinBtn) {
+      pinBtn.classList.add("is-on");
+      pinBtn.title = "已钉住（点击取消，取消后悬停显示）";
+    }
+    document.body.classList.remove("logs-floating");
+
+    function setPanel(name) {
+      if (title) title.textContent = name === "term" ? "终端" : "运行日志";
+      if (clearBtn) clearBtn.hidden = name === "term";
+      if (logBody) logBody.hidden = name !== "log";
+      if (termBody) termBody.hidden = name !== "term";
+      document.querySelectorAll(".sidebar-tab").forEach((el) => {
+        el.classList.toggle("active", el.getAttribute("data-panel") === name);
+      });
+    }
+    document.querySelectorAll(".sidebar-tab").forEach((el) => {
+      el.addEventListener("click", () => setPanel(el.getAttribute("data-panel") || "log"));
+    });
+    setPanel("log");
+
+    let termSince = 0;
+    async function pullTerm() {
+      try {
+        const r = await api("GET", "/api/terminal/output?since=" + termSince);
+        if (r && r.lines && r.lines.length) {
+          const box = $("term-output");
+          if (box) {
+            box.textContent += r.lines.join("");
+            box.scrollTop = box.scrollHeight;
+          }
+          termSince = r.next;
+        }
+      } catch (_) {}
+    }
+    setInterval(pullTerm, 800);
+    const tin = $("term-input");
+    if (tin) {
+      tin.addEventListener("keydown", async (e) => {
+        if (e.key !== "Enter") return;
+        const cmd = tin.value.trim();
+        if (!cmd) return;
+        tin.value = "";
+        try { await api("POST", "/api/terminal/exec", { cmd }); }
+        catch (err) { log(err.error || err.message || "终端执行失败", "err"); }
+        pullTerm();
+      });
+    }
+  })();
+
+  // 数据：整目录 zip 导出
+  if ($("settings-data-export")) {
+    $("settings-data-export").onclick = () => {
+      const a = document.createElement("a");
+      a.href = "/api/data/export-zip";
+      a.download = "";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    };
+  }
+
   init();
   migrateMainPanelsIntoSettings();
 })();
