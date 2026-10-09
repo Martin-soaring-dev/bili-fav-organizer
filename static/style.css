@@ -139,7 +139,7 @@ button.mini-btn { padding: 5px 10px; font-size: 12px; }
 .sep { color: var(--border); }
 
 /* 主布局：左日志 / 右面板 */
-.layout { flex: 1; display: flex; min-height: 0; }
+.layout { flex: 1; display: flex; min-height: 0; position: relative; }
 .logs {
   width: 320px;
   min-width: 240px;
@@ -1098,34 +1098,49 @@ body.logs-collapsed .settings-panel { left: 0 !important; }
 .link-btn:hover { opacity: .85; }
 .lock-hello-status { min-height: 1.2em; font-size: 13px; }
 
-/* 日志侧标：收紧、防抖 */
-
-/* ===== 日志呼出页签：唯一实现 ===== */
-/* 规则：仅 body.logs-collapsed 时显示；挂在 #app 下、不在 .logs 内 */
+/* ===== 日志页签：始终可见 =====
+   展开：贴日志右缘 top:0（按下态）；收起：贴左缘；竖排「日志」不换行 */
 .show-log-tab {
-  display: none;
-  position: fixed;
-  left: 320px;           /* 原日志窗右缘 */
-  top: 46%;
-  transform: translateY(-50%);
-  writing-mode: horizontal-tb;
-  padding: 5px 12px;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.2;
-  border: 1px solid var(--border);
-  border-radius: 0 8px 8px 0;
-  background: var(--panel);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  left: 320px;
+  top: 0;
+  width: 36px;
+  height: 78px;
+  padding: 6px 0;
+  border: none;
+  background: var(--panel, #fff);
   color: var(--accent, #0a7);
   cursor: pointer;
-  z-index: 90;
-  box-shadow: 2px 0 8px rgba(0,0,0,.14);
+  z-index: 40;
+  box-shadow: inset -2px 0 0 rgba(0,0,0,.06), 3px 0 8px rgba(0,0,0,.06);
+  clip-path: polygon(0 0, 100% 10%, 100% 90%, 0 100%);
+  transition: left .15s ease, background .12s ease;
 }
-.show-log-tab:hover { background: var(--button-hover, rgba(127,127,127,.15)); }
-body.logs-collapsed .show-log-tab { display: flex; align-items: center; }
+.show-log-tab-text {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 0.2em;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  user-select: none;
+}
+.show-log-tab:hover { background: var(--button-hover, rgba(127,127,127,.14)); }
+.show-log-tab:active { filter: brightness(.96); }
+body.logs-collapsed .show-log-tab {
+  left: 0;
+  clip-path: polygon(0 0, 100% 6%, 100% 94%, 0 100%);
+  box-shadow: 3px 0 10px rgba(0,0,0,.14);
+}
 body.logs-collapsed .logs { display: none !important; }
 body.logs-collapsed .settings-panel { left: 0 !important; }
 @media (max-width: 900px) {
+  .show-log-tab { left: min(320px, 40vw); }
   body.logs-collapsed .show-log-tab { left: 0; }
 }
 

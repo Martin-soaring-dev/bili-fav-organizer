@@ -4628,15 +4628,11 @@
     el.addEventListener("click", () => setTheme(el.getAttribute("data-theme")));
   });
 
-  if ($("toggle-log")) {
-    $("toggle-log").addEventListener("click", () => {
-      document.body.classList.add("logs-collapsed");
-      log("日志窗已隐藏，点左侧「日志」可恢复", "info");
-    });
-  }
+  // 日志页签：始终可见，点击在展开/收起间切换
   if ($("show-log-tab")) {
     $("show-log-tab").addEventListener("click", () => {
-      document.body.classList.remove("logs-collapsed");
+      const collapsed = document.body.classList.toggle("logs-collapsed");
+      log(collapsed ? "日志已收起，点「日志」展开" : "日志已展开", "info");
     });
   }
   if ($("pin-log")) {

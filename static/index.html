@@ -90,13 +90,15 @@
           <button id="pin-log" class="icon-btn" title="钉住/取消钉住" type="button" aria-label="钉住日志">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M14.7 3.3a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1-.2 1.6l-4.5 1.5-3.3 3.3.4 4.1a1 1 0 0 1-1.7.9L9 15.5l-4 4a1 1 0 1 1-1.4-1.4l4-4-4.5-4.5a1 1 0 0 1 .9-1.7l4.1.4 3.3-3.3 1.5-4.5a1 1 0 0 1 1.8.1z"/></svg>
           </button>
-          <button id="toggle-log" class="icon-btn" title="隐藏日志窗" type="button" aria-label="隐藏日志">
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M15.4 4.6 8 12l7.4 7.4 1.4-1.4L10.8 12l6-6z"/></svg>
-          </button>
         </span>
       </div>
       <div class="log-body" id="log-body"></div>
     </aside>
+
+    <!-- 日志页签：显示时贴日志右缘（点击收起）；收起时贴左缘（点击恢复） -->
+    <button id="show-log-tab" class="show-log-tab" type="button" title="收起/展开日志" aria-label="切换日志窗">
+      <span class="show-log-tab-text">日志</span>
+    </button>
 
     <!-- 右：操作面板 -->
     <main class="panels">
@@ -408,8 +410,6 @@
       </div><!-- /route-stack -->
     </main>
   </div>
-  <!-- 日志收起后的呼出页签：放在 .logs 外侧，避免父级 display:none 连带隐藏 -->
-  <button id="show-log-tab" class="show-log-tab" type="button" title="显示日志">日志</button>
 </div>
 
 <!-- 管理供应商 / 模型 -->
