@@ -796,7 +796,7 @@ public static class Win32Hwnd {
   $hwnd = [Win32Hwnd]::GetForegroundWindow()
   if ($hwnd -eq [IntPtr]::Zero) { $hwnd = [Win32Hwnd]::GetDesktopWindow() }
 
-  $op = [Windows.Security.Credentials.UI.UserConsentVerifierInterop]::RequestVerificationForWindowAsync($hwnd, 'Verify to unlock local data')
+  $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync('Verify to unlock local data')
   $deadline = (Get-Date).AddSeconds(45)
   $status = [string]$op.Status
   while ($status -eq 'Started' -or $status -eq '0') {
