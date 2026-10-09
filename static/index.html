@@ -79,26 +79,29 @@
   </header>
 
   <div class="layout">
-    <!-- 侧栏：内容 + 竖排标签（日志 / 终端 / 钉住） -->
-    <div class="sidebar-shell" id="sidebar-shell">
-      <aside class="sidebar" id="log-area">
-        <div class="panel-title">
-          <span id="sidebar-title">运行日志</span>
-          <span class="log-actions">
-            <button id="clear-log" class="icon-btn" title="清空日志" type="button" aria-label="清空日志">🗑️</button>
-          </span>
+    <!-- 侧栏：rail = 内容 + 竖排标签（📌 / 日志 / 终端） -->
+    <div class="sidebar-shell pinned" id="sidebar-shell">
+      <div class="sidebar-rail" id="sidebar-rail">
+        <aside class="sidebar" id="log-area">
+          <div class="panel-title">
+            <span id="sidebar-title">运行日志</span>
+            <span class="log-actions">
+              <button id="clear-log" class="icon-btn" title="清空日志" type="button" aria-label="清空日志">🗑️</button>
+            </span>
+          </div>
+          <div class="log-body" id="log-body"></div>
+          <div class="terminal-body" id="terminal-body" hidden>
+            <div class="term-status muted" id="term-status">输入命令，回车执行</div>
+            <div class="term-output" id="term-output"></div>
+            <input id="term-input" class="term-input" type="text" spellcheck="false"
+                   placeholder="输入命令，回车执行（工作目录：数据目录）">
+          </div>
+        </aside>
+        <div class="sidebar-tabs" id="sidebar-tabs">
+          <button type="button" class="sidebar-tab sidebar-pin is-on" id="pin-log" title="钉住侧栏" aria-label="钉住">📌</button>
+          <button type="button" class="sidebar-tab active" data-panel="log" title="运行日志">日志</button>
+          <button type="button" class="sidebar-tab" data-panel="term" title="终端">终端</button>
         </div>
-        <div class="log-body" id="log-body"></div>
-        <div class="terminal-body" id="terminal-body" hidden>
-          <div class="term-output" id="term-output"></div>
-          <input id="term-input" class="term-input" type="text" spellcheck="false"
-                 placeholder="输入命令，回车执行（工作目录：数据目录）">
-        </div>
-      </aside>
-      <div class="sidebar-tabs" id="sidebar-tabs">
-        <button type="button" class="sidebar-tab active" data-panel="log" title="运行日志">日志</button>
-        <button type="button" class="sidebar-tab" data-panel="term" title="终端">终端</button>
-        <button type="button" class="sidebar-tab sidebar-pin is-on" id="pin-log" title="钉住侧栏">📌</button>
       </div>
     </div>
 
@@ -903,9 +906,15 @@
         <div class="settings-block">
           <label>主题</label>
           <div class="row">
-            <button type="button" class="btn ghost theme-pick" data-theme="system">Auto</button>
-            <button type="button" class="btn ghost theme-pick" data-theme="light">☀ 浅色</button>
-            <button type="button" class="btn ghost theme-pick" data-theme="dark">🌙 深色</button>
+            <button type="button" class="btn ghost theme-pick active" data-theme="system" title="自动">
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg> 自动
+            </button>
+            <button type="button" class="btn ghost theme-pick" data-theme="light" title="浅色">
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg> 浅色
+            </button>
+            <button type="button" class="btn ghost theme-pick" data-theme="dark" title="深色">
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.2 14.2A8.4 8.4 0 0 1 9.8 3.8 7.8 7.8 0 1 0 20.2 14.2z" fill="currentColor"/></svg> 深色
+            </button>
           </div>
           <label>面板毛玻璃模糊（<span id="settings-opacity-val">24</span>px，Win11 风格）</label>
           <input id="settings-opacity" type="range" min="8" max="48" value="24">

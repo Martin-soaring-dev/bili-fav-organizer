@@ -4692,63 +4692,19 @@
   }, 60000);
 
 
-  // ===== 侧栏：日志/终端切换、默认锁定 =====
-  (function sidebar() {
-    const title = $("sidebar-title");
-    const clearBtn = $("clear-log");
-    const pinBtn = $("pin-log");
-    const logBody = $("log-body");
-    const termBody = $("terminal-body");
-    // 默认锁定
-    function setPanel(name) {
-      if (title) title.textContent = name === "term" ? "终端" : "运行日志";
-      if (clearBtn) clearBtn.hidden = name === "term";
-      if (logBody) logBody.hidden = name !== "log";
-      if (termBody) termBody.hidden = name !== "term";
-      document.querySelectorAll(".sidebar-tab").forEach((el) => {
-        el.classList.toggle("active", el.getAttribute("data-panel") === name);
-      });
-    }
-    document.querySelectorAll(".sidebar-tab").forEach((el) => {
-      el.addEventListener("click", () => setPanel(el.getAttribute("data-panel") || "log"));
-    });
-    setPanel("log");
-
-    let termSince = 0;
-    async function pullTerm() {
-      try {
-        const r = await api("GET", "/api/terminal/output?since=" + termSince);
-        if (r && r.lines && r.lines.length) {
-          const box = $("term-output");
-          if (box) {
-            box.textContent += r.lines.join("");
-            box.scrollTop = box.scrollHeight;
-          }
-          termSince = r.next;
-        }
-      } catch (_) {}
-    }
-    setInterval(pullTerm, 800);
-    const tin = $("term-input");
-    if (tin) {
-      tin.addEventListener("keydown", async (e) => {
-        if (e.key !== "Enter") return;
-        const cmd = tin.value.trim();
-        if (!cmd) return;
-        tin.value = "";
-        try { await api("POST", "/api/terminal/exec", { cmd }); }
-        catch (err) { log(err.error || err.message || "终端执行失败", "err"); }
-        pullTerm();
-      });
-    }
-  })();
-
   // 数据：整目录 zip 导出
   async function downloadExportZip() {
     try {
       const res = await fetch("/api/data/export-zip", {
         headers: API_TOKEN ? { "X-BiliFav-Token": API_TOKEN } : {},
       });
+      if (res.status === 403) {
+        const body = await res.text();
+        log("导出失败：金库已锁定，请先解锁", "err");
+        const screen = document.getElementById("app-lock-screen");
+        if (screen) screen.hidden = false;
+        return;
+      }
       if (!res.ok) throw new Error("HTTP " + res.status);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -4864,16 +4820,16 @@
     const logBody = $("log-body");
     const termBody = $("terminal-body");
     const pinBtn = $("pin-log");
+    const termStatus = $("term-status");
 
-    let pinned = true;   // 默认钉住
+    let pinned = true; // 默认钉住
     let panel = "log";
 
     function applyPin() {
-      if (!shell) return;
-      shell.classList.toggle("pinned", pinned);
+      if (shell) shell.classList.toggle("pinned", pinned);
       if (pinBtn) {
         pinBtn.classList.toggle("is-on", pinned);
-        pinBtn.title = pinned ? "已钉住（点击取消钉住）" : "未钉住（悬停显示侧栏）";
+        pinBtn.title = pinned ? "已钉住（点击取消，悬停显示）" : "未钉住（悬停标签区展开）";
       }
     }
 
@@ -4883,13 +4839,16 @@
       if (logBody) logBody.hidden = name !== "log";
       if (termBody) termBody.hidden = name !== "term";
       if (clearBtn) {
-        // 终端页：清空按钮隐藏且禁用
         clearBtn.hidden = name === "term";
         clearBtn.disabled = name === "term";
       }
       document.querySelectorAll(".sidebar-tab[data-panel]").forEach((el) => {
         el.classList.toggle("active", el.getAttribute("data-panel") === name);
       });
+      if (name === "term") {
+        pullTerm().catch(() => {});
+        if (termStatus) termStatus.textContent = "终端已就绪 — 输入命令回车执行";
+      }
     }
 
     document.querySelectorAll(".sidebar-tab[data-panel]").forEach((el) => {
@@ -4899,7 +4858,7 @@
       pinBtn.addEventListener("click", () => {
         pinned = !pinned;
         applyPin();
-        log(pinned ? "侧栏已钉住" : "侧栏未钉住（悬停显示）", "info");
+        log(pinned ? "侧栏已钉住" : "侧栏未钉住（悬停展开）", "info");
       });
     }
     applyPin();
@@ -4915,7 +4874,10 @@
           if (box) { box.textContent += r.lines.join(""); box.scrollTop = box.scrollHeight; }
           termSince = r.next;
         }
-      } catch (_) {}
+        if (termStatus) termStatus.textContent = "终端已就绪";
+      } catch (e) {
+        if (termStatus) termStatus.textContent = e.error || e.message || "终端不可用（可能未解锁）";
+      }
     }
     setInterval(pullTerm, 800);
     const tin = $("term-input");
@@ -4926,11 +4888,15 @@
         if (!cmd) return;
         tin.value = "";
         try { await api("POST", "/api/terminal/exec", { cmd }); }
-        catch (err) { log(err.error || err.message || "终端执行失败", "err"); }
+        catch (err) {
+          log(err.error || err.message || "终端执行失败", "err");
+          if (termStatus) termStatus.textContent = err.error || err.message || "执行失败";
+        }
         pullTerm();
       });
     }
   })();
+
 
   init();
   migrateMainPanelsIntoSettings();
