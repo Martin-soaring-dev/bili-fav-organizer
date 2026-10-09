@@ -4210,6 +4210,21 @@
     }
     if (name === "favorites") showFavoritesInSettings();
     if (name === "advanced") loadPromptFields();
+    if (name === "model") {
+      // 进入「模型」页时刷新供应商/模型列表
+      (async () => {
+        try {
+          await loadConfig();
+          const activeModel = modelById(activeModelId);
+          manageSelectedProviderId = activeModel
+            ? activeModel.provider_id
+            : (providersCache[0] || {}).id || "";
+          if (activeModel) openModelForm(activeModel.id);
+          else closeModelForm();
+          renderManageLists({ resetModelScroll: true, scrollToActive: Boolean(activeModel) });
+        } catch (_) {}
+      })();
+    }
   }
 
   async function refreshSettingsData() {
@@ -4628,11 +4643,24 @@
     el.addEventListener("click", () => setTheme(el.getAttribute("data-theme")));
   });
 
-  // 日志页签：始终可见，点击在展开/收起间切换
+  // 日志页签：行为随位置变化
+  // 贴左（日志已隐藏）→ 点击展开；贴日志右缘（日志可见）→ 点击收起/缩回
   if ($("show-log-tab")) {
     $("show-log-tab").addEventListener("click", () => {
-      const collapsed = document.body.classList.toggle("logs-collapsed");
-      log(collapsed ? "日志已收起，点「日志」展开" : "日志已展开", "info");
+      const area = $("log-area");
+      const collapsed = document.body.classList.contains("logs-collapsed");
+      const hidden = !!(area && area.classList.contains("log-hide"));
+      if (collapsed || hidden) {
+        document.body.classList.remove("logs-collapsed");
+        if (area) area.classList.remove("log-hide");
+        log("日志已展开", "info");
+      } else if (area && document.body.classList.contains("logs-floating")) {
+        area.classList.add("log-hide");
+        log("日志已缩回，点左侧「日志」或移入左缘展开", "info");
+      } else {
+        document.body.classList.add("logs-collapsed");
+        log("日志已收起，点「日志」展开", "info");
+      }
     });
   }
   // 钉住：钉住=固定在布局；未钉住=悬浮，鼠标移开自动缩回

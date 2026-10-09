@@ -1208,3 +1208,9 @@ body.logs-floating:not(.logs-collapsed) .show-log-tab { left: 0; }
 }
 .theme-ico-auto path.half-sun { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 .theme-ico-auto path.half-moon { fill: currentColor; stroke: none; }
+
+body.logs-floating:not(.logs-collapsed) .show-log-tab { left: 0 !important; }
+body.logs-floating .logs { pointer-events: auto; }
+.show-log-tab { pointer-events: auto; }
+svg.theme-ico[hidden] { display: none !important; }
+.theme-pick.active { outline: 2px solid var(--accent, #0a7); background: rgba(120,180,120,.18); font-weight: 700; }

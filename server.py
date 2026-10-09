@@ -778,33 +778,32 @@ def vault_hello_verify():
         return {"ok": False, "status": "unsupported", "message": "当前系统不支持 Windows Hello"}
     ps = r'''
 $ErrorActionPreference = 'Stop'
+function Write-Ascii([string]$s) {
+  Write-Output (($s -replace '[^\x20-\x7E]', '?') -replace '[\r\n]+', ' ')
+}
 try {
-  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
   $null = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
 
-  $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
-    $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1
-  } | Select-Object -First 1
-  if (-not $asTask) { Write-Output 'unsupported:AsTask extension missing'; exit 0 }
-
   $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::VerifyAsync('Verify to unlock local data')
-  $t = $op.GetType()
-  $argType = $null
-  if ($t.IsGenericType) { $argType = $t.GetGenericArguments()[0] }
-  if (-not $argType) { Write-Output 'unsupported:cannot resolve async result type'; exit 0 }
-  $task = $asTask.MakeGenericMethod($argType).Invoke($null, @($op))
-  if (-not $task.Wait([TimeSpan]::FromSeconds(30))) { Write-Output 'cancel'; exit 0 }
-
-  $name = $task.Result.ToString()
-  switch -Regex ($name) {
-    '^(Verified|Allow)$' { Write-Output 'ok'; exit 0 }
-    '^(UserCancelled|UserCanceled)$' { Write-Output 'cancel'; exit 0 }
-    default { Write-Output ('deny:' + $name) }
+  # IAsyncOperation：轮询 Status，避免 AsTask / ConsentResult 类型问题
+  $deadline = (Get-Date).AddSeconds(40)
+  $status = [string]$op.Status
+  while ($status -eq 'Started' -or $status -eq '0') {
+    if ((Get-Date) -gt $deadline) { Write-Output 'cancel'; exit 0 }
+    Start-Sleep -Milliseconds 250
+    $status = [string]$op.Status
   }
+  if ($status -eq 'Completed' -or $status -eq '1') {
+    $name = [string]$op.GetResults()
+    if ($name -eq 'Verified' -or $name -eq 'Allow' -or $name -eq '0') { Write-Output 'ok'; exit 0 }
+    if ($name -eq 'UserCancelled' -or $name -eq 'UserCanceled') { Write-Output 'cancel'; exit 0 }
+    Write-Ascii ('deny:' + $name)
+    exit 0
+  }
+  Write-Ascii ('unsupported:async status=' + $status)
 } catch {
-  $msg = ($_.Exception.Message -replace '[\r\n]+', ' ')
-  $msg = ($msg -replace '[^\x20-\x7E]', '?')
-  Write-Output ('unsupported:' + $msg)
+  Write-Ascii ('unsupported:' + $_.Exception.Message)
 }
 '''
     try:
@@ -1441,14 +1440,29 @@ def data_open_folder():
     try:
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if sys.platform == "win32":
-            # explorer 打开并尽量置顶，避免落在后台
-            subprocess.Popen(["explorer", str(USER_DATA_DIR)])
-            time.sleep(0.4)
+            # 启动资源管理器并抢前台（多枚举几轮窗口）
+            path = str(USER_DATA_DIR)
+            subprocess.Popen(["explorer", path])
             try:
                 import ctypes
+                import ctypes.wintypes as wintypes
+                time.sleep(0.5)
                 user32 = ctypes.windll.user32
                 hwnd = user32.FindWindowW("CabinetWClass", None)
+                if not hwnd:
+                    # 扩展：枚举顶层窗口找资源管理器
+                    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+                    def _cb(h, _):
+                        cls = ctypes.create_unicode_buffer(256)
+                        user32.GetClassNameW(h, cls, 256)
+                        if cls.value == "CabinetWClass":
+                            globals()["_explorer_hwnd"] = h
+                        return True
+                    globals()["_explorer_hwnd"] = None
+                    user32.EnumWindows(_cb, 0)
+                    hwnd = globals().get("_explorer_hwnd") or 0
                 if hwnd:
+                    user32.ShowWindow(hwnd, 9)  # SW_RESTORE
                     user32.SetForegroundWindow(hwnd)
             except Exception:
                 pass
