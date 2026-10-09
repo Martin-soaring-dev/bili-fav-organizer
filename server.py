@@ -783,25 +783,24 @@ function Write-Ascii([string]$s) {
 }
 try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
-  # 此机上的 WinRT 投影暴露的是 RequestVerificationAsync（不是 VerifyAsync）
   $null = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+  $resultType = [Windows.Security.Credentials.UI.UserConsentVerificationResult,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
 
+  $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 -and
+    $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+  } | Select-Object -First 1
+  if (-not $asTask) { Write-Output 'unsupported:AsTask missing'; exit 0 }
+
+  # 本机 WinRT 投影：RequestVerificationAsync + UserConsentVerificationResult
   $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync('Verify to unlock local data')
-  $deadline = (Get-Date).AddSeconds(45)
-  $status = [string]$op.Status
-  while ($status -eq 'Started' -or $status -eq '0') {
-    if ((Get-Date) -gt $deadline) { Write-Output 'cancel'; exit 0 }
-    Start-Sleep -Milliseconds 250
-    $status = [string]$op.Status
-  }
-  if ($status -eq 'Completed' -or $status -eq '1') {
-    $name = [string]$op.GetResults()
-    if ($name -eq 'Verified' -or $name -eq 'Allow' -or $name -eq '0') { Write-Output 'ok'; exit 0 }
-    if ($name -eq 'UserCancelled' -or $name -eq 'UserCanceled') { Write-Output 'cancel'; exit 0 }
-    Write-Ascii ('deny:' + $name)
-    exit 0
-  }
-  Write-Ascii ('unsupported:async status=' + $status)
+  $task = $asTask.MakeGenericMethod($resultType).Invoke($null, @($op))
+  if (-not $task.Wait(45000)) { Write-Output 'cancel'; exit 0 }
+
+  $name = [string]$task.Result
+  if ($name -eq 'Verified' -or $name -eq 'Allow' -or $name -eq '0') { Write-Output 'ok'; exit 0 }
+  if ($name -eq 'UserCancelled' -or $name -eq 'UserCanceled') { Write-Output 'cancel'; exit 0 }
+  Write-Ascii ('deny:' + $name)
 } catch {
   Write-Ascii ('unsupported:' + $_.Exception.Message)
 }
