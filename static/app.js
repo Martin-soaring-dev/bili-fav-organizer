@@ -193,7 +193,7 @@
           return;
         }
         await api("POST", "/api/vault/set-password", {
-          password: next, current_password: current,
+          password: next, current_password: "",
         });
         log("应用密码已更新", "ok");
         closeAppLockModal();
@@ -4409,5 +4409,112 @@
     });
   }
 
+  function migrateMainPanelsIntoSettings() {
+    const loginHost = $("settings-login-host");
+    const modelHost = $("settings-model-host");
+    const conn = $("connection-content");
+    if (!conn || !loginHost || loginHost.dataset.filled) return;
+    const sections = conn.querySelectorAll(":scope > .conn-section");
+    if (sections[0]) loginHost.appendChild(sections[0]);
+    if (sections[1] && modelHost) modelHost.appendChild(sections[1]);
+    loginHost.dataset.filled = "1";
+  }
+
+  const THEME_CYCLE = ["system", "light", "dark"];
+  const THEME_LABEL = { system: "Auto", light: "☀", dark: "🌙" };
+  function setTheme(v) {
+    const top = $("theme-mode");
+    if (top) {
+      top.value = v;
+      top.dispatchEvent(new Event("change"));
+    } else if (typeof applyTheme === "function") {
+      applyTheme(v);
+    }
+    const btn = $("theme-cycle-btn");
+    if (btn) btn.textContent = THEME_LABEL[v] || "Auto";
+    document.querySelectorAll(".theme-pick").forEach((el) => {
+      el.classList.toggle("active", el.getAttribute("data-theme") === v);
+    });
+  }
+  if ($("theme-cycle-btn")) {
+    const cur = localStorage.getItem("theme-mode") || "system";
+    $("theme-cycle-btn").textContent = THEME_LABEL[cur] || "Auto";
+    $("theme-cycle-btn").addEventListener("click", () => {
+      const idx = THEME_CYCLE.indexOf(localStorage.getItem("theme-mode") || "system");
+      setTheme(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
+    });
+  }
+  document.querySelectorAll(".theme-pick").forEach((el) => {
+    el.addEventListener("click", () => setTheme(el.getAttribute("data-theme")));
+  });
+
+  if ($("toggle-log")) {
+    $("toggle-log").addEventListener("click", () => {
+      const area = $("log-area");
+      const tab = $("show-log-tab");
+      if (!area) return;
+      const hidden = area.classList.toggle("collapsed");
+      if (tab) tab.hidden = !hidden;
+      document.body.classList.toggle("logs-collapsed", hidden);
+    });
+  }
+  if ($("show-log-tab")) {
+    $("show-log-tab").addEventListener("click", () => {
+      const area = $("log-area");
+      const tab = $("show-log-tab");
+      if (area) area.classList.remove("collapsed");
+      if (tab) tab.hidden = true;
+      document.body.classList.remove("logs-collapsed");
+    });
+  }
+  if ($("pin-log")) {
+    $("pin-log").addEventListener("click", () => {
+      const area = $("log-area");
+      if (!area) return;
+      area.classList.toggle("pinned");
+    });
+  }
+  if ($("settings-opacity")) {
+    $("settings-opacity").addEventListener("input", (e) => {
+      const v = e.target.value;
+      const panel = $("settings-panel");
+      if (panel) panel.style.opacity = String(Number(v) / 100);
+      const val = $("settings-opacity-val");
+      if (val) val.textContent = String(v);
+    });
+  }
+
+  async function refreshUsage() {
+    try {
+      const u = await api("GET", "/api/data/usage");
+      const fmt = (n) => {
+        if (n == null) return "—";
+        const gb = n / 1024 / 1024 / 1024;
+        return gb >= 1 ? gb.toFixed(1) + " GB" : Math.max(1, Math.round(n / 1024 / 1024)) + " MB";
+      };
+      const diskBar = $("disk-used-bar");
+      const projBar = $("proj-used-bar");
+      if (diskBar && u.disk_total_bytes) {
+        const pct = Math.min(100, (u.disk_used_bytes / u.disk_total_bytes) * 100);
+        diskBar.style.width = pct.toFixed(1) + "%";
+        const meta = $("disk-used-meta");
+        if (meta) meta.textContent = fmt(u.disk_used_bytes) + " / " + fmt(u.disk_total_bytes);
+      }
+      if (projBar) {
+        projBar.style.width = u.disk_total_bytes
+          ? Math.max(0.5, Math.min(100, (u.project_bytes / u.disk_total_bytes) * 100)).toFixed(2) + "%"
+          : "1%";
+        const meta = $("proj-used-meta");
+        if (meta) meta.textContent = fmt(u.project_bytes);
+      }
+    } catch (_) {}
+  }
+
+  setInterval(() => {
+    try { if (typeof refreshStats === "function") refreshStats(); } catch (_) {}
+    refreshUsage();
+  }, 60000);
+
   init();
+  migrateMainPanelsIntoSettings();
 })();

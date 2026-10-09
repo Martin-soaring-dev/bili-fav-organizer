@@ -1005,3 +1005,24 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @media (max-width: 900px) {
   .settings-panel { left: 0; }
 }
+
+.log-actions { display: inline-flex; gap: 6px; }
+.logs.collapsed { display: none; }
+.logs.pinned { box-shadow: 2px 0 8px rgba(0,0,0,.12); z-index: 2; }
+.show-log-tab {
+  position: fixed; left: 0; top: 50%; transform: translateY(-50%);
+  writing-mode: vertical-rl; padding: 12px 6px; border-radius: 0 8px 8px 0;
+  border: 1px solid var(--border); background: var(--panel); cursor: pointer;
+  z-index: 50; font-size: 12px;
+}
+body.logs-collapsed .settings-panel { left: 0 !important; }
+.settings-panel { transition: opacity .15s ease; }
+.usage-bar-wrap { margin: 10px 0 14px; }
+.usage-label { font-size: 13px; margin-bottom: 6px; }
+.usage-bar {
+  height: 14px; border-radius: 7px; background: rgba(128,128,128,.25); overflow: hidden;
+}
+.usage-fill { height: 100%; width: 0; border-radius: 7px; transition: width .3s ease; }
+.usage-fill.disk { background: linear-gradient(90deg, #4c8dff, #7aa8ff); }
+.usage-fill.proj { background: linear-gradient(90deg, #2fbf71, #61d095); }
+.usage-meta { font-size: 12px; margin-top: 4px; }

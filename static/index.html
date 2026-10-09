@@ -22,16 +22,9 @@
       <span id="update-status" class="update-status" aria-live="polite"></span>
     </div>
     <div class="topbar-actions">
+      <button id="theme-cycle-btn" class="btn mini-btn" title="主题：自动 / 浅色 / 深色">Auto</button>
       <button id="settings-btn" class="btn mini-btn" title="设置">⚙</button>
       <button id="lock-now-btn" class="btn mini-btn" title="锁定">🔒</button>
-      <button id="data-import-btn" class="btn mini-btn">📥 读取项目数据</button>
-      <button id="data-export-btn" class="btn mini-btn">📤 导出项目数据</button>
-      <button id="data-clear-btn" class="btn mini-btn danger">🗑 清除当前数据</button>
-      <select id="theme-mode" class="theme-mode" title="界面模式">
-        <option value="system">跟随系统</option>
-        <option value="dark">深色</option>
-        <option value="light">浅色</option>
-      </select>
       <input id="data-file" type="file" accept=".json,application/json" style="display:none">
     </div>
     <div class="status-strip">
@@ -42,15 +35,22 @@
       <span>视频 <b id="st-videos">-</b></span>
       <span>已分析 <b id="st-analyzed">-</b></span>
       <span>已定案 <b id="st-planned">-</b></span>
-      <button id="load-stats" class="mini" type="button" title="重新读取本地数据库中的统计计数">刷新计数</button>
     </div>
   </header>
 
   <div class="layout">
     <!-- 左：日志区 -->
     <aside class="logs" id="log-area">
-      <div class="panel-title">运行日志 <button id="clear-log" class="mini">清空</button></div>
+      <div class="panel-title">
+        <span>运行日志</span>
+        <span class="log-actions">
+          <button id="clear-log" class="mini" title="清空日志">🗑</button>
+          <button id="pin-log" class="mini" title="钉住日志窗">📌</button>
+          <button id="toggle-log" class="mini" title="隐藏日志窗">⟨</button>
+        </span>
+      </div>
       <div class="log-body" id="log-body"></div>
+      <button id="show-log-tab" class="show-log-tab" type="button" title="显示日志" hidden>日志</button>
     </aside>
 
     <!-- 右：操作面板 -->
@@ -774,45 +774,15 @@
         <div id="settings-account-info" class="settings-block">读取中…</div>
         <hr class="settings-sep">
         <h3>登录信息</h3>
-        <div class="settings-block">
-          <label class="cookie-method-pick">Cookie 获取方式
-            <select id="settings-cookie-method">
-              <option value="qr" selected>二维码登录（推荐）</option>
-              <option value="manual">手动输入 Cookie</option>
-            </select>
-          </label>
-          <div id="settings-qr-panel" class="cookie-method-panel">
-            <div class="row">
-              <button id="settings-qr-btn" class="btn ghost" type="button">刷新二维码</button>
-              <span class="muted" id="settings-qr-status">点刷新生成二维码</span>
-            </div>
-            <div id="settings-qr-box" class="qr-box" style="display:none">
-              <img id="settings-qr-img" alt="登录二维码">
-              <div class="qr-tip">请用 <b>手机 B站 App</b> 扫码确认</div>
-            </div>
-          </div>
-          <div id="settings-manual-panel" class="cookie-method-panel" hidden>
-            <textarea id="settings-cookie" rows="2" placeholder="SESSDATA=...; bili_jct=...; DedeUserID=..."></textarea>
-            <div class="row">
-              <button id="settings-save-cookie" class="btn">保存 Cookie</button>
-              <span id="settings-cookie-state" class="muted"></span>
-            </div>
-          </div>
-          <div class="row">
-            <button id="settings-test-cookie" class="btn ghost" type="button">测试 Cookie</button>
-            <button id="settings-save-account" class="btn primary" type="button">保存并刷新</button>
-          </div>
+        <div class="settings-block" id="settings-login-host">
+          <!-- 登录控件由主界面连接配置迁入（保留原 id，便于既有脚本） -->
         </div>
       </section>
 
       <section class="settings-tab" data-tab-panel="model" hidden>
-        <h3>概览</h3>
-        <div id="settings-model-overview" class="settings-block">读取中…</div>
-        <hr class="settings-sep">
-        <h3>模型管理</h3>
-        <div class="settings-block">
-          <button id="settings-manage-models" class="btn ghost" type="button">打开模型管理</button>
-          <p class="muted">供应商、API Key、模型规格与测试连接。</p>
+        <h3>模型配置</h3>
+        <div class="settings-block" id="settings-model-host">
+          <!-- 模型配置由主界面迁入 -->
         </div>
       </section>
 
@@ -820,8 +790,6 @@
         <h3>修改密码</h3>
         <div class="settings-block">
           <p class="muted" id="settings-security-status">—</p>
-          <label>当前密码（未解锁时必填）</label>
-          <input id="settings-sec-current" type="password" autocomplete="current-password">
           <label>新密码（至少 6 位）</label>
           <input id="settings-sec-new" type="password" autocomplete="new-password">
           <label>再次输入新密码</label>
@@ -847,20 +815,20 @@
         <h3>界面</h3>
         <div class="settings-block">
           <label>主题</label>
-          <select id="settings-theme-mode" class="theme-mode">
-            <option value="system">跟随系统</option>
-            <option value="dark">深色</option>
-            <option value="light">浅色</option>
-          </select>
-          <p class="muted">与顶栏主题选择同步。</p>
+          <div class="row">
+            <button type="button" class="btn ghost theme-pick" data-theme="system">Auto</button>
+            <button type="button" class="btn ghost theme-pick" data-theme="light">☀ 浅色</button>
+            <button type="button" class="btn ghost theme-pick" data-theme="dark">🌙 深色</button>
+          </div>
+          <label>设置面板透明度（<span id="settings-opacity-val">96</span>%）</label>
+          <input id="settings-opacity" type="range" min="70" max="100" value="96">
         </div>
       </section>
 
       <section class="settings-tab" data-tab-panel="favorites" hidden>
         <h3>本地收藏数据</h3>
-        <div class="settings-block">
-          <button id="settings-open-library" class="btn ghost" type="button">浏览本地内容</button>
-          <p class="muted">查看收藏夹、条目、详情与画像（与「查看本地内容」相同）。</p>
+        <div class="settings-block" id="settings-favorites-host">
+          <p class="muted">正在载入本地收藏内容…</p>
         </div>
       </section>
 
@@ -876,6 +844,18 @@
           <label>数据目录</label>
           <input id="settings-data-path" type="text" readonly>
           <button id="settings-data-open" class="btn ghost" type="button">打开目录</button>
+          <hr class="settings-sep">
+          <h3>磁盘占用</h3>
+          <div class="usage-bar-wrap">
+            <div class="usage-label">磁盘已用</div>
+            <div class="usage-bar"><div id="disk-used-bar" class="usage-fill disk"></div></div>
+            <div class="usage-meta muted" id="disk-used-meta">—</div>
+          </div>
+          <div class="usage-bar-wrap">
+            <div class="usage-label">本项目数据</div>
+            <div class="usage-bar"><div id="proj-used-bar" class="usage-fill proj"></div></div>
+            <div class="usage-meta muted" id="proj-used-meta">—</div>
+          </div>
         </div>
       </section>
 

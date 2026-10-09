@@ -407,7 +407,8 @@ APP_UNLOCK_BLOB = USER_DATA_DIR / "app_unlock.blob"
 _APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
 _PBKDF2_ITERS = 200_000
 _APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/",
-                        "/api/cookie", "/api/prompts/defaults", "/api/data/paths")
+                        "/api/cookie", "/api/prompts/defaults", "/api/data/paths",
+                        "/api/data/usage")
 
 
 def _app_lock_secrets() -> dict:
@@ -1270,17 +1271,30 @@ def set_config(cfg: ConfigIn):
 
 
 DEFAULT_PROMPTS = {
+    # 与 llm_analyzer 生产提示词同源（规则段）；运行时仍会拼接目录/画像上下文
     "prompt_profile": (
-        "你是收藏夹整理助手。请根据抽样条目为收藏夹写出简介、主题、典型内容、范围外提示，"
-        "并给出 coherence 与 0~1 confidence。只返回 JSON。"
+        "你是收藏夹内容画像整理助手。请根据输入的全部条目归纳收藏夹画像，收藏夹名称只是弱提示。"
+        "输出 JSON：summary 简介、topics 主题列表、typical_content 典型内容、out_of_scope 范围外提示、"
+        "coherence 一致性说明、confidence 0~1。只返回 JSON。"
     ),
     "prompt_analyze": (
-        "你是 B 站视频归类助手。请根据收藏夹画像，为每条视频给出 recommended 收藏夹、"
-        "action（move_to_existing/create_new/skip）、reason（≤20 字）与 confidence 0~1。只返回 JSON。"
+        "你是 B 站收藏夹整理助手。任务是判断一批视频各自归属于哪个收藏夹。\n"
+        "规则：\n"
+        "1. 每个输入 id 必须有一条对应结果，id 原样返回。\n"
+        "2. 归类以画像的实际主题和收纳范围为主要依据，收藏夹名称只作弱提示。\n"
+        "3. action=move_to_existing 且 recommended 就是已所在夹时表示留下，不要用 skip 表示留下。\n"
+        "4. in_default_inbox=true 表示尚未分拣，必须在有画像的收藏夹中选最合适的一个；"
+        "所有画像都不符且新主题清楚时才 create_new；确实无处可去才 skip。\n"
+        "5. 略微偏离且证据不明确时保留原位。\n"
+        "6. 标题/简介/UP主全空或完全无法归类才 skip。\n"
+        "7. confidence 为 0~1。\n"
+        "8. reason 不超过 20 字。\n"
+        "9. 默认收藏夹只能移出，绝不能作为移入目标。\n"
+        "只返回纯 JSON。"
     ),
     "prompt_merge": (
-        "你是收藏夹合并顾问。请根据画像与代表条目，提出合并组（target_id、source_ids、final_name、"
-        "reason、confidence）。只返回 JSON。"
+        "你是 B 站收藏夹信息架构整理助手。目标是在保留有用主题边界的前提下提出合并组。"
+        "输出 JSON groups：target_id、source_ids、final_name、reason、confidence。只返回 JSON。"
     ),
 }
 DEFAULT_CONFIDENCE = {
@@ -1301,6 +1315,45 @@ def data_paths():
         "ok": True,
         "data_dir": str(USER_DATA_DIR),
         "db_file": str(store.DB_FILE),
+    }
+
+
+@app.get("/api/data/usage")
+def data_usage():
+    def _dir_size(path: Path) -> int:
+        total = 0
+        if not path.exists():
+            return 0
+        if path.is_file():
+            return path.stat().st_size
+        for p in path.rglob("*"):
+            try:
+                if p.is_file():
+                    total += p.stat().st_size
+            except OSError:
+                pass
+        return total
+
+    proj = _dir_size(USER_DATA_DIR)
+    disk_total = disk_free = None
+    try:
+        if sys.platform == "win32":
+            import shutil as _sh
+            usage = _sh.disk_usage(str(USER_DATA_DIR if USER_DATA_DIR.exists() else Path.home()))
+            disk_total, disk_free = usage.total, usage.free
+        else:
+            import shutil as _sh
+            usage = _sh.disk_usage(str(USER_DATA_DIR if USER_DATA_DIR.exists() else Path.home()))
+            disk_total, disk_free = usage.total, usage.free
+    except OSError:
+        pass
+    disk_used = (disk_total - disk_free) if disk_total is not None else None
+    return {
+        "ok": True,
+        "project_bytes": proj,
+        "disk_total_bytes": disk_total,
+        "disk_used_bytes": disk_used,
+        "disk_free_bytes": disk_free,
     }
 
 
