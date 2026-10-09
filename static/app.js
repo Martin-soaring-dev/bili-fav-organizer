@@ -7,14 +7,17 @@
 
   // ---------- 界面主题 ----------
   const savedTheme = localStorage.getItem("theme-mode") || "system";
-  $("theme-mode").value = savedTheme;
+  const themeModeEl = $("theme-mode");
+  if (themeModeEl) themeModeEl.value = savedTheme;
   function applyTheme(mode) {
     if (mode === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", mode);
     localStorage.setItem("theme-mode", mode);
   }
   applyTheme(savedTheme);
-  $("theme-mode").addEventListener("change", () => applyTheme($("theme-mode").value));
+  if (themeModeEl) {
+    themeModeEl.addEventListener("change", () => applyTheme(themeModeEl.value));
+  }
 
   const connectionToggle = $("connection-toggle");
   const connectionContent = $("connection-content");
@@ -853,7 +856,7 @@
     } catch (e) { log("保存配置失败: " + (e.error || e.message), "err"); }
   });
 
-  $("load-stats").addEventListener("click", () => refreshStats());
+  if ($("load-stats")) $("load-stats").addEventListener("click", () => refreshStats());
 
   // ---------- 进度条 ----------
   function setProgress(el, id, done, total) {
@@ -1123,12 +1126,12 @@
   });
 
   // ---------- 项目数据：导出 / 读取 / 清除 ----------
-  $("data-export-btn").addEventListener("click", () => {
+  if ($("data-export-btn")) $("data-export-btn").addEventListener("click", () => {
     log("导出项目数据 ...（浏览器将下载 JSON 文件）");
     window.location.href = "/api/data/export";
   });
 
-  $("data-import-btn").addEventListener("click", () => $("data-file").click());
+  if ($("data-import-btn")) $("data-import-btn").addEventListener("click", () => { const f = $("data-file"); if (f) f.click(); });
 
   $("data-file").addEventListener("change", async (e) => {
     const f = e.target.files && e.target.files[0];
@@ -1154,7 +1157,7 @@
   });
 
   const clearModal = $("clear-modal");
-  $("data-clear-btn").addEventListener("click", () => { clearModal.style.display = "flex"; });
+  if ($("data-clear-btn")) $("data-clear-btn").addEventListener("click", () => { clearModal.style.display = "flex"; });
   $("clear-close").addEventListener("click", () => { clearModal.style.display = "none"; });
   $("clear-all").addEventListener("click", () => document.querySelectorAll(".clear-options input").forEach(x => x.checked = true));
   $("clear-none").addEventListener("click", () => document.querySelectorAll(".clear-options input").forEach(x => x.checked = false));

@@ -25,6 +25,16 @@
       <button id="theme-cycle-btn" class="btn mini-btn" title="主题：自动 / 浅色 / 深色">Auto</button>
       <button id="settings-btn" class="btn mini-btn" title="设置">⚙</button>
       <button id="lock-now-btn" class="btn mini-btn" title="锁定">🔒</button>
+      <!-- 隐藏钩子：兼容既有导入/导出/主题脚本 -->
+      <select id="theme-mode" hidden>
+        <option value="system">跟随系统</option>
+        <option value="dark">深色</option>
+        <option value="light">浅色</option>
+      </select>
+      <button id="data-import-btn" type="button" hidden>导入</button>
+      <button id="data-export-btn" type="button" hidden>导出</button>
+      <button id="data-clear-btn" type="button" hidden>清除</button>
+      <button id="load-stats" type="button" hidden>刷新计数</button>
       <input id="data-file" type="file" accept=".json,application/json" style="display:none">
     </div>
     <div class="status-strip">
