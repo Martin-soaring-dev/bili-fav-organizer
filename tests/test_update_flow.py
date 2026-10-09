@@ -16,6 +16,7 @@ from unittest.mock import patch
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+os.environ.setdefault("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", "1")
 
 # 只在自己最先导入 server 时隔离数据目录；若别的测试已导入则复用，不改变其行为。
 if "server" not in sys.modules:

@@ -1,7 +1,8 @@
 """本地 API 防护与长任务互斥契约。"""
 import os
-import time
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -12,18 +13,30 @@ import server
 class LocalApiGuardTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        os.environ.pop("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", None)
         cls.client = TestClient(server.app)
 
-    @classmethod
-    def tearDownClass(cls):
-        os.environ.pop("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", None)
+    def setUp(self):
+        # 本类按生产规则断言；只在用例期间关掉测试钩子，避免拖垮其它 TestClient 套件
+        self._prev_insecure = os.environ.pop("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", None)
+
+    def tearDown(self):
+        if self._prev_insecure is not None:
+            os.environ["BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL"] = self._prev_insecure
+        else:
+            os.environ.pop("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", None)
 
     def _token(self):
         return server._LOCAL_API_TOKEN
 
     def test_rejects_non_local_host(self):
         res = self.client.get("/api/status", headers={"Host": "evil.example"})
+        self.assertEqual(403, res.status_code)
+
+    def test_rejects_testclient_host_in_production(self):
+        # 生产不得把 Host: testserver 当成测试豁免
+        res = self.client.put("/api/scan/selection", json={"folder_ids": []},
+                              headers={"Host": "testserver",
+                                       "X-BiliFav-Token": self._token()})
         self.assertEqual(403, res.status_code)
 
     def test_rejects_missing_token_on_write(self):
@@ -73,6 +86,26 @@ class LocalApiGuardTests(unittest.TestCase):
             self.assertEqual(403, res.status_code)
         finally:
             os.environ.pop("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", None)
+
+
+class DpapiTokenBlobTests(unittest.TestCase):
+    def test_protect_unprotect_roundtrip(self):
+        raw = "secret-token-值".encode("utf-8")
+        blob = server._dpapi_protect(raw)
+        self.assertEqual(raw, server._dpapi_unprotect(blob))
+
+    def test_plain_prefix_fallback(self):
+        self.assertEqual(b"abc", server._dpapi_unprotect(b"PLAIN\x00abc"))
+
+    def test_persist_and_load_token_blob(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            old = server._TOKEN_BLOB
+            server._TOKEN_BLOB = Path(tmp) / "token.blob"
+            try:
+                server._persist_api_token()
+                self.assertEqual(server._LOCAL_API_TOKEN, server._load_persisted_token())
+            finally:
+                server._TOKEN_BLOB = old
 
 
 class JobMutexTests(unittest.TestCase):

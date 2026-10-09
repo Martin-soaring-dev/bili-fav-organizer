@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+os.environ.setdefault("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", "1")
 # Keep this feature's tests independent of other, pre-existing test helpers.
 # Seed empty storage before importing the app so legacy user data is never migrated.
 TEST_ROOT = Path(__file__).resolve().parent / ".test-data" / "scan-recovery"

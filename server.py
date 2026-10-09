@@ -296,7 +296,8 @@ def _host_allowed(host: str) -> bool:
     if hostname.startswith("["):  # [::1]:port
         hostname = hostname.split("]")[0].lstrip("[")
     allowed = {"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"}
-    if _is_test_client_host(host) or _insecure_local():
+    # 仅测试钩子打开时才接受 TestClient 的 Host，生产绝不因 Host 值放行
+    if _insecure_local():
         allowed.add("testserver")
     return hostname in allowed
 
@@ -306,14 +307,14 @@ def _origin_allowed(origin: str, port: int | None) -> bool:
         parts = urlsplit(origin)
     except ValueError:
         return False
-    if parts.scheme not in ("http", "https"):
+    if parts.scheme != "http":
         return False
     hostname = (parts.hostname or "").lower()
     if hostname not in ("127.0.0.1", "localhost", "::1"):
         return False
-    if port and parts.port and int(parts.port) != int(port):
-        return False
-    return True
+    origin_port = parts.port or (443 if parts.scheme == "https" else 80)
+    expect = int(port or _APP_PORT)
+    return int(origin_port) == expect
 
 
 def _token_from_request(request) -> str:
@@ -328,7 +329,7 @@ def _token_from_request(request) -> str:
 
 def _token_ok(request) -> bool:
     provided = _token_from_request(request)
-    return bool(provided) and provided == _LOCAL_API_TOKEN
+    return bool(provided) and secrets.compare_digest(provided, _LOCAL_API_TOKEN)
 
 
 # ---- DPAPI（Windows 用户绑定）；非 Windows 回退为明文 blob 文件 ----
@@ -389,6 +390,14 @@ def _persist_api_token() -> None:
         _TOKEN_BLOB.write_bytes(_dpapi_protect(_LOCAL_API_TOKEN.encode("utf-8")))
     except OSError as exc:
         log.warning("无法写入 token.blob：%s", exc)
+
+
+def _load_persisted_token() -> str | None:
+    """读回 token.blob（DPAPI 解密）。失败返回 None，不覆盖进程内 token。"""
+    try:
+        return _dpapi_unprotect(_TOKEN_BLOB.read_bytes()).decode("utf-8")
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
 
 
 def _begin_job(key: str, state: dict, *, error: str = "") -> JSONResponse | None:
@@ -1594,38 +1603,6 @@ def _pending_scan_issues() -> list[dict]:
 
 
 @app.middleware("http")
-async def local_api_guard(request, call_next):
-    """Host / Origin / Sec-Fetch / Token —— 挡 CSRF 与 DNS rebinding。"""
-    host = request.headers.get("host", "")
-    if not _host_allowed(host):
-        return JSONResponse({"ok": False, "error": "非法 Host"}, status_code=403)
-    path = request.url.path
-    method = request.method.upper()
-    test_client = _is_test_client_host(host)
-    need_token = (method not in ("GET", "HEAD", "OPTIONS") or
-                  path in ("/api/data/export", "/api/cookie"))
-    if need_token and not test_client and not _insecure_local():
-        origin = request.headers.get("origin")
-        if origin and not _origin_allowed(origin, request.url.port or _APP_PORT):
-            return JSONResponse({"ok": False, "error": "跨源请求被拒绝"}, status_code=403)
-        sfs = request.headers.get("sec-fetch-site")
-        if sfs and sfs not in ("same-origin", "none"):
-            return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
-        if not _token_ok(request):
-            return JSONResponse({"ok": False, "error": "缺少或无效的本地 API token"},
-                                status_code=403)
-    elif need_token and not test_client and _insecure_local():
-        # 仍拦跨站表单，只是不校验 token（测试/开发）
-        sfs = request.headers.get("sec-fetch-site")
-        if sfs and sfs not in ("same-origin", "none"):
-            return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
-        origin = request.headers.get("origin")
-        if origin and not _origin_allowed(origin, request.url.port or _APP_PORT):
-            return JSONResponse({"ok": False, "error": "跨源请求被拒绝"}, status_code=403)
-    return await call_next(request)
-
-
-@app.middleware("http")
 async def scan_issue_gate(request, call_next):
     blocked_paths = {"/api/analyze/start", "/api/analyze/continuous", "/api/plan/mark_invalid",
                      "/api/plan/apply", "/api/apply/start", "/api/folder-profiles/generate",
@@ -1638,6 +1615,33 @@ async def scan_issue_gate(request, call_next):
             return JSONResponse({"ok": False, "code": "scan_issue_pending",
                                  "error": "收藏夹扫描异常尚未解决，请先处理提示窗口中的问题。",
                                  "issues": issues}, status_code=409)
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def local_api_guard(request, call_next):
+    """Host / Origin / Sec-Fetch / Token —— 挡 CSRF 与 DNS rebinding。
+
+    注册在 scan_issue_gate 之后：Starlette 后注册的在外层，安全校验最先执行。
+    """
+    host = request.headers.get("host", "")
+    if not _host_allowed(host):
+        return JSONResponse({"ok": False, "error": "非法 Host"}, status_code=403)
+    path = request.url.path
+    method = request.method.upper()
+    need_token = (method not in ("GET", "HEAD", "OPTIONS") or
+                  path in ("/api/data/export", "/api/cookie"))
+    if need_token:
+        origin = request.headers.get("origin")
+        if origin and not _origin_allowed(origin, request.url.port or _APP_PORT):
+            return JSONResponse({"ok": False, "error": "跨源请求被拒绝"}, status_code=403)
+        sfs = request.headers.get("sec-fetch-site")
+        if sfs and sfs not in ("same-origin", "none"):
+            return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
+        # 仅开发/测试钩子跳过 token；生产始终校验
+        if not _insecure_local() and not _token_ok(request):
+            return JSONResponse({"ok": False, "error": "缺少或无效的本地 API token"},
+                                status_code=403)
     return await call_next(request)
 
 
@@ -4748,6 +4752,9 @@ def main():
     _log_attribution()
     _cleanup_stale_update_leftovers(APP_DIR.parent, Path(tempfile.gettempdir()))
     _persist_api_token()
+    restored = _load_persisted_token()
+    if restored != _LOCAL_API_TOKEN:
+        log.warning("token.blob 解密结果与当前 token 不一致（跨用户或损坏）")
     _UVICORN_SERVER = uvicorn.Server(config)
     _UVICORN_SERVER.run()
 
