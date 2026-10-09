@@ -197,9 +197,19 @@
   }
 
   async function beginUnlockFlow() {
-    setLockMode("hello");
     if (helloTried) return;
     helloTried = true;
+    let bound = false;
+    try {
+      const vs = await api("GET", "/api/vault/status");
+      bound = !!(vs && vs.has_device_wrap);
+    } catch (_) {}
+    if (!bound) {
+      // 未绑定 Windows Hello：不自动认证，直接密码/恢复码
+      setLockMode("password");
+      return;
+    }
+    setLockMode("hello");
     await tryWindowsHelloAuto();
   }
 
@@ -4633,65 +4643,6 @@
     el.addEventListener("click", () => setTheme(el.getAttribute("data-theme")));
   });
 
-  // 日志页签：行为随位置变化
-  // 贴左（日志已隐藏）→ 点击展开；贴日志右缘（日志可见）→ 点击收起/缩回
-  if ($("show-log-tab")) {
-    $("show-log-tab").addEventListener("click", () => {
-      const area = $("log-area");
-      const collapsed = document.body.classList.contains("logs-collapsed");
-      const hidden = !!(area && area.classList.contains("log-hide"));
-      if (collapsed || hidden) {
-        document.body.classList.remove("logs-collapsed");
-        if (area) area.classList.remove("log-hide");
-        log("日志已展开", "info");
-      } else if (area && document.body.classList.contains("logs-floating")) {
-        area.classList.add("log-hide");
-        log("日志已缩回，点左侧「日志」或移入左缘展开", "info");
-      } else {
-        document.body.classList.add("logs-collapsed");
-        log("日志已收起，点「日志」展开", "info");
-      }
-    });
-  }
-  // 钉住：钉住=固定在布局；未钉住=悬浮，鼠标移开自动缩回
-  let logPinned = false;
-  let logHideTimer = null;
-  function applyLogPin() {
-    const area = $("log-area");
-    const btn = $("pin-log");
-    if (!area) return;
-    document.body.classList.toggle("logs-floating", !logPinned);
-    if (btn) btn.classList.toggle("is-on", logPinned);
-    if (btn) btn.title = logPinned ? "已钉住（点击取消，取消后悬停显示）" : "未钉住（点击钉住固定）";
-    if (logPinned) {
-      area.classList.remove("log-hide");
-      if (logHideTimer) clearTimeout(logHideTimer);
-    }
-  }
-  if ($("pin-log")) {
-    $("pin-log").addEventListener("click", () => {
-      logPinned = !logPinned;
-      applyLogPin();
-      log(logPinned ? "日志已钉住" : "已取消钉住，鼠标移入显示、移开收起", "info");
-    });
-  }
-  // 默认未钉住（悬浮）
-  applyLogPin();
-  const logAreaEl = $("log-area");
-  if (logAreaEl) {
-    logAreaEl.addEventListener("mouseenter", () => {
-      if (logPinned) return;
-      if (logHideTimer) clearTimeout(logHideTimer);
-      logAreaEl.classList.remove("log-hide");
-    });
-    logAreaEl.addEventListener("mouseleave", () => {
-      if (logPinned) return;
-      if (logHideTimer) clearTimeout(logHideTimer);
-      logHideTimer = setTimeout(() => {
-        if (!logPinned) logAreaEl.classList.add("log-hide");
-      }, 700);
-    });
-  }
   if ($("settings-opacity")) {
     // 毛玻璃模糊半径（px），替代整块 opacity 透明
     const applyBlur = (px) => {
@@ -4749,13 +4700,6 @@
     const logBody = $("log-body");
     const termBody = $("terminal-body");
     // 默认锁定
-    logPinned = true;
-    if (pinBtn) {
-      pinBtn.classList.add("is-on");
-      pinBtn.title = "已钉住（点击取消，取消后悬停显示）";
-    }
-    document.body.classList.remove("logs-floating");
-
     function setPanel(name) {
       if (title) title.textContent = name === "term" ? "终端" : "运行日志";
       if (clearBtn) clearBtn.hidden = name === "term";
@@ -4910,6 +4854,83 @@
     });
     updateHelloBtn();
   }
+
+
+  // ===================== 侧栏（唯一实现） =====================
+  (function sidebar() {
+    const shell = $("sidebar-shell");
+    const title = $("sidebar-title");
+    const clearBtn = $("clear-log");
+    const logBody = $("log-body");
+    const termBody = $("terminal-body");
+    const pinBtn = $("pin-log");
+
+    let pinned = true;   // 默认钉住
+    let panel = "log";
+
+    function applyPin() {
+      if (!shell) return;
+      shell.classList.toggle("pinned", pinned);
+      if (pinBtn) {
+        pinBtn.classList.toggle("is-on", pinned);
+        pinBtn.title = pinned ? "已钉住（点击取消钉住）" : "未钉住（悬停显示侧栏）";
+      }
+    }
+
+    function setPanel(name) {
+      panel = name;
+      if (title) title.textContent = name === "term" ? "终端" : "运行日志";
+      if (logBody) logBody.hidden = name !== "log";
+      if (termBody) termBody.hidden = name !== "term";
+      if (clearBtn) {
+        // 终端页：清空按钮隐藏且禁用
+        clearBtn.hidden = name === "term";
+        clearBtn.disabled = name === "term";
+      }
+      document.querySelectorAll(".sidebar-tab[data-panel]").forEach((el) => {
+        el.classList.toggle("active", el.getAttribute("data-panel") === name);
+      });
+    }
+
+    document.querySelectorAll(".sidebar-tab[data-panel]").forEach((el) => {
+      el.addEventListener("click", () => setPanel(el.getAttribute("data-panel") || "log"));
+    });
+    if (pinBtn) {
+      pinBtn.addEventListener("click", () => {
+        pinned = !pinned;
+        applyPin();
+        log(pinned ? "侧栏已钉住" : "侧栏未钉住（悬停显示）", "info");
+      });
+    }
+    applyPin();
+    setPanel("log");
+
+    // 终端输出轮询
+    let termSince = 0;
+    async function pullTerm() {
+      try {
+        const r = await api("GET", "/api/terminal/output?since=" + termSince);
+        if (r && r.lines && r.lines.length) {
+          const box = $("term-output");
+          if (box) { box.textContent += r.lines.join(""); box.scrollTop = box.scrollHeight; }
+          termSince = r.next;
+        }
+      } catch (_) {}
+    }
+    setInterval(pullTerm, 800);
+    const tin = $("term-input");
+    if (tin) {
+      tin.addEventListener("keydown", async (e) => {
+        if (e.key !== "Enter") return;
+        const cmd = tin.value.trim();
+        if (!cmd) return;
+        tin.value = "";
+        try { await api("POST", "/api/terminal/exec", { cmd }); }
+        catch (err) { log(err.error || err.message || "终端执行失败", "err"); }
+        pullTerm();
+      });
+    }
+  })();
 
   init();
   migrateMainPanelsIntoSettings();
