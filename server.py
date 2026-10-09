@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import sys
 import subprocess
@@ -273,6 +274,138 @@ ANALYZE_WAKE = threading.Event()
 _scan_start_lock = threading.Lock()
 _evt_lock = threading.Lock()
 _evt_seq = [0]
+_JOB_START_LOCK = threading.Lock()
+LONG_JOBS = ("scan_run", "analyze_run", "apply_run",
+             "folder_merge_run", "folder_merge_ai_run", "folder_profile_run")
+
+# 进程级本地 API token：内存持有；DPAPI blob 只作同 Windows 用户的恢复材料
+_LOCAL_API_TOKEN = secrets.token_urlsafe(32)
+_TOKEN_BLOB = USER_DATA_DIR / "token.blob"
+
+
+def _insecure_local() -> bool:
+    return os.environ.get("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", "").strip() == "1"
+
+
+def _is_test_client_host(host: str) -> bool:
+    return (host or "").split(":")[0].lower() == "testserver"
+
+
+def _host_allowed(host: str) -> bool:
+    hostname = (host or "").split(":")[0].strip().lower()
+    if hostname.startswith("["):  # [::1]:port
+        hostname = hostname.split("]")[0].lstrip("[")
+    allowed = {"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"}
+    if _is_test_client_host(host) or _insecure_local():
+        allowed.add("testserver")
+    return hostname in allowed
+
+
+def _origin_allowed(origin: str, port: int | None) -> bool:
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    hostname = (parts.hostname or "").lower()
+    if hostname not in ("127.0.0.1", "localhost", "::1"):
+        return False
+    if port and parts.port and int(parts.port) != int(port):
+        return False
+    return True
+
+
+def _token_from_request(request) -> str:
+    raw = request.headers.get("x-bilifav-token", "")
+    if raw:
+        return raw.strip()
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _token_ok(request) -> bool:
+    provided = _token_from_request(request)
+    return bool(provided) and provided == _LOCAL_API_TOKEN
+
+
+# ---- DPAPI（Windows 用户绑定）；非 Windows 回退为明文 blob 文件 ----
+def _dpapi_protect(data: bytes) -> bytes:
+    if sys.platform != "win32":
+        return b"PLAIN\x00" + data
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    in_buf = ctypes.create_string_buffer(data)
+    in_blob = DATA_BLOB(len(data), ctypes.cast(in_buf, ctypes.POINTER(ctypes.c_byte)))
+    out_blob = DATA_BLOB()
+    if not crypt32.CryptProtectData(
+            ctypes.byref(in_blob), "BiliFavOrganizer", None, None, None, 0,
+            ctypes.byref(out_blob)):
+        raise OSError("CryptProtectData failed")
+    try:
+        return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+    finally:
+        kernel32.LocalFree(out_blob.pbData)
+
+
+def _dpapi_unprotect(blob: bytes) -> bytes:
+    if blob.startswith(b"PLAIN\x00"):
+        return blob[6:]
+    if sys.platform != "win32":
+        raise OSError("DPAPI blob 只能在原 Windows 用户环境下解密")
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    in_buf = ctypes.create_string_buffer(blob)
+    in_blob = DATA_BLOB(len(blob), ctypes.cast(in_buf, ctypes.POINTER(ctypes.c_byte)))
+    out_blob = DATA_BLOB()
+    if not crypt32.CryptUnprotectData(
+            ctypes.byref(in_blob), None, None, None, None, 0,
+            ctypes.byref(out_blob)):
+        raise OSError("CryptUnprotectData failed")
+    try:
+        return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+    finally:
+        kernel32.LocalFree(out_blob.pbData)
+
+
+def _persist_api_token() -> None:
+    """把当前 token 用 DPAPI 绑到 Windows 用户后落盘（供同用户恢复，非明文）。"""
+    try:
+        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _TOKEN_BLOB.write_bytes(_dpapi_protect(_LOCAL_API_TOKEN.encode("utf-8")))
+    except OSError as exc:
+        log.warning("无法写入 token.blob：%s", exc)
+
+
+def _begin_job(key: str, state: dict, *, error: str = "") -> JSONResponse | None:
+    """在锁内占坑：长任务两两互斥，避免 check-then-act 双开。"""
+    with _JOB_START_LOCK:
+        for other in LONG_JOBS:
+            if other == key:
+                continue
+            if (APP.get(other) or {}).get("running"):
+                return JSONResponse(
+                    {"ok": False, "error": error or f"已有任务在运行（{other}），请先停止"},
+                    status_code=409)
+        if (APP.get(key) or {}).get("running"):
+            return JSONResponse({"ok": False, "error": error or "任务已在运行中"},
+                                status_code=409)
+        APP[key] = state
+        return None
 
 
 def emit(level: str, text: str, **extra):
@@ -1461,6 +1594,38 @@ def _pending_scan_issues() -> list[dict]:
 
 
 @app.middleware("http")
+async def local_api_guard(request, call_next):
+    """Host / Origin / Sec-Fetch / Token —— 挡 CSRF 与 DNS rebinding。"""
+    host = request.headers.get("host", "")
+    if not _host_allowed(host):
+        return JSONResponse({"ok": False, "error": "非法 Host"}, status_code=403)
+    path = request.url.path
+    method = request.method.upper()
+    test_client = _is_test_client_host(host)
+    need_token = (method not in ("GET", "HEAD", "OPTIONS") or
+                  path in ("/api/data/export", "/api/cookie"))
+    if need_token and not test_client and not _insecure_local():
+        origin = request.headers.get("origin")
+        if origin and not _origin_allowed(origin, request.url.port or _APP_PORT):
+            return JSONResponse({"ok": False, "error": "跨源请求被拒绝"}, status_code=403)
+        sfs = request.headers.get("sec-fetch-site")
+        if sfs and sfs not in ("same-origin", "none"):
+            return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
+        if not _token_ok(request):
+            return JSONResponse({"ok": False, "error": "缺少或无效的本地 API token"},
+                                status_code=403)
+    elif need_token and not test_client and _insecure_local():
+        # 仍拦跨站表单，只是不校验 token（测试/开发）
+        sfs = request.headers.get("sec-fetch-site")
+        if sfs and sfs not in ("same-origin", "none"):
+            return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
+        origin = request.headers.get("origin")
+        if origin and not _origin_allowed(origin, request.url.port or _APP_PORT):
+            return JSONResponse({"ok": False, "error": "跨源请求被拒绝"}, status_code=403)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def scan_issue_gate(request, call_next):
     blocked_paths = {"/api/analyze/start", "/api/analyze/continuous", "/api/plan/mark_invalid",
                      "/api/plan/apply", "/api/apply/start", "/api/folder-profiles/generate",
@@ -1569,16 +1734,14 @@ def scan(body: Optional[ScanIn] = None):
 def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
     """按文件夹选择批量元数据或分页读取，校验后更新该夹快照。"""
     with _scan_start_lock:
-        if APP["scan_run"] and APP["scan_run"].get("running"):
-            return JSONResponse({"ok": False, "error": "扫描已在运行中"}, status_code=409)
-        if recovery and any((APP.get(key) or {}).get("running") for key in (
-                "analyze_run", "apply_run", "folder_merge_run", "folder_merge_ai_run", "folder_profile_run")):
-            return JSONResponse({"ok": False, "error": "请先停止正在运行的整理任务，再处理扫描异常"}, status_code=409)
         run_id = uuid.uuid4().hex
-        app_state = APP["scan_run"] = {"id": run_id, "running": True, "step": "init", "done": 0,
-                                       "total": 0, "error": None, "strategy": "", "stop": False,
-                                       "folder_done": 0, "folder_total": 0, "current": "",
-                                       "recovery_action": recovery}
+        app_state = {"id": run_id, "running": True, "step": "init", "done": 0,
+                     "total": 0, "error": None, "strategy": "", "stop": False,
+                     "folder_done": 0, "folder_total": 0, "current": "",
+                     "recovery_action": recovery}
+        conflict = _begin_job("scan_run", app_state, error="扫描已在运行中")
+        if conflict:
+            return conflict
 
     def run():
         try:
@@ -1976,7 +2139,10 @@ def folder_organize_suggest():
     llm_cfg = make_llm_config()
     if not llm_cfg.configured:
         return JSONResponse({"ok": False, "error": "LLM 未配置"}, status_code=400)
-    state = APP["folder_merge_ai_run"] = {"running": True, "error": None, "count": 0}
+    state = {"running": True, "error": None, "count": 0}
+    conflict = _begin_job("folder_merge_ai_run", state, error="AI 合并分析已在运行")
+    if conflict:
+        return conflict
 
     def run():
         try:
@@ -2194,8 +2360,11 @@ def folder_organize_start():
         owner_mid = session.get_mid()
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
-    state = APP["folder_merge_run"] = {"running": True, "stop": False, "done": 0,
-                                       "total": len(pending), "error": None, "status": "running"}
+    state = {"running": True, "stop": False, "done": 0,
+             "total": len(pending), "error": None, "status": "running"}
+    conflict = _begin_job("folder_merge_run", state, error="收藏夹合并已在运行")
+    if conflict:
+        return conflict
 
     def save():
         store.save_folder_merge_plan(plan)
@@ -2735,11 +2904,14 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
     if not llm_cfg.configured:
         return JSONResponse({"ok": False, "error": "LLM 未配置，请先选择供应商与模型"}, status_code=400)
 
-    state = APP["folder_profile_run"] = {
+    state = {
         "running": True, "stop": False, "rebuild": bool(body.rebuild),
         "total": len(requested), "done": 0, "generated": 0,
         "skipped": 0, "failed": 0, "current": "", "error": None,
     }
+    conflict = _begin_job("folder_profile_run", state, error="收藏夹画像任务已在运行")
+    if conflict:
+        return conflict
 
     def run():
         try:
@@ -3056,13 +3228,16 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
     done_ids0 = _pending_analysis_ids(rebuild_mode, store.analysis_status_map())
     pending0 = sum(1 for v in videos if v.get("bvid")
                    and v["bvid"] not in done_ids0 and not _is_invalid(v))
-    state = APP["analyze_run"] = {"running": True, "done": 0, "total": len(videos),
-                                  "pending": pending0,
-                                  "failed": 0, "stop": False, "error": None,
-                                  "concurrency": concurrency, "batch": batch_size,
-                                  "continuous": bool(body.continuous), "waiting": False,
-                                  "round": 0, "selected_ids": sorted(selected),
-                                  "rebuild": rebuild_mode, "inflight": 0}
+    state = {"running": True, "done": 0, "total": len(videos),
+             "pending": pending0,
+             "failed": 0, "stop": False, "error": None,
+             "concurrency": concurrency, "batch": batch_size,
+             "continuous": bool(body.continuous), "waiting": False,
+             "round": 0, "selected_ids": sorted(selected),
+             "rebuild": rebuild_mode, "inflight": 0}
+    conflict = _begin_job("analyze_run", state, error="分析已在运行中")
+    if conflict:
+        return conflict
 
     def run():
         from concurrent.futures import ThreadPoolExecutor
@@ -3515,10 +3690,13 @@ def apply_start():
     already_done = len([1 for it in plan.values() if it.get("status") == "done"])
     held_unknown = len([1 for it in plan.values() if it.get("status") == "unknown"])
 
-    state = APP["apply_run"] = {"running": True, "done": 0, "total": total,
-                                "ok": 0, "failed": 0, "skip": 0, "deleted": 0,
-                                "unknown": 0, "stop": False, "error": None, "log": [],
-                                "batch_size": batch_size, "batch_done": 0, "batch_total": 0}
+    state = {"running": True, "done": 0, "total": total,
+             "ok": 0, "failed": 0, "skip": 0, "deleted": 0,
+             "unknown": 0, "stop": False, "error": None, "log": [],
+             "batch_size": batch_size, "batch_done": 0, "batch_total": 0}
+    conflict = _begin_job("apply_run", state, error="执行已在运行中")
+    if conflict:
+        return conflict
 
     def _mark(item, status: str, result: str):
         """写入一条方案的执行结果。"""
@@ -3575,20 +3753,15 @@ def apply_start():
             label = "删除失效" if kind == "delete" else f"移入「{target_name}」"
             emit("info", f"批次 {bn}/{bt}：{label} {len(entries)} 条",
                  phase="apply", done=state["done"], total=total)
+            # try 只包远程调用：落库失败不得把已远端成功的批次标成 failed
             try:
                 if kind == "delete":
                     session.batch_delete(src, aids, should_stop=lambda: state["stop"])
-                    msg = f"批量删除失效视频成功（批次 {bn}）"
-                    finish_items(entries, "done", msg, source_id=src)
-                    state["deleted"] += len(entries)
+                    success_msg = f"批量删除失效视频成功（批次 {bn}）"
                 else:
                     session.move_batch(src, target_id, aids, mid=owner_mid,
                                        should_stop=lambda: state["stop"])
-                    msg = f"批量移入「{target_name}」成功（批次 {bn}）"
-                    finish_items(entries, "done", msg, target_id=target_id, source_id=src)
-                emit("ok", f"批次 {bn}/{bt} 完成：{len(entries)} 条",
-                     phase="apply", done=state["done"], total=total)
-                return True
+                    success_msg = f"批量移入「{target_name}」成功（批次 {bn}）"
             except bili_api.WriteUncertainError as e:
                 msg = f"批次 {bn} 结果不确定：{e}"
                 finish_items(entries, "unknown", msg)
@@ -3612,7 +3785,23 @@ def apply_start():
                 # 网络/IO：记账后继续，避免一次抖动卡死整次执行。
                 fail_entries(entries, f"批次 {bn} 网络/IO 异常：{e}")
                 return True
-            # 未预期异常不再吞掉继续写：交给外层停止整次执行，避免带病写库。
+            # 远端已成功 → 记账；落库失败保持 done 并停，绝不改写成 failed
+            try:
+                if kind == "delete":
+                    finish_items(entries, "done", success_msg, source_id=src)
+                    state["deleted"] += len(entries)
+                else:
+                    finish_items(entries, "done", success_msg,
+                                 target_id=target_id, source_id=src)
+                emit("ok", f"批次 {bn}/{bt} 完成：{len(entries)} 条",
+                     phase="apply", done=state["done"], total=total)
+                return True
+            except (requests.RequestException, OSError) as e:
+                state["error"] = f"批次 {bn} 远端已成功但本地落库失败：{e}"
+                state["stop"] = True
+                emit("err", state["error"], phase="apply", kind="apply_end",
+                     done=state["done"], total=total)
+                return False
 
         try:
             if migrated:
@@ -3808,11 +3997,14 @@ def apply_start():
             emit("err", state["error"], phase="apply", kind="apply_end",
                  done=state["done"], total=total)
         except Exception as e:
-            state["error"] = f"执行初始化失败：{e}"
+            state["error"] = f"执行失败：{e}"
             emit("err", state["error"], phase="apply", kind="apply_end",
                  done=state["done"], total=total)
         finally:
-            save_progress()
+            try:
+                save_progress()
+            except (requests.RequestException, OSError) as e:
+                emit("err", f"收尾落库失败：{e}", phase="apply")
             state["running"] = False
             # 内容整理结束后自动刷新一次收藏夹目录，避免 remote_count 与本地关系长期不一致
             if state.get("ok") or state.get("deleted"):
@@ -4500,6 +4692,11 @@ _ASSET_VERSION_RE = re.compile(r"\?v=[A-Za-z0-9._-]*")
 def index():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     html = _ASSET_VERSION_RE.sub("?v=" + _asset_version(), html)
+    token_script = f"<script>window.__BILI_FAV_TOKEN__={json.dumps(_LOCAL_API_TOKEN)};</script>"
+    if "<head>" in html:
+        html = html.replace("<head>", "<head>" + token_script, 1)
+    else:
+        html = token_script + html
     return HTMLResponse(html, headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
@@ -4550,6 +4747,7 @@ def main():
         threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
     _log_attribution()
     _cleanup_stale_update_leftovers(APP_DIR.parent, Path(tempfile.gettempdir()))
+    _persist_api_token()
     _UVICORN_SERVER = uvicorn.Server(config)
     _UVICORN_SERVER.run()
 

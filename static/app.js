@@ -48,8 +48,10 @@
   $("clear-log").addEventListener("click", () => { logBody.innerHTML = ""; });
 
   // ---------- HTTP ----------
+  const API_TOKEN = (typeof window !== "undefined" && window.__BILI_FAV_TOKEN__) || "";
   async function api(method, url, body, options = {}) {
     const opt = { method, headers: {} };
+    if (API_TOKEN) opt.headers["X-BiliFav-Token"] = API_TOKEN;
     let timeoutId = null;
     if (options.timeoutMs) {
       const controller = new AbortController();

@@ -48,19 +48,22 @@ class DefaultFolderDetectionTests(unittest.TestCase):
 
 class DefaultFolderDestinationGuardTests(unittest.TestCase):
     def test_rejects_moving_into_default_folder(self):
-        err = server._default_folder_destination_error(
-            [{"action": "move_to_existing", "target_folder": "默认收藏夹"}])
+        with patch.object(server.store, "load_folders", return_value=FOLDERS):
+            err = server._default_folder_destination_error(
+                [{"action": "move_to_existing", "target_folder": "默认收藏夹"}])
         self.assertIn("默认收藏夹", err)
 
     def test_rejects_renaming_to_default_folder(self):
-        err = server._default_folder_destination_error(
-            [{"action": "create_new", "create_new_name": "默认收藏夹"}])
+        with patch.object(server.store, "load_folders", return_value=FOLDERS):
+            err = server._default_folder_destination_error(
+                [{"action": "create_new", "create_new_name": "默认收藏夹"}])
         self.assertIn("默认收藏夹", err)
 
     def test_allows_normal_targets(self):
-        self.assertEqual("", server._default_folder_destination_error(
-            [{"action": "move_to_existing", "target_folder": "硬件"},
-             {"action": "create_new", "create_new_name": "新主题"}]))
+        with patch.object(server.store, "load_folders", return_value=FOLDERS):
+            self.assertEqual("", server._default_folder_destination_error(
+                [{"action": "move_to_existing", "target_folder": "硬件"},
+                 {"action": "create_new", "create_new_name": "新主题"}]))
 
     def test_no_default_folder_means_no_block(self):
         with patch.object(server.store, "load_folders",
