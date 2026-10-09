@@ -107,13 +107,113 @@
   // ---------- 应用密码 ----------
   const lockScreen = $("app-lock-screen");
   const lockModal = $("app-lock-modal");
+  let pendingHelloBind = false;
 
   function showLockScreen(show) {
     if (!lockScreen) return;
     lockScreen.hidden = !show;
-    if (show) {
+    if (show) beginUnlockFlow();
+  }
+
+  function setLockMode(mode) {
+    const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
+    show("lock-mode-hello", mode === "hello");
+    show("lock-mode-password", mode === "password");
+    show("lock-mode-recovery", mode === "recovery");
+    const err = $("app-lock-error");
+    if (err) err.textContent = "";
+    if (mode === "password") {
       const input = $("app-lock-password");
       if (input) { input.value = ""; input.focus(); }
+    }
+    if (mode === "recovery") {
+      const r = $("app-lock-recovery");
+      if (r) r.focus();
+    }
+  }
+
+  let helloTried = false;
+  async function tryWindowsHelloAuto() {
+    const status = $("lock-hello-status");
+    if (status) status.textContent = "正在请求 Windows Hello…";
+    try {
+      const r = await api("POST", "/api/vault/hello-verify", {}, { timeoutMs: 35000 });
+      if (r && r.ok) {
+        await unlockWithVault({ useHello: true });
+        return true;
+      }
+      if (status) status.textContent = (r && r.message) || "无法使用 Hello，请改用密码";
+      setLockMode("password");
+      return false;
+    } catch (e) {
+      if (status) status.textContent = e.error || e.message || "Hello 请求失败";
+      setLockMode("password");
+      return false;
+    }
+  }
+
+  async function unlockWithVault(opts) {
+    const password = ($("app-lock-password") || {}).value || "";
+    const recovery = ($("app-lock-recovery") || {}).value || "";
+    const errBox = $("app-lock-error");
+    const vs = await api("GET", "/api/vault/status");
+    if (opts && opts.useHello) {
+      // Hello 成功：直接用设备包装解 DEK（若已绑定）或会话已由服务端处理
+      const helloOk = await api("POST", "/api/vault/hello-verify", {}, { timeoutMs: 35000 });
+      if (!helloOk || !helloOk.ok) {
+        if (errBox) errBox.textContent = (helloOk && helloOk.message) || "Windows Hello 验证失败";
+        setLockMode("password");
+        return;
+      }
+      try {
+        // 服务端设备包装若存在则尝试 unlock-with-device；否则仍需密码
+        await api("POST", "/api/vault/unlock-device", {});
+        finishUnlock();
+        return;
+      } catch (e) {
+        if (errBox) errBox.textContent = "验证通过，但仍需应用密码解密数据";
+        setLockMode("password");
+        return;
+      }
+    }
+    if (vs && vs.configured) {
+      await api("POST", "/api/vault/unlock", {
+        password: password || undefined,
+        recovery_code: recovery || undefined,
+      });
+    } else {
+      await api("POST", "/api/app-lock/unlock", { password });
+    }
+    finishUnlock();
+  }
+
+  function finishUnlock() {
+    const errBox = $("app-lock-error");
+    if (errBox) errBox.textContent = "";
+    showLockScreen(false);
+    helloTried = false;
+    log("应用已解锁", "ok");
+    refreshAppLock();
+    if (pendingHelloBind) {
+      pendingHelloBind = false;
+      log("解锁完成，正在完成 Windows Hello 绑定…", "info");
+      completeHelloBind();
+    }
+  }
+
+  async function beginUnlockFlow() {
+    setLockMode("hello");
+    if (helloTried) return;
+    helloTried = true;
+    await tryWindowsHelloAuto();
+  }
+
+  async function submitUnlock() {
+    try {
+      await unlockWithVault({});
+    } catch (e) {
+      const errBox = $("app-lock-error");
+      if (errBox) errBox.textContent = e.error || e.message || "解锁失败";
     }
   }
 
@@ -142,31 +242,6 @@
       return { ...st, vault: vs };
     } catch (e) {
       return null;
-    }
-  }
-
-  async function submitUnlock() {
-    const password = ($("app-lock-password") || {}).value || "";
-    const recovery = ($("app-lock-recovery") || {}).value || "";
-    const autoUnlock = !!($("app-lock-auto") || {}).checked;
-    const errBox = $("app-lock-error");
-    try {
-      // 金库优先：密码/恢复码都是为了解开 DEK
-      const vs = await api("GET", "/api/vault/status");
-      if (vs && vs.configured) {
-        await api("POST", "/api/vault/unlock", {
-          password: password || undefined,
-          recovery_code: recovery || undefined,
-        });
-      } else {
-        await api("POST", "/api/app-lock/unlock", { password, auto_unlock: autoUnlock });
-      }
-      if (errBox) errBox.textContent = "";
-      showLockScreen(false);
-      log("应用已解锁", "ok");
-      await refreshAppLock();
-    } catch (e) {
-      if (errBox) errBox.textContent = e.error || e.message || "解锁失败";
     }
   }
 
@@ -238,6 +313,32 @@
   if ($("app-lock-btn")) $("app-lock-btn").addEventListener("click", () => openSettings("security"));
   if ($("app-lock-close")) $("app-lock-close").addEventListener("click", closeAppLockModal);
   if ($("app-lock-unlock-btn")) $("app-lock-unlock-btn").addEventListener("click", submitUnlock);
+  if ($("lock-hello-btn")) $("lock-hello-btn").addEventListener("click", () => tryWindowsHelloAuto());
+  if ($("lock-other-ways")) $("lock-other-ways").addEventListener("click", () => setLockMode("password"));
+  if ($("lock-forgot")) $("lock-forgot").addEventListener("click", () => setLockMode("recovery"));
+  if ($("lock-forgot2")) $("lock-forgot2").addEventListener("click", () => setLockMode("recovery"));
+  if ($("lock-back-pw")) $("lock-back-pw").addEventListener("click", () => setLockMode("password"));
+  if ($("lock-back-hello")) $("lock-back-hello").addEventListener("click", () => setLockMode("hello"));
+  if ($("lock-recovery-submit")) {
+    $("lock-recovery-submit").addEventListener("click", async () => {
+      const recovery = ($("app-lock-recovery") || {}).value || "";
+      const p1 = ($("lock-new-password") || {}).value || "";
+      const p2 = ($("lock-new-password2") || {}).value || "";
+      const err = $("app-lock-error");
+      if (err) err.textContent = "";
+      if (p1.length < 6 || p1 !== p2) {
+        if (err) err.textContent = "新密码至少 6 位且两次一致";
+        return;
+      }
+      try {
+        await api("POST", "/api/vault/unlock", { recovery_code: recovery, password: p1 });
+        finishUnlock();
+        log("已通过恢复码重设密码并解锁", "ok");
+      } catch (e) {
+        if (err) err.textContent = e.error || e.message || "恢复失败";
+      }
+    });
+  }
   if ($("app-lock-password")) {
     $("app-lock-password").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submitUnlock();
@@ -4101,6 +4202,12 @@
       const on = el.getAttribute("data-tab-panel") === name;
       el.hidden = !on;
     });
+    if (name === "data") {
+      refreshDataPath();
+      refreshUsage();
+    }
+    if (name === "favorites") showFavoritesInSettings();
+    if (name === "advanced") loadPromptFields();
   }
 
   async function refreshSettingsData() {
@@ -4139,6 +4246,18 @@
         box.textContent = vs && vs.configured
           ? (vs.unlocked ? "金库：已设置应用密码 · 已解锁" : "金库：已设置应用密码 · 未解锁")
           : "金库：尚未初始化";
+      }
+      const hello = $("settings-sec-hello-state");
+      if (hello && vs) {
+        if (vs.has_device_wrap) {
+          hello.textContent = "已绑定";
+          hello.classList.remove("muted");
+          hello.style.color = "var(--green)";
+        } else {
+          hello.textContent = vs.unlocked ? "未绑定" : "未绑定（需先解锁）";
+          hello.classList.add("muted");
+          hello.style.color = "";
+        }
       }
     } catch (_) {}
     // 高级默认值
@@ -4215,6 +4334,24 @@
       }
     });
   }
+  async function completeHelloBind() {
+    try {
+      await api("POST", "/api/vault/bind-device", {});
+      const vs = await api("GET", "/api/vault/status");
+      const st = $("settings-sec-hello-state");
+      if (st && vs && vs.has_device_wrap) {
+        st.textContent = "已绑定";
+        st.classList.remove("muted");
+        st.style.color = "var(--green)";
+      }
+      log("Windows Hello 绑定测试通过，已绑定本机验证", "ok");
+      refreshSettingsData();
+      return true;
+    } catch (e) {
+      log(e.error || e.message || "绑定失败", "err");
+      return false;
+    }
+  }
   if ($("settings-sec-hello")) {
     $("settings-sec-hello").addEventListener("click", async () => {
       try {
@@ -4223,13 +4360,23 @@
           log("请先设置应用密码", "warn");
           return;
         }
-        if (!vs.unlocked) {
-          log("请先解锁金库再绑定 Windows Hello", "warn");
+        if (vs.has_device_wrap && vs.unlocked) {
+          const st = $("settings-sec-hello-state");
+          if (st) {
+            st.textContent = "已绑定";
+            st.style.color = "var(--green)";
+          }
+          log("本机已绑定 Windows Hello / DPAPI，如需重绑请先解锁后再次点击", "info");
           return;
         }
-        await api("POST", "/api/vault/bind-device", {});
-        log("已绑定本机验证（Windows Hello / DPAPI）", "ok");
-        refreshSettingsData();
+        if (!vs.unlocked) {
+          // 要求用户先解锁一次，解锁成功后自动继续绑定
+          pendingHelloBind = true;
+          log("请先解锁金库（一次即可），解锁后将自动完成 Windows Hello 绑定", "warn");
+          showLockScreen(true);
+          return;
+        }
+        await completeHelloBind();
       } catch (e) {
         log(e.error || e.message || "绑定失败", "err");
       }
@@ -4424,7 +4571,7 @@
   }
 
   const THEME_CYCLE = ["system", "light", "dark"];
-  const THEME_LABEL = { system: "Auto", light: "☀", dark: "🌙" };
+  const THEME_TITLE = { system: "主题：自动（半日/半夜间）", light: "主题：浅色", dark: "主题：深色" };
   function setTheme(v) {
     const top = $("theme-mode");
     if (top) {
@@ -4434,14 +4581,22 @@
       applyTheme(v);
     }
     const btn = $("theme-cycle-btn");
-    if (btn) btn.textContent = THEME_LABEL[v] || "Auto";
+    if (btn) {
+      btn.title = THEME_TITLE[v] || THEME_TITLE.system;
+      btn.querySelectorAll(".theme-ico").forEach((svg) => {
+        const kind = (svg.className.baseVal || "").includes("auto") ? "system"
+          : (svg.className.baseVal || "").includes("light") ? "light"
+          : "dark";
+        svg.hidden = kind !== v;
+      });
+    }
     document.querySelectorAll(".theme-pick").forEach((el) => {
       el.classList.toggle("active", el.getAttribute("data-theme") === v);
     });
   }
   if ($("theme-cycle-btn")) {
     const cur = localStorage.getItem("theme-mode") || "system";
-    $("theme-cycle-btn").textContent = THEME_LABEL[cur] || "Auto";
+    setTheme(cur);
     $("theme-cycle-btn").addEventListener("click", () => {
       const idx = THEME_CYCLE.indexOf(localStorage.getItem("theme-mode") || "system");
       setTheme(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
@@ -4471,13 +4626,17 @@
     });
   }
   if ($("settings-opacity")) {
-    $("settings-opacity").addEventListener("input", (e) => {
-      const v = e.target.value;
-      const panel = $("settings-panel");
-      if (panel) panel.style.opacity = String(Number(v) / 100);
+    // 毛玻璃模糊半径（px），替代整块 opacity 透明
+    const applyBlur = (px) => {
+      document.documentElement.style.setProperty("--panel-blur", px + "px");
       const val = $("settings-opacity-val");
-      if (val) val.textContent = String(v);
-    });
+      if (val) val.textContent = String(px);
+      try { localStorage.setItem("settings-blur", String(px)); } catch (_) {}
+    };
+    const savedBlur = (() => { try { return localStorage.getItem("settings-blur"); } catch (_) { return null; } })();
+    $("settings-opacity").value = savedBlur || "24";
+    applyBlur(Number($("settings-opacity").value));
+    $("settings-opacity").addEventListener("input", (e) => applyBlur(Number(e.target.value)));
   }
 
   async function refreshUsage() {
@@ -4488,20 +4647,23 @@
         const gb = n / 1024 / 1024 / 1024;
         return gb >= 1 ? gb.toFixed(1) + " GB" : Math.max(1, Math.round(n / 1024 / 1024)) + " MB";
       };
+      // 单条进度：整条 = 磁盘总空间；蓝 = 已用；绿 = 本项目（叠在已用之上）
       const diskBar = $("disk-used-bar");
       const projBar = $("proj-used-bar");
-      if (diskBar && u.disk_total_bytes) {
-        const pct = Math.min(100, (u.disk_used_bytes / u.disk_total_bytes) * 100);
-        diskBar.style.width = pct.toFixed(1) + "%";
+      const total = u.disk_total_bytes || 0;
+      if (diskBar && total) {
+        const pct = Math.min(100, (u.disk_used_bytes / total) * 100);
+        diskBar.style.width = pct.toFixed(2) + "%";
         const meta = $("disk-used-meta");
-        if (meta) meta.textContent = fmt(u.disk_used_bytes) + " / " + fmt(u.disk_total_bytes);
+        if (meta) meta.textContent = fmt(u.disk_used_bytes) + " / " + fmt(total);
       }
-      if (projBar) {
-        projBar.style.width = u.disk_total_bytes
-          ? Math.max(0.5, Math.min(100, (u.project_bytes / u.disk_total_bytes) * 100)).toFixed(2) + "%"
-          : "1%";
+      if (projBar && total) {
+        const pct = Math.max(0.4, Math.min(100, (u.project_bytes / total) * 100));
+        projBar.style.width = pct.toFixed(3) + "%";
         const meta = $("proj-used-meta");
         if (meta) meta.textContent = fmt(u.project_bytes);
+      } else if (projBar) {
+        projBar.style.width = "0%";
       }
     } catch (_) {}
   }

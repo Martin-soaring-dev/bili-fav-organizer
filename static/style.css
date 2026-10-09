@@ -71,6 +71,14 @@ body {
   gap: 12px;
   flex-wrap: wrap;
 }
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .brand { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 15px; font-weight: 700; color: var(--accent); }
 /* 平涂标志自身带色（深/亮青），深浅顶栏都够对比，无需按主题切换文件 */
 .brand-mark { display: block; width: 32px; height: 32px; flex: none; }
@@ -90,7 +98,37 @@ body {
 .update-check-btn:hover { background: var(--button-hover); color: var(--accent); }
 .update-check-btn.checking { animation: update-spin 1s linear infinite; }
 @keyframes update-spin { to { transform: rotate(360deg); } }
-.topbar-actions { display: flex; gap: 8px; align-items: center; margin-left: auto; margin-right: 16px; }
+/* 右上角自绘 SVG 图标按钮：圆润简约 */
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--button-bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: background .12s ease, border-color .12s ease, color .12s ease, transform .08s ease;
+}
+.icon-btn:hover {
+  background: var(--button-hover);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+}
+.icon-btn:active { transform: translateY(1px); }
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 button.mini-btn { padding: 5px 10px; font-size: 12px; }
 .status-strip { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--muted); }
 .status-strip b { color: var(--text); }
@@ -962,9 +1000,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 120;
   left: 320px; /* 覆盖日志窗外全部操作区 */
   width: auto;
-  background: var(--panel, #1c1c1e); color: var(--text, #eee);
-  border-left: 1px solid var(--border, #444);
-  box-shadow: -8px 0 24px rgba(0,0,0,.25);
+  color: var(--text, #eee);
+  /* Win11 毛玻璃：半透明底 + 背景模糊 + 略提亮 */
+  background: color-mix(in srgb, var(--panel, #1c1c1e) 58%, transparent);
+  -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(1.45);
+  backdrop-filter: blur(var(--panel-blur, 24px)) saturate(1.45);
+  border-left: 1px solid color-mix(in srgb, var(--border, #444) 70%, transparent);
+  box-shadow: -8px 0 28px rgba(0,0,0,.22);
   display: flex; flex-direction: column;
 }
 .settings-panel[hidden] { display: none !important; }
@@ -1009,32 +1051,75 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .log-actions { display: inline-flex; gap: 6px; }
 .logs.collapsed { display: none; }
 .logs.pinned { box-shadow: 2px 0 8px rgba(0,0,0,.12); z-index: 2; }
-.show-log-tab {
-  position: fixed; left: 0; top: 50%; transform: translateY(-50%);
-  writing-mode: vertical-rl; padding: 12px 6px; border-radius: 0 8px 8px 0;
-  border: 1px solid var(--border); background: var(--panel); cursor: pointer;
-  z-index: 50; font-size: 12px;
-}
+
 body.logs-collapsed .settings-panel { left: 0 !important; }
 .settings-panel { transition: opacity .15s ease; }
 .usage-bar-wrap { margin: 10px 0 14px; }
 .usage-label { font-size: 13px; margin-bottom: 6px; }
+.usage-label b { color: var(--text); }
 .usage-bar {
-  height: 14px; border-radius: 7px; background: rgba(128,128,128,.25); overflow: hidden;
+  height: 16px; border-radius: 9px; background: rgba(128,128,128,.22); overflow: hidden;
+  position: relative;
 }
-.usage-fill { height: 100%; width: 0; border-radius: 7px; transition: width .3s ease; }
-.usage-fill.disk { background: linear-gradient(90deg, #4c8dff, #7aa8ff); }
-.usage-fill.proj { background: linear-gradient(90deg, #2fbf71, #61d095); }
+.usage-bar-merged .usage-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+  border-radius: 9px; transition: width .35s ease;
+}
+.usage-bar-merged .usage-fill.disk { background: linear-gradient(90deg, #4c8dff, #7aa8ff); z-index: 1; opacity: .85; }
+.usage-bar-merged .usage-fill.proj { background: linear-gradient(90deg, #2fbf71, #45d68a); z-index: 2; min-width: 4px; box-shadow: 1px 0 0 rgba(255,255,255,.35); }
+.usage-legend { display: flex; gap: 14px; align-items: center; font-size: 11px; margin-top: 6px; flex-wrap: wrap; }
+.legend-swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px;
+}
+.legend-swatch.proj { background: #2fbf71; }
+.legend-swatch.disk { background: #4c8dff; }
+.legend-swatch.free { background: rgba(128,128,128,.28); }
 .usage-meta { font-size: 12px; margin-top: 4px; }
 
 /* 日志收起时显示侧边页签；默认收起态由 body.logs-collapsed 控制 */
+/* 日志呼出页签：位于 #app 下、.logs 外侧，收起时不会被父级隐藏 */
 .show-log-tab {
   display: none;
   position: fixed; left: 0; top: 42%; transform: translateY(-50%);
-  writing-mode: vertical-rl; padding: 14px 8px; border-radius: 0 8px 8px 0;
+  writing-mode: vertical-rl; padding: 14px 9px; border-radius: 0 10px 10px 0;
   border: 1px solid var(--border); background: var(--panel); cursor: pointer;
-  z-index: 50; font-size: 13px; color: var(--text);
+  z-index: 90; font-size: 13px; color: var(--accent); font-weight: 700;
+  box-shadow: 2px 0 10px rgba(0,0,0,.18);
 }
+.show-log-tab:hover { background: var(--button-hover); }
 body.logs-collapsed .show-log-tab { display: block; }
 body.logs-collapsed .logs { display: none; }
 body.logs-collapsed .settings-panel { left: 0 !important; }
+
+/* 图标按钮：无边框，悬停/按下变色 */
+.icon-btn, .btn.icon-btn {
+  border: none; background: transparent; padding: 6px 8px;
+  border-radius: 8px; cursor: pointer; color: inherit; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.icon-btn:hover, .btn.icon-btn:hover { background: rgba(127,127,127,.18); }
+.icon-btn:active, .btn.icon-btn:active { background: rgba(127,127,127,.32); }
+.topbar-actions .icon-btn { font-size: 16px; }
+
+/* 解锁模式切换 */
+.lock-mode { display: flex; flex-direction: column; gap: 10px; }
+.lock-mode[hidden] { display: none !important; }
+.lock-links { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.link-btn {
+  border: none; background: transparent; color: var(--accent, #0a7);
+  cursor: pointer; font-size: 13px; text-decoration: underline; padding: 4px 0;
+}
+.link-btn:hover { opacity: .85; }
+.lock-hello-status { min-height: 1.2em; font-size: 13px; }
+
+/* 日志侧标：收紧、防抖 */
+.show-log-tab {
+  position: fixed !important; left: 0 !important;
+  top: 50% !important; transform: translateY(-50%) !important;
+  writing-mode: vertical-rl;
+  padding: 8px 5px !important; font-size: 11px !important;
+  width: auto; max-width: 28px;
+  border-radius: 0 6px 6px 0 !important;
+  opacity: .85;
+}
+.show-log-tab:hover { opacity: 1; }

@@ -408,7 +408,7 @@ _APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
 _PBKDF2_ITERS = 200_000
 _APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/",
                         "/api/cookie", "/api/prompts/defaults", "/api/data/paths",
-                        "/api/data/usage")
+                        "/api/data/usage", "/api/vault/hello-verify")
 
 
 def _app_lock_secrets() -> dict:
@@ -670,6 +670,25 @@ def vault_onboarding(body: VaultInitIn):
             **_vault_status_payload()}
 
 
+@app.post("/api/vault/unlock-device")
+def vault_unlock_device():
+    """Windows Hello 验证通过后，用 DPAPI 中的设备材料解 DEK。"""
+    if not VAULT.state.has_device_wrap:
+        return JSONResponse({"ok": False, "error": "未绑定本机验证，请使用应用密码"},
+                            status_code=400)
+    hello = vault_hello_verify()
+    if not hello.get("ok"):
+        return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
+                            status_code=403)
+    try:
+        secret = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes()).decode("utf-8")
+        VAULT.unlock_with_secret("device", secret)
+    except (OSError, ValueError, vault_mod.VaultError) as exc:
+        return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"}, status_code=400)
+    _APP_LOCK.update(unlocked=True)
+    return {"ok": True, **_vault_status_payload()}
+
+
 @app.post("/api/vault/unlock")
 def vault_unlock(body: VaultUnlockIn):
     try:
@@ -745,10 +764,56 @@ def vault_bind_device():
     secret = secrets.token_urlsafe(32)
     try:
         VAULT.bind_device_blob(secret)
+        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        APP_UNLOCK_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
     except (vault_mod.VaultError, OSError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
-    _set_auto_unlock(True)
     return {"ok": True, **_vault_status_payload()}
+
+
+@app.post("/api/vault/hello-verify")
+def vault_hello_verify():
+    """调用 Windows Hello / PIN（UserConsentVerifier）。取消或失败返回明确状态。"""
+    if sys.platform != "win32":
+        return {"ok": False, "status": "unsupported", "message": "当前系统不支持 Windows Hello"}
+    ps = r'''
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction SilentlyContinue
+  $type = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+  if ($null -eq $type) { Write-Output 'unsupported'; exit 0 }
+  $async = $type::VerifyAsync('验证以解锁数据')
+  # 轮询 IAsyncOperation 完成
+  $deadline = (Get-Date).AddSeconds(30)
+  while (((Get-Date) -lt $deadline)) {
+    $status = $async.Status
+    if ($status -eq 'Completed') { break }
+    if ($status -eq 'Error' -or $status -eq 'Canceled') { break }
+    Start-Sleep -Milliseconds 200
+  }
+  if ($async.Status -ne 'Completed') { Write-Output 'cancel'; exit 0 }
+  $r = $async.GetResults()
+  $c = $r.ConsentResult
+  if ($c -eq 'Allow') { Write-Output 'ok' }
+  elseif ($c -eq 'UserCancelled') { Write-Output 'cancel' }
+  else { Write-Output ('deny:' + $c) }
+} catch {
+  Write-Output ('unsupported:' + $_.Exception.Message)
+}
+'''
+    try:
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            capture_output=True, text=True, timeout=35, encoding="utf-8", errors="replace",
+        )
+        text = (out.stdout or "").strip().splitlines()[-1] if out.stdout else ""
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "status": "error", "message": str(exc)}
+    if text == "ok":
+        return {"ok": True, "status": "ok", "message": "验证通过"}
+    if text == "cancel":
+        return {"ok": False, "status": "cancel", "message": "已取消"}
+    return {"ok": False, "status": "unsupported",
+            "message": text or "不可用（未配置 Windows Hello 或系统拒绝）"}
 
 
 def _begin_job(key: str, state: dict, *, error: str = "") -> JSONResponse | None:
