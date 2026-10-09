@@ -100,15 +100,16 @@
                  placeholder="输入命令，回车执行（工作目录：数据目录）">
         </div>
       </aside>
-      <button id="show-log-tab" class="show-log-tab" type="button"
-              title="展开侧栏" aria-label="展开侧栏">
-        <span class="show-log-tab-text">日志</span>
-      </button>
       <div class="sidebar-tabs" id="sidebar-tabs">
         <button type="button" class="sidebar-tab active" data-panel="log" title="运行日志">日志</button>
         <button type="button" class="sidebar-tab" data-panel="term" title="终端">终端</button>
       </div>
     </div>
+    <!-- 侧栏收起后的展开页签（必须在 .sidebar-shell 之外，否则会被一起隐藏） -->
+    <button id="show-log-tab" class="show-log-tab" type="button"
+            title="展开侧栏" aria-label="展开侧栏">
+      <span class="show-log-tab-text">日志</span>
+    </button>
 
     <!-- 右：操作面板 -->
     <main class="panels">

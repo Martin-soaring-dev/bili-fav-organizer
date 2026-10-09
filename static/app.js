@@ -4479,9 +4479,6 @@
       input.click();
     }
   });
-  if ($("settings-data-export")) $("settings-data-export").addEventListener("click", () => {
-    const b = $("data-export-btn"); if (b) b.click();
-  });
   if ($("settings-data-clear")) $("settings-data-clear").addEventListener("click", () => {
     const b = $("data-clear-btn"); if (b) b.click();
   });
