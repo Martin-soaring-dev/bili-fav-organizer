@@ -998,7 +998,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 /* 设置中心：右侧覆盖面板 */
 .settings-panel {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 120;
-  left: 320px; /* 覆盖日志窗外全部操作区 */
+  left: 350px; /* 侧栏320+标签30，不遮挡侧栏标签 */
   width: auto;
   color: var(--text, #eee);
   /* Win11 毛玻璃：半透明底 + 背景模糊 + 略提亮 */
@@ -1307,3 +1307,6 @@ svg.theme-ico[hidden] { display: none !important; }
   padding: 10px 12px !important;
 }
 .term-input::placeholder { color: #6a6a6a; }
+
+.theme-pick-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.theme-blur-label { display: block; white-space: nowrap; }

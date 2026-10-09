@@ -1241,28 +1241,7 @@
 
   if ($("data-import-btn")) $("data-import-btn").addEventListener("click", () => { const f = $("data-file"); if (f) f.click(); });
 
-  $("data-file").addEventListener("change", async (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    try {
-      const bundle = JSON.parse(await f.text());
-      const n = (o) => (o && typeof o === "object") ? Object.keys(o).length : 0;
-      const msg = `确定用「${f.name}」覆盖当前项目数据吗？\n\n` +
-        `· 收藏夹 ${(bundle.folders || []).length}\n` +
-        `· 视频 ${n(bundle.videos)}\n` +
-        `· 分析 ${n(bundle.analysis)}\n` +
-        `· 方案 ${n(bundle.plan)}\n` +
-        `· 已扫完的收藏夹 ${(bundle.scan_done || []).length}`;
-      if (!confirm(msg)) return;
-      const r = await api("POST", "/api/data/import", { bundle });
-      log(`已导入项目数据：${JSON.stringify(r.stats)}`, "ok");
-      refreshStats();
-    } catch (err) {
-      log("导入失败: " + (err.error || err.message), "err");
-    } finally {
-      e.target.value = "";
-    }
-  });
+  // 旧的 JSON 单独导入监听器已移除：统一走 dataImportZip（按扩展名分流 zip/json）
 
   const clearModal = $("clear-modal");
   if ($("data-clear-btn")) $("data-clear-btn").addEventListener("click", () => { clearModal.style.display = "flex"; });

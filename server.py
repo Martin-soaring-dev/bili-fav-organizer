@@ -1463,21 +1463,24 @@ def data_usage():
 
 @app.post("/api/data/open-folder")
 def data_open_folder():
+    """打开数据目录并尽量置顶资源管理器窗口。"""
     try:
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if sys.platform == "win32":
             path = str(USER_DATA_DIR)
-            # Shell.Application.Explore 通常会把窗口带到前台
-            ps = f'''
-$ErrorActionPreference = "SilentlyContinue"
-$shell = New-Object -ComObject Shell.Application
-$shell.Explore("{path}")
-Start-Sleep -Milliseconds 800
-$wshell = New-Object -ComObject WScript.Shell
-$null = $wshell.AppActivate("BiliFavOrganizer")
-'''
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps],
-                           capture_output=True, timeout=15)
+            # explorer /select 直接定位；随后按窗口标题激活资源管理器（不是本应用）
+            ps = (
+                "Start-Process explorer.exe -ArgumentList '/select,\"" + path + "\"';\n"
+                "Start-Sleep -Milliseconds 600;\n"
+                "$name = Split-Path '" + path + "' -Leaf;\n"
+                "$wshell = New-Object -ComObject WScript.Shell;\n"
+                "$null = $wshell.AppActivate($name);\n"
+                "if (-not $?) { $null = $wshell.AppActivate('文件资源管理器'); }\n"
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps],
+                capture_output=True, timeout=15,
+            )
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(USER_DATA_DIR)])
         else:
