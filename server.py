@@ -697,6 +697,22 @@ def vault_set_password(body: VaultSetPasswordIn):
     return {"ok": True, **_vault_status_payload()}
 
 
+@app.post("/api/vault/bind-device")
+def vault_bind_device():
+    """绑定 Windows/DPAPI 设备包装（须先有应用密码并解锁）。"""
+    if not VAULT.state.password_set:
+        return JSONResponse({"ok": False, "error": "请先设置应用密码"}, status_code=400)
+    if not VAULT.is_unlocked():
+        return JSONResponse({"ok": False, "error": "请先解锁金库"}, status_code=403)
+    secret = secrets.token_urlsafe(32)
+    try:
+        VAULT.bind_device_blob(secret)
+    except (vault_mod.VaultError, OSError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    _set_auto_unlock(True)
+    return {"ok": True, **_vault_status_payload()}
+
+
 def _begin_job(key: str, state: dict, *, error: str = "") -> JSONResponse | None:
     """在锁内占坑：长任务两两互斥，避免 check-then-act 双开。"""
     with _JOB_START_LOCK:
@@ -1139,6 +1155,12 @@ class ConfigIn(BaseModel):
     write_interval: Optional[int] = None
     folder_merge_interval: Optional[int] = None
     apply_batch: Optional[int] = None
+    prompt_profile: Optional[str] = None
+    prompt_analyze: Optional[str] = None
+    prompt_merge: Optional[str] = None
+    confidence_profile_min: Optional[float] = None
+    confidence_analyze_min: Optional[float] = None
+    confidence_merge_min: Optional[float] = None
 
 
 @app.post("/api/config")
@@ -1194,6 +1216,18 @@ def set_config(cfg: ConfigIn):
         cur["folder_merge_interval"] = max(1, min(60, int(cfg.folder_merge_interval)))
     if cfg.apply_batch is not None:
         cur["apply_batch"] = max(1, min(1000, int(cfg.apply_batch)))
+    if cfg.prompt_profile is not None:
+        cur["prompt_profile"] = cfg.prompt_profile
+    if cfg.prompt_analyze is not None:
+        cur["prompt_analyze"] = cfg.prompt_analyze
+    if cfg.prompt_merge is not None:
+        cur["prompt_merge"] = cfg.prompt_merge
+    if cfg.confidence_profile_min is not None:
+        cur["confidence_profile_min"] = max(0.0, min(1.0, float(cfg.confidence_profile_min)))
+    if cfg.confidence_analyze_min is not None:
+        cur["confidence_analyze_min"] = max(0.0, min(1.0, float(cfg.confidence_analyze_min)))
+    if cfg.confidence_merge_min is not None:
+        cur["confidence_merge_min"] = max(0.0, min(1.0, float(cfg.confidence_merge_min)))
     save_config(cur)
     return {"ok": True, "config": get_config()}
 

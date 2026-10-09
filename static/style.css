@@ -956,3 +956,45 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 }
 .vault-qr-status { font-size: 13px; min-height: 1.4em; }
 .vault-qr-step { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 14px; }
+
+/* 设置中心：右侧覆盖面板 */
+.settings-panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 120;
+  width: min(480px, 100vw);
+  background: var(--panel, #1c1c1e); color: var(--text, #eee);
+  border-left: 1px solid var(--border, #444);
+  box-shadow: -8px 0 24px rgba(0,0,0,.25);
+  display: flex; flex-direction: column;
+}
+.settings-panel[hidden] { display: none !important; }
+.settings-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--border, #444);
+}
+.settings-title { font-size: 18px; font-weight: 700; }
+.settings-body { display: flex; flex: 1; min-height: 0; }
+.settings-nav {
+  width: 148px; flex-shrink: 0; padding: 10px 8px;
+  border-right: 1px solid var(--border, #444);
+  display: flex; flex-direction: column; gap: 4px;
+  overflow: auto;
+}
+.settings-nav-item {
+  text-align: left; padding: 10px 12px; border: none; border-radius: 8px;
+  background: transparent; color: inherit; cursor: pointer; font-size: 14px;
+}
+.settings-nav-item.active { background: rgba(120,160,255,.18); font-weight: 600; }
+.settings-nav-item:hover { background: rgba(120,160,255,.10); }
+.settings-content { flex: 1; overflow: auto; padding: 16px 18px 28px; }
+.settings-block { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 14px; }
+.settings-block label { font-size: 13px; opacity: .9; }
+.settings-block input[type="password"],
+.settings-block input[type="number"],
+.settings-block input[type="text"],
+.settings-block textarea {
+  width: 100%; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border, #555);
+  background: var(--bg, #111); color: inherit;
+}
+.settings-sep { border: none; border-top: 1px solid var(--border, #444); margin: 14px 0; }
+.settings-tab h3 { margin: 4px 0 6px; font-size: 15px; }

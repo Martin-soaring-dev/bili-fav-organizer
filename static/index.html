@@ -22,7 +22,8 @@
       <span id="update-status" class="update-status" aria-live="polite"></span>
     </div>
     <div class="topbar-actions">
-      <button id="app-lock-btn" class="btn mini-btn" title="应用密码与锁定">🔒 应用密码</button>
+      <button id="settings-btn" class="btn mini-btn" title="设置">⚙ 设置</button>
+      <button id="lock-now-btn" class="btn mini-btn" title="锁定">🔒</button>
       <button id="data-import-btn" class="btn mini-btn">📥 读取项目数据</button>
       <button id="data-export-btn" class="btn mini-btn">📤 导出项目数据</button>
       <button id="data-clear-btn" class="btn mini-btn danger">🗑 清除当前数据</button>
@@ -747,6 +748,139 @@
     <div class="modal-foot">
       <button id="vault-recovery-copy" class="btn ghost">复制</button>
       <button id="vault-recovery-ok" class="btn primary" disabled>继续</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置中心：右侧覆盖面板 -->
+<div id="settings-panel" class="settings-panel" hidden>
+  <div class="settings-header">
+    <div class="settings-title">⚙ 设置</div>
+    <button id="settings-close" class="mini" type="button">关闭</button>
+  </div>
+  <div class="settings-body">
+    <nav class="settings-nav" id="settings-nav">
+      <button type="button" data-tab="account" class="settings-nav-item active">账号</button>
+      <button type="button" data-tab="model" class="settings-nav-item">模型</button>
+      <button type="button" data-tab="security" class="settings-nav-item">安全</button>
+      <button type="button" data-tab="favorites" class="settings-nav-item">收藏</button>
+      <button type="button" data-tab="advanced" class="settings-nav-item">高级</button>
+    </nav>
+    <div class="settings-content">
+      <section class="settings-tab" data-tab-panel="account">
+        <h3>账号信息</h3>
+        <div id="settings-account-info" class="settings-block">读取中…</div>
+        <hr class="settings-sep">
+        <h3>登录信息</h3>
+        <div class="settings-block">
+          <label class="cookie-method-pick">Cookie 获取方式
+            <select id="settings-cookie-method">
+              <option value="qr" selected>二维码登录（推荐）</option>
+              <option value="manual">手动输入 Cookie</option>
+            </select>
+          </label>
+          <div id="settings-qr-panel" class="cookie-method-panel">
+            <div class="row">
+              <button id="settings-qr-btn" class="btn ghost" type="button">刷新二维码</button>
+              <span class="muted" id="settings-qr-status">点刷新生成二维码</span>
+            </div>
+            <div id="settings-qr-box" class="qr-box" style="display:none">
+              <img id="settings-qr-img" alt="登录二维码">
+              <div class="qr-tip">请用 <b>手机 B站 App</b> 扫码确认</div>
+            </div>
+          </div>
+          <div id="settings-manual-panel" class="cookie-method-panel" hidden>
+            <textarea id="settings-cookie" rows="2" placeholder="SESSDATA=...; bili_jct=...; DedeUserID=..."></textarea>
+            <div class="row">
+              <button id="settings-save-cookie" class="btn">保存 Cookie</button>
+              <span id="settings-cookie-state" class="muted"></span>
+            </div>
+          </div>
+          <div class="row">
+            <button id="settings-test-cookie" class="btn ghost" type="button">测试 Cookie</button>
+            <button id="settings-save-account" class="btn primary" type="button">保存并刷新</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-tab" data-tab-panel="model" hidden>
+        <h3>概览</h3>
+        <div id="settings-model-overview" class="settings-block">读取中…</div>
+        <hr class="settings-sep">
+        <h3>模型管理</h3>
+        <div class="settings-block">
+          <button id="settings-manage-models" class="btn ghost" type="button">打开模型管理</button>
+          <p class="muted">供应商、API Key、模型规格与测试连接。</p>
+        </div>
+      </section>
+
+      <section class="settings-tab" data-tab-panel="security" hidden>
+        <h3>密码管理</h3>
+        <div class="settings-block">
+          <p class="muted" id="settings-security-status">—</p>
+          <label>当前密码（未解锁或改密时）</label>
+          <input id="settings-sec-current" type="password" autocomplete="current-password">
+          <label>新密码（至少 6 位）</label>
+          <input id="settings-sec-new" type="password" autocomplete="new-password">
+          <label>再次输入新密码</label>
+          <input id="settings-sec-new2" type="password" autocomplete="new-password">
+          <div class="row">
+            <button id="settings-sec-reset" class="btn primary" type="button">重置密码</button>
+          </div>
+          <p class="muted">已解锁时可直接重置；重置不会丢失收藏数据。</p>
+        </div>
+        <hr class="settings-sep">
+        <h3>验证方式</h3>
+        <div class="settings-block">
+          <p>应用密码：必选</p>
+          <div class="row">
+            <button id="settings-sec-hello" class="btn ghost" type="button">绑定 Windows Hello</button>
+            <span id="settings-sec-hello-state" class="muted"></span>
+          </div>
+          <p class="muted">绑定 Hello 前必须已设置应用密码。</p>
+        </div>
+      </section>
+
+      <section class="settings-tab" data-tab-panel="favorites" hidden>
+        <h3>本地收藏数据</h3>
+        <div class="settings-block">
+          <button id="settings-open-library" class="btn ghost" type="button">浏览本地内容</button>
+          <p class="muted">查看收藏夹、条目、详情与画像（与「查看本地内容」相同）。</p>
+        </div>
+      </section>
+
+      <section class="settings-tab" data-tab-panel="advanced" hidden>
+        <h3>收藏夹画像</h3>
+        <div class="settings-block">
+          <label>提示词</label>
+          <textarea id="prompt-profile" rows="5"></textarea>
+          <label>置信度阈值（0~1）</label>
+          <input id="conf-profile" type="number" min="0" max="1" step="0.05">
+          <button id="reset-prompt-profile" class="btn ghost" type="button">恢复默认</button>
+        </div>
+        <hr class="settings-sep">
+        <h3>LLM 归类分析</h3>
+        <div class="settings-block">
+          <label>提示词</label>
+          <textarea id="prompt-analyze" rows="5"></textarea>
+          <label>置信度阈值（0~1）</label>
+          <input id="conf-analyze" type="number" min="0" max="1" step="0.05">
+          <button id="reset-prompt-analyze" class="btn ghost" type="button">恢复默认</button>
+        </div>
+        <hr class="settings-sep">
+        <h3>AI 合并建议</h3>
+        <div class="settings-block">
+          <label>提示词</label>
+          <textarea id="prompt-merge" rows="5"></textarea>
+          <label>置信度阈值（0~1）</label>
+          <input id="conf-merge" type="number" min="0" max="1" step="0.05">
+          <button id="reset-prompt-merge" class="btn ghost" type="button">恢复默认</button>
+        </div>
+        <div class="settings-block">
+          <button id="settings-save-advanced" class="btn primary" type="button">保存高级设置</button>
+          <span id="settings-advanced-state" class="muted"></span>
+        </div>
+      </section>
     </div>
   </div>
 </div>

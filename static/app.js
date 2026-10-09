@@ -53,10 +53,11 @@
     const opt = { method, headers: {} };
     if (API_TOKEN) opt.headers["X-BiliFav-Token"] = API_TOKEN;
     let timeoutId = null;
-    if (options.timeoutMs) {
+    const timeoutMs = options.timeoutMs || 30000;
+    {
       const controller = new AbortController();
       opt.signal = controller.signal;
-      timeoutId = setTimeout(() => controller.abort(), options.timeoutMs);
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     }
     if (body !== undefined) {
       opt.headers["Content-Type"] = "application/json";
@@ -83,6 +84,18 @@
         throw err;
       }
       return data;
+    } catch (e) {
+      if (e && e.name === "AbortError") {
+        const err = new Error("请求超时（" + Math.round(timeoutMs / 1000) + "s）");
+        err.error = err.message;
+        throw err;
+      }
+      if (e && e.name === "TypeError") {
+        const err = new Error("网络连接失败，请确认本地服务仍在运行");
+        err.error = err.message;
+        throw err;
+      }
+      throw e;
     } finally {
       if (timeoutId !== null) clearTimeout(timeoutId);
     }
@@ -219,7 +232,7 @@
     }
   }
 
-  if ($("app-lock-btn")) $("app-lock-btn").addEventListener("click", openAppLockModal);
+  if ($("app-lock-btn")) $("app-lock-btn").addEventListener("click", () => openSettings("security"));
   if ($("app-lock-close")) $("app-lock-close").addEventListener("click", closeAppLockModal);
   if ($("app-lock-unlock-btn")) $("app-lock-unlock-btn").addEventListener("click", submitUnlock);
   if ($("app-lock-password")) {
@@ -4064,5 +4077,260 @@
     setInterval(checkConn, 10000);   // 仅更新连接指示灯，不写日志
     log("系统就绪。请先扫码登录（或手动输入 Cookie）→ 扫描 → 分析 → 定案 → 执行。");
   }
+
+  // ---------- 设置中心 ----------
+  function openSettings(tab) {
+    const panel = $("settings-panel");
+    if (!panel) return;
+    panel.hidden = false;
+    if (tab) selectSettingsTab(tab);
+    refreshSettingsData();
+  }
+  function closeSettings() {
+    const panel = $("settings-panel");
+    if (panel) panel.hidden = true;
+  }
+  function selectSettingsTab(name) {
+    document.querySelectorAll(".settings-nav-item").forEach((el) => {
+      el.classList.toggle("active", el.getAttribute("data-tab") === name);
+    });
+    document.querySelectorAll(".settings-tab").forEach((el) => {
+      const on = el.getAttribute("data-tab-panel") === name;
+      el.hidden = !on;
+    });
+  }
+
+  async function refreshSettingsData() {
+    // 账号
+    try {
+      const st = await api("GET", "/api/login/status");
+      const box = $("settings-account-info");
+      if (box) {
+        box.innerHTML = st && st.configured
+          ? `<div>已登录 · B 站 <b>mid=${st.mid || "未知"}</b></div>`
+          : "<div>尚未登录 B 站账号</div>";
+      }
+    } catch (e) {
+      const box = $("settings-account-info");
+      if (box) box.textContent = e.error || e.message || "读取账号失败";
+    }
+    // 模型概览
+    try {
+      const cfg = await api("GET", "/api/config");
+      const box = $("settings-model-overview");
+      if (box) {
+        box.innerHTML = `
+          <div>当前模型：<b>${cfg.model || "未配置"}</b></div>
+          <div class="muted">${cfg.base_url || ""}</div>
+          <div class="muted">输出上限 ${cfg.analyze_max_tokens || "-"} · 上下文 ${cfg.active_context_tokens || cfg.model_context_tokens || "-"}</div>`;
+      }
+    } catch (e) {
+      const box = $("settings-model-overview");
+      if (box) box.textContent = e.error || e.message || "读取模型配置失败";
+    }
+    // 安全
+    try {
+      const vs = await api("GET", "/api/vault/status");
+      const box = $("settings-security-status");
+      if (box) {
+        box.textContent = vs && vs.configured
+          ? (vs.unlocked ? "金库：已设置应用密码 · 已解锁" : "金库：已设置应用密码 · 未解锁")
+          : "金库：尚未初始化";
+      }
+    } catch (_) {}
+    // 高级默认值
+    loadPromptFields();
+  }
+
+  function loadPromptFields() {
+    const map = [
+      ["prompt-profile", "prompt_profile"],
+      ["prompt-analyze", "prompt_analyze"],
+      ["prompt-merge", "prompt_merge"],
+      ["conf-profile", "confidence_profile_min"],
+      ["conf-analyze", "confidence_analyze_min"],
+      ["conf-merge", "confidence_merge_min"],
+    ];
+    api("GET", "/api/config").then((cfg) => {
+      for (const [elId, key] of map) {
+        const el = $(elId);
+        if (!el) continue;
+        if (cfg[key] !== undefined && cfg[key] !== null && cfg[key] !== "") el.value = cfg[key];
+      }
+    }).catch(() => {});
+  }
+
+  if ($("settings-btn")) $("settings-btn").addEventListener("click", () => openSettings());
+  if ($("settings-close")) $("settings-close").addEventListener("click", closeSettings);
+  if ($("settings-nav")) {
+    $("settings-nav").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-tab]");
+      if (btn) selectSettingsTab(btn.getAttribute("data-tab"));
+    });
+  }
+  if ($("settings-manage-models")) {
+    $("settings-manage-models").addEventListener("click", () => {
+      const open = $("manage-models-btn");
+      if (open) open.click();
+    });
+  }
+  if ($("settings-open-library")) {
+    $("settings-open-library").addEventListener("click", () => {
+      const open = $("open-library") || $("library-open") || document.querySelector("[id*=library]");
+      // 优先走既有查看本地内容按钮
+      const btn = document.querySelector('button[id*="library"], button[title*="本地"]');
+      if (btn && btn.id !== "settings-open-library") btn.click();
+      else log("请使用主界面「查看本地内容」按钮", "info");
+    });
+  }
+  if ($("settings-sec-reset")) {
+    $("settings-sec-reset").addEventListener("click", async () => {
+      const cur = ($("settings-sec-current") || {}).value || "";
+      const p1 = ($("settings-sec-new") || {}).value || "";
+      const p2 = ($("settings-sec-new2") || {}).value || "";
+      if (p1.length < 6 || p1 !== p2) {
+        log("新密码至少 6 位且两次一致", "warn");
+        return;
+      }
+      try {
+        await api("POST", "/api/vault/set-password", {
+          password: p1, current_password: cur,
+        });
+        log("应用密码已重置", "ok");
+        if ($("settings-sec-current")) $("settings-sec-current").value = "";
+        if ($("settings-sec-new")) $("settings-sec-new").value = "";
+        if ($("settings-sec-new2")) $("settings-sec-new2").value = "";
+        refreshSettingsData();
+      } catch (e) {
+        log(e.error || e.message || "重置密码失败", "err");
+      }
+    });
+  }
+  if ($("settings-sec-hello")) {
+    $("settings-sec-hello").addEventListener("click", async () => {
+      try {
+        const vs = await api("GET", "/api/vault/status");
+        if (!vs || !vs.configured) {
+          log("请先设置应用密码", "warn");
+          return;
+        }
+        if (!vs.unlocked) {
+          log("请先解锁金库再绑定 Windows Hello", "warn");
+          return;
+        }
+        await api("POST", "/api/vault/bind-device", {});
+        log("已绑定本机验证（Windows Hello / DPAPI）", "ok");
+        refreshSettingsData();
+      } catch (e) {
+        log(e.error || e.message || "绑定失败", "err");
+      }
+    });
+  }
+  if ($("settings-save-advanced")) {
+    $("settings-save-advanced").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/config", {
+          prompt_profile: ($("prompt-profile") || {}).value || "",
+          prompt_analyze: ($("prompt-analyze") || {}).value || "",
+          prompt_merge: ($("prompt-merge") || {}).value || "",
+          confidence_profile_min: Number(($("conf-profile") || {}).value || 0),
+          confidence_analyze_min: Number(($("conf-analyze") || {}).value || 0),
+          confidence_merge_min: Number(($("conf-merge") || {}).value || 0),
+        });
+        if ($("settings-advanced-state")) $("settings-advanced-state").textContent = "已保存";
+        log("高级设置已保存", "ok");
+      } catch (e) {
+        log(e.error || e.message || "保存失败", "err");
+      }
+    });
+  }
+  for (const [btnId, key] of [
+    ["reset-prompt-profile", "prompt_profile"],
+    ["reset-prompt-analyze", "prompt_analyze"],
+    ["reset-prompt-merge", "prompt_merge"],
+  ]) {
+    const el = $(btnId);
+    if (el) el.addEventListener("click", () => {
+      const field = $(key === "prompt_profile" ? "prompt-profile"
+        : key === "prompt_analyze" ? "prompt-analyze" : "prompt-merge");
+      if (field) field.value = "";
+      log("已清空，保存后恢复内置默认提示词", "info");
+    });
+  }
+  if ($("settings-cookie-method")) {
+    $("settings-cookie-method").addEventListener("change", () => {
+      const qr = $("settings-cookie-method").value === "qr";
+      const a = $("settings-qr-panel");
+      const b = $("settings-manual-panel");
+      if (a) a.hidden = !qr;
+      if (b) b.hidden = qr;
+    });
+  }
+  if ($("lock-now-btn")) {
+    $("lock-now-btn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/vault/lock", {});
+        await refreshAppLock();
+        showLockScreen(true);
+        log("已锁定", "warn");
+      } catch (e) {
+        log(e.error || e.message || "锁定失败", "err");
+      }
+    });
+  }
+
+  // 设置-账号：独立二维码/手动 Cookie（复用登录 API）
+  if ($("settings-qr-btn")) {
+    $("settings-qr-btn").addEventListener("click", async () => {
+      const status = $("settings-qr-status");
+      const box = $("settings-qr-box");
+      const img = $("settings-qr-img");
+      if (status) status.textContent = "生成中…";
+      try {
+        const r = await api("POST", "/api/login/qr/generate", undefined, { timeoutMs: 20000 });
+        if (!r || !r.ok) throw new Error((r && r.error) || "生成失败");
+        if (img) img.src = r.image;
+        if (box) box.style.display = "flex";
+        if (status) status.textContent = "请用手机 B 站 App 扫码";
+      } catch (e) {
+        if (status) status.textContent = e.error || e.message || "生成失败";
+      }
+    });
+  }
+  if ($("settings-save-cookie")) {
+    $("settings-save-cookie").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/cookie", { cookie_string: ($("settings-cookie") || {}).value || "" });
+        if ($("settings-cookie-state")) $("settings-cookie-state").textContent = "已保存";
+        refreshSettingsData();
+      } catch (e) {
+        if ($("settings-cookie-state")) $("settings-cookie-state").textContent = e.error || e.message || "保存失败";
+      }
+    });
+  }
+  if ($("settings-test-cookie")) {
+    $("settings-test-cookie").addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "/api/test/cookie");
+        log((r && r.ok) ? "Cookie 可用" : (r && r.error) || "Cookie 测试失败", (r && r.ok) ? "ok" : "err");
+        refreshSettingsData();
+      } catch (e) {
+        log(e.error || e.message || "Cookie 测试失败", "err");
+      }
+    });
+  }
+  if ($("settings-save-account")) {
+    $("settings-save-account").addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "/api/folders/refresh");
+        log("已刷新收藏夹目录：" + ((r && r.total != null) ? r.total : ""), "ok");
+        refreshSettingsData();
+        if (typeof refreshStats === "function") refreshStats();
+      } catch (e) {
+        log("刷新目录失败: " + (e.error || e.message), "err");
+      }
+    });
+  }
+
   init();
 })();
