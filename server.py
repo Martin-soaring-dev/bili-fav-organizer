@@ -672,6 +672,21 @@ def vault_onboarding(body: VaultInitIn):
             **_vault_status_payload()}
 
 
+
+@app.post("/api/vault/unbind-device")
+def vault_unbind_device():
+    try:
+        VAULT._pop_wrap("device")
+        VAULT.save_meta()
+    except Exception:
+        pass
+    try:
+        APP_UNLOCK_BLOB.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return {"ok": True, **_vault_status_payload()}
+
+
 class VaultUnlockDeviceIn(BaseModel):
     skip_hello: bool = False
 

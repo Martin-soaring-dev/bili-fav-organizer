@@ -4354,7 +4354,7 @@
         st.classList.remove("muted");
         st.style.color = "var(--green)";
       }
-      log("Windows Hello 绑定测试通过，已绑定本机验证", "ok");
+      log("Windows Hello 绑定成功", "ok"); updateHelloBtn();
       refreshSettingsData();
       return true;
     } catch (e) {
@@ -4473,7 +4473,11 @@
     } catch (_) {}
   }
   if ($("settings-data-import")) $("settings-data-import").addEventListener("click", () => {
-    const b = $("data-import-btn"); if (b) b.click();
+    const input = $("data-file");
+    if (input) {
+      input.accept = ".zip,.json,application/zip,application/json";
+      input.click();
+    }
   });
   if ($("settings-data-export")) $("settings-data-export").addEventListener("click", () => {
     const b = $("data-export-btn"); if (b) b.click();
@@ -4603,13 +4607,9 @@
   const THEME_CYCLE = ["system", "light", "dark"];
   const THEME_TITLE = { system: "主题：自动（半日/半夜间）", light: "主题：浅色", dark: "主题：深色" };
   function setTheme(v) {
+    if (typeof applyTheme === "function") applyTheme(v);
     const top = $("theme-mode");
-    if (top) {
-      top.value = v;
-      top.dispatchEvent(new Event("change"));
-    } else if (typeof applyTheme === "function") {
-      applyTheme(v);
-    }
+    if (top) top.value = v;
     const btn = $("theme-cycle-btn");
     if (btn) {
       btn.title = THEME_TITLE[v] || THEME_TITLE.system;
@@ -4803,15 +4803,115 @@
   })();
 
   // 数据：整目录 zip 导出
-  if ($("settings-data-export")) {
-    $("settings-data-export").onclick = () => {
+  async function downloadExportZip() {
+    try {
+      const res = await fetch("/api/data/export-zip", {
+        headers: API_TOKEN ? { "X-BiliFav-Token": API_TOKEN } : {},
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = "/api/data/export-zip";
-      a.download = "";
+      a.href = url;
+      a.download = "bili_fav_data_" + Date.now() + ".zip";
       document.body.appendChild(a);
       a.click();
       a.remove();
-    };
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      log("已开始下载数据目录 zip", "ok");
+    } catch (e) {
+      log("导出失败：" + (e.message || e), "err");
+    }
+  }
+  if ($("settings-data-export")) {
+    $("settings-data-export").onclick = downloadExportZip;
+  }
+
+
+  // 数据导入：优先 zip（完整目录），JSON 兼容
+  (function dataImportZip() {
+    const input = $("data-file");
+    if (!input || input.dataset.zipHook) return;
+    input.dataset.zipHook = "1";
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      input.value = "";
+      if (!file) return;
+      const isZip = /\.zip$/i.test(file.name) || file.type === "application/zip";
+      const isJson = /\.json$/i.test(file.name) || file.type === "application/json";
+      const ok = window.confirm(
+        isZip
+          ? "将用 zip 覆盖本机数据目录（导入前自动备份）。确定继续？"
+          : "将导入 JSON 项目数据（覆盖，导入前自动备份）。确定继续？"
+      );
+      if (!ok) return;
+      const bar = document.createElement("progress");
+      bar.value = 0; bar.max = 100;
+      bar.style.cssText = "position:fixed;right:16px;bottom:16px;width:220px;z-index:9999";
+      document.body.appendChild(bar);
+      try {
+        if (isZip) {
+          const b64 = await new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result).split(",")[1] || "");
+            fr.onerror = reject;
+            fr.readAsDataURL(file);
+          });
+          bar.value = 40;
+          const r = await api("POST", "/api/data/import-zip", { zip_b64: b64 });
+          bar.value = 100;
+          log("已导入 zip：" + ((r && r.files) || 0) + " 个文件" + (r && r.migrated ? "；" + r.migrated : ""), "ok");
+        } else if (isJson) {
+          const text = await file.text();
+          const bundle = JSON.parse(text);
+          bar.value = 40;
+          await api("POST", "/api/data/import", { bundle, scope: "all" });
+          bar.value = 100;
+          log("已导入 JSON 项目数据", "ok");
+        } else {
+          log("请选择 .zip 或 .json 文件", "warn");
+        }
+        refreshDataPath();
+        refreshUsage();
+      } catch (e) {
+        log("导入失败：" + (e.error || e.message || e), "err");
+      } finally {
+        setTimeout(() => bar.remove(), 800);
+      }
+    });
+  })();
+
+
+  function updateHelloBtn() {
+    const btn = $("settings-sec-hello");
+    const st = $("settings-sec-hello-state");
+    if (!btn) return;
+    api("GET", "/api/vault/status").then((vs) => {
+      const on = !!(vs && vs.has_device_wrap);
+      btn.textContent = on ? "解绑 Windows Hello" : "绑定 Windows Hello";
+      if (st) {
+        st.textContent = on ? "已绑定" : "";
+        st.style.color = on ? "var(--green)" : "";
+      }
+    }).catch(() => {});
+  }
+  if ($("settings-sec-hello")) {
+    $("settings-sec-hello").addEventListener("click", async () => {
+      try {
+        const vs = await api("GET", "/api/vault/status");
+        if (vs && vs.has_device_wrap) {
+          await api("POST", "/api/vault/unbind-device", {});
+          log("已解绑 Windows Hello", "ok");
+          updateHelloBtn();
+          return;
+        }
+        await completeHelloBind();
+        updateHelloBtn();
+      } catch (e) {
+        log(e.error || e.message || "操作失败", "err");
+      }
+    });
+    updateHelloBtn();
   }
 
   init();

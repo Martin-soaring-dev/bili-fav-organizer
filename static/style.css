@@ -1253,3 +1253,8 @@ svg.theme-ico[hidden] { display: none !important; }
 body.logs-collapsed .sidebar-shell { display: none !important; }
 body.logs-collapsed .sidebar-tabs { display: none !important; }
 body.logs-collapsed .show-log-tab { display: flex; }
+
+/* 收起时侧栏页签显示 */
+body.logs-collapsed .show-log-tab { display: flex !important; }
+.sidebar-shell:not(.collapsed) .show-log-tab { display: none !important; }
+body.logs-collapsed .sidebar-shell { display: none !important; }

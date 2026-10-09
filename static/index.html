@@ -73,7 +73,7 @@
         <button id="data-export-btn" type="button" hidden>导出</button>
         <button id="data-clear-btn" type="button" hidden>清除</button>
         <button id="load-stats" type="button" hidden>刷新计数</button>
-        <input id="data-file" type="file" accept=".json,application/json" style="display:none">
+        <input id="data-file" type="file" accept=".zip,.json,application/zip,application/json" style="display:none">
       </div>
     </div>
   </header>
@@ -100,6 +100,10 @@
                  placeholder="输入命令，回车执行（工作目录：数据目录）">
         </div>
       </aside>
+      <button id="show-log-tab" class="show-log-tab" type="button"
+              title="展开侧栏" aria-label="展开侧栏">
+        <span class="show-log-tab-text">日志</span>
+      </button>
       <div class="sidebar-tabs" id="sidebar-tabs">
         <button type="button" class="sidebar-tab active" data-panel="log" title="运行日志">日志</button>
         <button type="button" class="sidebar-tab" data-panel="term" title="终端">终端</button>
