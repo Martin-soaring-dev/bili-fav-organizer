@@ -1026,3 +1026,15 @@ body.logs-collapsed .settings-panel { left: 0 !important; }
 .usage-fill.disk { background: linear-gradient(90deg, #4c8dff, #7aa8ff); }
 .usage-fill.proj { background: linear-gradient(90deg, #2fbf71, #61d095); }
 .usage-meta { font-size: 12px; margin-top: 4px; }
+
+/* 日志收起时显示侧边页签；默认收起态由 body.logs-collapsed 控制 */
+.show-log-tab {
+  display: none;
+  position: fixed; left: 0; top: 42%; transform: translateY(-50%);
+  writing-mode: vertical-rl; padding: 14px 8px; border-radius: 0 8px 8px 0;
+  border: 1px solid var(--border); background: var(--panel); cursor: pointer;
+  z-index: 50; font-size: 13px; color: var(--text);
+}
+body.logs-collapsed .show-log-tab { display: block; }
+body.logs-collapsed .logs { display: none; }
+body.logs-collapsed .settings-panel { left: 0 !important; }

@@ -4450,20 +4450,12 @@
 
   if ($("toggle-log")) {
     $("toggle-log").addEventListener("click", () => {
-      const area = $("log-area");
-      const tab = $("show-log-tab");
-      if (!area) return;
-      const hidden = area.classList.toggle("collapsed");
-      if (tab) tab.hidden = !hidden;
-      document.body.classList.toggle("logs-collapsed", hidden);
+      document.body.classList.add("logs-collapsed");
+      log("日志窗已隐藏，点左侧「日志」可恢复", "info");
     });
   }
   if ($("show-log-tab")) {
     $("show-log-tab").addEventListener("click", () => {
-      const area = $("log-area");
-      const tab = $("show-log-tab");
-      if (area) area.classList.remove("collapsed");
-      if (tab) tab.hidden = true;
       document.body.classList.remove("logs-collapsed");
     });
   }
@@ -4471,7 +4463,8 @@
     $("pin-log").addEventListener("click", () => {
       const area = $("log-area");
       if (!area) return;
-      area.classList.toggle("pinned");
+      const on = area.classList.toggle("pinned");
+      log(on ? "日志窗已钉住" : "已取消钉住", "info");
     });
   }
   if ($("settings-opacity")) {
