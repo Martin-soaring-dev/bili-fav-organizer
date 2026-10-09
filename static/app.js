@@ -118,10 +118,18 @@
 
   async function submitUnlock() {
     const password = ($("app-lock-password") || {}).value || "";
+    const recovery = ($("app-lock-recovery") || {}).value || "";
     const autoUnlock = !!($("app-lock-auto") || {}).checked;
     const errBox = $("app-lock-error");
     try {
-      await api("POST", "/api/app-lock/unlock", { password, auto_unlock: autoUnlock });
+      if (recovery) {
+        await api("POST", "/api/vault/unlock", {
+          recovery_code: recovery,
+          password: password || undefined,
+        });
+      } else {
+        await api("POST", "/api/app-lock/unlock", { password, auto_unlock: autoUnlock });
+      }
       if (errBox) errBox.textContent = "";
       showLockScreen(false);
       log("应用已解锁", "ok");
@@ -192,6 +200,39 @@
   if ($("app-lock-save")) $("app-lock-save").addEventListener("click", saveAppLock);
   if ($("app-lock-remove")) $("app-lock-remove").addEventListener("click", removeAppLock);
   refreshAppLock();
+
+  // ---------- 金库 / 恢复码 ----------
+  function showVaultRecovery(code) {
+    const modal = $("vault-recovery-modal");
+    const codeEl = $("vault-recovery-code");
+    const saved = $("vault-recovery-saved");
+    const ok = $("vault-recovery-ok");
+    if (!modal) return;
+    if (codeEl) codeEl.textContent = code;
+    if (saved) saved.checked = false;
+    if (ok) ok.disabled = true;
+    modal.style.display = "flex";
+    if (saved && ok) saved.onchange = () => { ok.disabled = !saved.checked; };
+    const copy = $("vault-recovery-copy");
+    if (copy) copy.onclick = () => {
+      if (navigator.clipboard && code) navigator.clipboard.writeText(code).catch(() => {});
+    };
+    if (ok) ok.onclick = async () => {
+      try {
+        await api("POST", "/api/vault/complete-onboarding", {});
+        modal.style.display = "none";
+        log("恢复码已确认保存，金库初始化完成", "ok");
+      } catch (e) {
+        log(e.error || e.message || "完成初始化失败", "err");
+      }
+    };
+  }
+
+  async function refreshVaultStatus() {
+    try { return await api("GET", "/api/vault/status"); } catch (e) { return null; }
+  }
+
+  window.__biliFavVault = { showRecovery: showVaultRecovery, refreshStatus: refreshVaultStatus };
 
   function setUpdateStatus(message, state = "") {
     const box = $("update-status");

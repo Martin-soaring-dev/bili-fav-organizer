@@ -932,3 +932,20 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .app-lock-error { color: #e5534b; font-size: 13px; min-height: 1.2em; }
 .app-lock-form { display: flex; flex-direction: column; gap: 8px; }
 .app-lock-form label { font-size: 13px; opacity: .9; }
+
+/* 金库恢复码 */
+.vault-recovery-box { max-width: 520px; }
+.vault-warn-banner {
+  background: #b00020; color: #fff; font-size: 18px; font-weight: 700;
+  padding: 14px 16px; border-radius: 10px 10px 0 0; text-align: center;
+}
+.vault-warn-text {
+  font-size: 15px; font-weight: 700; color: #b00020; line-height: 1.5;
+  margin: 10px 0;
+}
+.vault-recovery-code {
+  font-family: ui-monospace, Consolas, monospace; font-size: 28px; font-weight: 700;
+  letter-spacing: 0.12em; text-align: center; padding: 18px 12px;
+  background: #fff3cd; border: 2px solid #b00020; border-radius: 8px;
+  color: #222; user-select: all;
+}

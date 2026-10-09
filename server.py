@@ -44,6 +44,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+import vault as vault_mod
+
 import bili_api
 import llm_analyzer
 import store
@@ -555,6 +557,118 @@ def app_lock_remove(body: AppLockPasswordIn):
     _APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
     emit("warn", "已移除应用密码")
     return {"ok": True, **_app_lock_status()}
+
+
+# ---------- Secure Vault（DEK 多 KEK） ----------
+VAULT = vault_mod.Vault(USER_DATA_DIR / "vault.json")
+VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
+
+
+def _vault_status_payload() -> dict:
+    st = VAULT.state
+    return {
+        "configured": st.password_set,
+        # 未配置金库 = 旧版开放模式，视为已解锁
+        "unlocked": st.unlocked or not st.password_set,
+        "onboarding_complete": st.onboarding_complete,
+        "bound_mid": st.bound_mid,
+        "has_recovery_wrap": st.has_recovery_wrap,
+        "has_device_wrap": st.has_device_wrap,
+        "has_account_wrap": st.has_account_wrap,
+    }
+
+
+def _vault_save_db_encrypted() -> None:
+    """把当前 SQLite 库整库 AEAD 落盘。"""
+    src = store.DB_FILE
+    if not src.is_file() or not VAULT.is_unlocked():
+        return
+    VAULT.encrypt_file(src, VAULT_DB_ENC)
+
+
+def _vault_restore_db_if_needed() -> bool:
+    """若只有密文库且金库已解锁，则解出工作库。"""
+    if store.DB_FILE.is_file() or not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
+        return False
+    try:
+        VAULT.decrypt_file(VAULT_DB_ENC, store.DB_FILE)
+        return True
+    except vault_mod.VaultError as exc:
+        log.warning("无法解密数据库：%s", exc)
+        return False
+
+
+class VaultInitIn(BaseModel):
+    bound_mid: str = ""
+    password: str = ""
+    recovery_code: str = ""
+
+
+class VaultUnlockIn(BaseModel):
+    password: str = ""
+    recovery_code: str = ""
+    bound_mid: str = ""
+
+
+@app.get("/api/vault/status")
+def vault_status():
+    return _vault_status_payload()
+
+
+@app.post("/api/vault/onboarding")
+def vault_onboarding(body: VaultInitIn):
+    """新用户：绑定 mid + 设密码，返回一次性恢复码明文。"""
+    password = body.password or ""
+    if len(password) < 6:
+        return JSONResponse({"ok": False, "error": "应用密码至少 6 位"}, status_code=400)
+    if not body.bound_mid:
+        return JSONResponse({"ok": False, "error": "缺少绑定的 B 站用户 ID"}, status_code=400)
+    try:
+        code = VAULT.initialize(bound_mid=body.bound_mid, password=password)
+    except vault_mod.VaultError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    # 同步旧 app-lock：视为已设密码并解锁
+    _save_app_lock_secrets("", "")  # 密码哈希由 vault 接管后，app-lock 可选兼容
+    _APP_LOCK.update(enabled=False, unlocked=True)
+    emit("ok", "金库初始化完成，请保存恢复码")
+    return {"ok": True, "recovery_code": code, **_vault_status_payload()}
+
+
+@app.post("/api/vault/unlock")
+def vault_unlock(body: VaultUnlockIn):
+    try:
+        if body.recovery_code:
+            VAULT.unlock_with_recovery(body.recovery_code)
+            if body.password:
+                VAULT.set_password(body.password)
+        elif body.password:
+            VAULT.unlock_with_password(body.password)
+        else:
+            return JSONResponse({"ok": False, "error": "请输入应用密码或恢复码"}, status_code=400)
+    except vault_mod.VaultError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
+    restored = _vault_restore_db_if_needed()
+    _APP_LOCK.update(enabled=False, unlocked=True)
+    return {"ok": True, "db_restored": restored, **_vault_status_payload()}
+
+
+@app.post("/api/vault/lock")
+def vault_lock():
+    try:
+        _vault_save_db_encrypted()
+    except OSError as exc:
+        return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
+                            status_code=500)
+    VAULT.lock()
+    return {"ok": True, **_vault_status_payload()}
+
+
+@app.post("/api/vault/complete-onboarding")
+def vault_complete_onboarding():
+    if not VAULT.is_unlocked():
+        return JSONResponse({"ok": False, "error": "金库未解锁"}, status_code=403)
+    VAULT.complete_onboarding()
+    return {"ok": True, **_vault_status_payload()}
 
 
 def _begin_job(key: str, state: dict, *, error: str = "") -> JSONResponse | None:
@@ -1792,6 +1906,19 @@ async def local_api_guard(request, call_next):
             and not path.startswith(_APP_LOCK_OPEN_PATHS)):
         return JSONResponse({"ok": False, "code": "app_locked",
                              "error": "应用已锁定，请先解锁"}, status_code=403)
+    # 金库：配置了却未完成 onboarding / 未解锁时，业务 API 拒绝
+    if path.startswith("/api/") and not path.startswith(
+            _APP_LOCK_OPEN_PATHS + ("/api/vault/",)):
+        try:
+            vst = VAULT.state
+        except Exception:
+            vst = None
+        if vst is not None and vst.password_set and not vst.onboarding_complete:
+            return JSONResponse({"ok": False, "code": "app_onboarding",
+                                 "error": "请先完成金库初始化（保存恢复码）"}, status_code=403)
+        if vst is not None and vst.password_set and vst.onboarding_complete and not vst.unlocked:
+            return JSONResponse({"ok": False, "code": "app_locked",
+                                 "error": "金库已锁定，请先解锁"}, status_code=403)
     need_token = (method not in ("GET", "HEAD", "OPTIONS") or
                   path in ("/api/data/export", "/api/cookie"))
     if need_token:
@@ -4922,6 +5049,10 @@ def main():
     if _APP_LOCK["enabled"]:
         log.info("应用密码已启用，当前状态：%s",
                  "已解锁（本机自动）" if _APP_LOCK["unlocked"] else "已锁定")
+    try:
+        VAULT.load_meta()
+    except vault_mod.VaultError as exc:
+        log.error("金库元数据无法读取：%s", exc)
     _UVICORN_SERVER = uvicorn.Server(config)
     _UVICORN_SERVER.run()
 

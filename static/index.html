@@ -669,6 +669,8 @@
     <p class="muted">输入应用密码以继续使用。密码只存在本机。</p>
     <input id="app-lock-password" type="password" autocomplete="current-password"
            placeholder="应用密码" class="app-lock-input">
+    <input id="app-lock-recovery" type="text" class="app-lock-input"
+           placeholder="或输入恢复码（忘记密码时）" autocomplete="off">
     <label class="app-lock-auto"><input id="app-lock-auto" type="checkbox"> 本机自动解锁（绑定当前 Windows 用户）</label>
     <button id="app-lock-unlock-btn" class="btn primary">解锁</button>
     <div id="app-lock-error" class="app-lock-error" role="alert"></div>
@@ -694,6 +696,29 @@
     <div class="modal-foot">
       <button id="app-lock-remove" class="btn danger">移除密码</button>
       <button id="app-lock-save" class="btn primary">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 金库：恢复码展示（大号醒目警告） -->
+<div id="vault-recovery-modal" class="modal" style="display:none">
+  <div class="modal-box vault-recovery-box">
+    <div class="vault-warn-banner">⚠️ 请立即抄写并离线保存恢复码</div>
+    <div class="modal-body">
+      <p class="vault-warn-text">
+        <strong>丢失恢复码且忘记密码后，任何人都无法恢复你的数据（包括作者）。</strong>
+      </p>
+      <div id="vault-recovery-code" class="vault-recovery-code">—</div>
+      <p class="vault-warn-text">
+        <strong>请勿截图上传网盘；请抄在纸上或存入密码管理器。</strong>
+      </p>
+      <label class="app-lock-auto">
+        <input id="vault-recovery-saved" type="checkbox"> 我已保存恢复码
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button id="vault-recovery-copy" class="btn ghost">复制</button>
+      <button id="vault-recovery-ok" class="btn primary" disabled>继续</button>
     </div>
   </div>
 </div>
