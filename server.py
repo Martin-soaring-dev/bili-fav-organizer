@@ -1906,17 +1906,22 @@ async def local_api_guard(request, call_next):
             and not path.startswith(_APP_LOCK_OPEN_PATHS)):
         return JSONResponse({"ok": False, "code": "app_locked",
                              "error": "应用已锁定，请先解锁"}, status_code=403)
-    # 金库：配置了却未完成 onboarding / 未解锁时，业务 API 拒绝
-    if path.startswith("/api/") and not path.startswith(
-            _APP_LOCK_OPEN_PATHS + ("/api/vault/",)):
+    # 金库强制门闩：未初始化 / 未完成引导 / 未解锁时，业务 API 一律拒绝
+    # 测试钩子 BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL=1 时跳过（与 token 同理）
+    if (path.startswith("/api/") and not _insecure_local()
+            and not path.startswith(_APP_LOCK_OPEN_PATHS + ("/api/vault/",))):
         try:
             vst = VAULT.state
         except Exception:
             vst = None
-        if vst is not None and vst.password_set and not vst.onboarding_complete:
+        if vst is None or not vst.password_set:
+            return JSONResponse({"ok": False, "code": "app_onboarding",
+                                 "error": "首次使用请先设置应用密码并保存恢复码"},
+                                status_code=403)
+        if not vst.onboarding_complete:
             return JSONResponse({"ok": False, "code": "app_onboarding",
                                  "error": "请先完成金库初始化（保存恢复码）"}, status_code=403)
-        if vst is not None and vst.password_set and vst.onboarding_complete and not vst.unlocked:
+        if not vst.unlocked:
             return JSONResponse({"ok": False, "code": "app_locked",
                                  "error": "金库已锁定，请先解锁"}, status_code=403)
     need_token = (method not in ("GET", "HEAD", "OPTIONS") or

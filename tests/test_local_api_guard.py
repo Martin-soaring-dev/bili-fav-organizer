@@ -18,8 +18,19 @@ class LocalApiGuardTests(unittest.TestCase):
     def setUp(self):
         # 本类按生产规则断言；只在用例期间关掉测试钩子，避免拖垮其它 TestClient 套件
         self._prev_insecure = os.environ.pop("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", None)
+        # 金库强制 onboarding 会抢先 403；本类测 Host/Token，故预置为已初始化且解锁
+        self._prev_vault = server.VAULT
+        import tempfile
+        from pathlib import Path
+        import vault as vault_mod
+        self._vault_tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        server.VAULT = vault_mod.Vault(Path(self._vault_tmp.name) / "vault.json")
+        server.VAULT.initialize(bound_mid="1", password="secret-pass")
+        server.VAULT.complete_onboarding()
 
     def tearDown(self):
+        server.VAULT = self._prev_vault
+        self._vault_tmp.cleanup()
         if self._prev_insecure is not None:
             os.environ["BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL"] = self._prev_insecure
         else:

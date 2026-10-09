@@ -76,6 +76,10 @@
           const screen = document.getElementById("app-lock-screen");
           if (screen) screen.hidden = false;
         }
+        if (data && data.code === "app_onboarding") {
+          const modal = document.getElementById("vault-onboarding-modal");
+          if (modal) modal.style.display = "flex";
+        }
         throw err;
       }
       return data;
@@ -233,6 +237,49 @@
   }
 
   window.__biliFavVault = { showRecovery: showVaultRecovery, refreshStatus: refreshVaultStatus };
+
+  async function maybeShowVaultOnboarding() {
+    const st = await refreshVaultStatus();
+    const modal = $("vault-onboarding-modal");
+    if (!modal) return;
+    if (st && st.configured) {
+      modal.style.display = "none";
+      return;
+    }
+    modal.style.display = "flex";
+    const err = $("vault-onboard-error");
+    const submit = $("vault-onboard-submit");
+    if (submit) {
+      submit.onclick = async () => {
+        const mid = ($("vault-onboard-mid") || {}).value || "";
+        const p1 = ($("vault-onboard-password") || {}).value || "";
+        const p2 = ($("vault-onboard-password2") || {}).value || "";
+        if (err) err.textContent = "";
+        if (p1.length < 6) {
+          if (err) err.textContent = "应用密码至少 6 位";
+          return;
+        }
+        if (p1 !== p2) {
+          if (err) err.textContent = "两次输入的密码不一致";
+          return;
+        }
+        if (!mid) {
+          if (err) err.textContent = "请填写 B 站用户 ID（mid）";
+          return;
+        }
+        try {
+          const res = await api("POST", "/api/vault/onboarding", {
+            bound_mid: mid.trim(), password: p1,
+          });
+          modal.style.display = "none";
+          showVaultRecovery(res.recovery_code);
+        } catch (e) {
+          if (err) err.textContent = e.error || e.message || "初始化失败";
+        }
+      };
+    }
+  }
+  maybeShowVaultOnboarding();
 
   function setUpdateStatus(message, state = "") {
     const box = $("update-status");

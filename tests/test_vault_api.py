@@ -34,6 +34,19 @@ class VaultApiTests(unittest.TestCase):
         self.assertFalse(st["configured"])
         self.assertTrue(st["unlocked"])
 
+    def test_force_onboarding_blocks_business_api_in_production(self):
+        os.environ.pop("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", None)
+        headers = {"Host": "127.0.0.1:8080"}
+        try:
+            res = self.client.put("/api/scan/selection", json={"folder_ids": []},
+                                  headers=headers)
+            self.assertEqual(403, res.status_code)
+            self.assertEqual("app_onboarding", res.json().get("code"))
+            res = self.client.get("/api/vault/status", headers=headers)
+            self.assertEqual(200, res.status_code)
+        finally:
+            os.environ.setdefault("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", "1")
+
     def test_onboarding_returns_recovery_code_once(self):
         res = self.client.post("/api/vault/onboarding", json={
             "bound_mid": "12345",

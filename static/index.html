@@ -700,6 +700,26 @@
   </div>
 </div>
 
+<!-- 金库首次初始化 -->
+<div id="vault-onboarding-modal" class="modal" style="display:none">
+  <div class="modal-box vault-recovery-box">
+    <div class="vault-warn-banner">🔐 首次使用 · 请设置应用密码</div>
+    <div class="modal-body vault-onboarding-body">
+      <p class="muted">设置密码后将生成<strong>恢复码</strong>，请务必离线保存。未完成初始化前无法使用整理功能。</p>
+      <label for="vault-onboard-mid">B 站用户 ID（mid，扫码登录后自动填入；可先手动填）</label>
+      <input id="vault-onboard-mid" type="text" placeholder="例如 12345678">
+      <label for="vault-onboard-password">应用密码（至少 6 位）</label>
+      <input id="vault-onboard-password" type="password" autocomplete="new-password">
+      <label for="vault-onboard-password2">再次输入密码</label>
+      <input id="vault-onboard-password2" type="password" autocomplete="new-password">
+      <div id="vault-onboard-error" class="app-lock-error" role="alert"></div>
+    </div>
+    <div class="modal-foot">
+      <button id="vault-onboard-submit" class="btn primary">设置密码并生成恢复码</button>
+    </div>
+  </div>
+</div>
+
 <!-- 金库：恢复码展示（大号醒目警告） -->
 <div id="vault-recovery-modal" class="modal" style="display:none">
   <div class="modal-box vault-recovery-box">
