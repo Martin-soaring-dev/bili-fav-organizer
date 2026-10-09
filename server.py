@@ -777,32 +777,39 @@ def vault_hello_verify():
     if sys.platform != "win32":
         return {"ok": False, "status": "unsupported", "message": "当前系统不支持 Windows Hello"}
     ps = r'''
+$ErrorActionPreference = 'Stop'
 try {
-  Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction SilentlyContinue
-  $type = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
-  if ($null -eq $type) { Write-Output 'unsupported'; exit 0 }
-  $async = $type::VerifyAsync('验证以解锁数据')
-  # 轮询 IAsyncOperation 完成
-  $deadline = (Get-Date).AddSeconds(30)
-  while (((Get-Date) -lt $deadline)) {
-    $status = $async.Status
-    if ($status -eq 'Completed') { break }
-    if ($status -eq 'Error' -or $status -eq 'Canceled') { break }
-    Start-Sleep -Milliseconds 200
-  }
-  if ($async.Status -ne 'Completed') { Write-Output 'cancel'; exit 0 }
-  $r = $async.GetResults()
-  $c = $r.ConsentResult
-  if ($c -eq 'Allow') { Write-Output 'ok' }
-  elseif ($c -eq 'UserCancelled') { Write-Output 'cancel' }
-  else { Write-Output ('deny:' + $c) }
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $null = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+  $null = [Windows.Security.Credentials.UI.ConsentResult,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+
+  # IAsyncOperation`1 → Task 的 AsTask 扩展
+  $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1
+  } | Select-Object -First 1
+  if (-not $asTask) { Write-Output 'unsupported:AsTask扩展不可用'; exit 0 }
+
+  $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::VerifyAsync('验证以解锁本机数据')
+  $generic = $asTask.MakeGenericMethod($op.GetType().GetGenericArguments()[0])
+  $task = $generic.Invoke($null, @($op))
+  if (-not $task.Wait(30000)) { Write-Output 'cancel'; exit 0 }
+
+  $result = $task.Result
+  # ConsentResult 枚举
+  $name = $result.ToString()
+  if ($name -eq 'Allow') { Write-Output 'ok'; exit 0 }
+  if ($name -eq 'UserCancelled') { Write-Output 'cancel'; exit 0 }
+  Write-Output ("deny:" + $name)
 } catch {
-  Write-Output ('unsupported:' + $_.Exception.Message)
+  $msg = $_.Exception.Message -replace '[\r\n]+', ' '
+  if ($msg -match 'not contain a method') { Write-Output ('unsupported:' + $msg) }
+  else { Write-Output ('unsupported:' + $msg) }
 }
 '''
     try:
+        # 必须允许交互：Windows Hello 需要弹出系统对话框
         out = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+            ["powershell", "-NoProfile", "-STA", "-Command", ps],
             capture_output=True, text=True, timeout=35, encoding="utf-8", errors="replace",
         )
         text = (out.stdout or "").strip().splitlines()[-1] if out.stdout else ""

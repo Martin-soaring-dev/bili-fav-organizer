@@ -1076,20 +1076,6 @@ body.logs-collapsed .settings-panel { left: 0 !important; }
 .legend-swatch.free { background: rgba(128,128,128,.28); }
 .usage-meta { font-size: 12px; margin-top: 4px; }
 
-/* 日志收起时显示侧边页签；默认收起态由 body.logs-collapsed 控制 */
-/* 日志呼出页签：位于 #app 下、.logs 外侧，收起时不会被父级隐藏 */
-.show-log-tab {
-  display: none;
-  position: fixed; left: 0; top: 42%; transform: translateY(-50%);
-  writing-mode: vertical-rl; padding: 14px 9px; border-radius: 0 10px 10px 0;
-  border: 1px solid var(--border); background: var(--panel); cursor: pointer;
-  z-index: 90; font-size: 13px; color: var(--accent); font-weight: 700;
-  box-shadow: 2px 0 10px rgba(0,0,0,.18);
-}
-.show-log-tab:hover { background: var(--button-hover); }
-body.logs-collapsed .show-log-tab { display: block; }
-body.logs-collapsed .logs { display: none; }
-body.logs-collapsed .settings-panel { left: 0 !important; }
 
 /* 图标按钮：无边框，悬停/按下变色 */
 .icon-btn, .btn.icon-btn {
@@ -1113,39 +1099,68 @@ body.logs-collapsed .settings-panel { left: 0 !important; }
 .lock-hello-status { min-height: 1.2em; font-size: 13px; }
 
 /* 日志侧标：收紧、防抖 */
-.show-log-tab {
-  position: fixed !important; left: 0 !important;
-  top: 50% !important; transform: translateY(-50%) !important;
-  writing-mode: vertical-rl;
-  padding: 8px 5px !important; font-size: 11px !important;
-  width: auto; max-width: 28px;
-  border-radius: 0 6px 6px 0 !important;
-  opacity: .85;
-}
-.show-log-tab:hover { opacity: 1; }
 
-/* 日志收起页签：贴在日志窗右缘宽度处（约 320px），更窄 */
-body.logs-collapsed .show-log-tab {
-  left: 320px !important;
-  top: 42% !important;
-  writing-mode: horizontal-tb !important;
-  transform: none !important;
-  padding: 4px 10px !important;
-  font-size: 11px !important;
-  max-width: none;
-  border-radius: 6px !important;
-  border-left: none;
+/* ===== 日志呼出页签：唯一实现 ===== */
+/* 规则：仅 body.logs-collapsed 时显示；挂在 #app 下、不在 .logs 内 */
+.show-log-tab {
+  display: none;
+  position: fixed;
+  left: 320px;           /* 原日志窗右缘 */
+  top: 46%;
+  transform: translateY(-50%);
+  writing-mode: horizontal-tb;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  border-radius: 0 8px 8px 0;
+  background: var(--panel);
+  color: var(--accent, #0a7);
+  cursor: pointer;
+  z-index: 90;
+  box-shadow: 2px 0 8px rgba(0,0,0,.14);
 }
+.show-log-tab:hover { background: var(--button-hover, rgba(127,127,127,.15)); }
+body.logs-collapsed .show-log-tab { display: flex; align-items: center; }
+body.logs-collapsed .logs { display: none !important; }
+body.logs-collapsed .settings-panel { left: 0 !important; }
 @media (max-width: 900px) {
-  body.logs-collapsed .show-log-tab { left: 0 !important; }
+  body.logs-collapsed .show-log-tab { left: 0; }
 }
-/* 设置内嵌管理模型：去掉弹窗外壳样式 */
-#settings-manage-host .manage-modal-box {
-  position: static !important;
+
+/* 更新按钮：无背景，悬停/按下不加底色，仅颜色变化 */
+#check-updates.icon-btn {
+  background: transparent !important;
+  border: none !important;
+}
+#check-updates.icon-btn:hover,
+#check-updates.icon-btn:active,
+#check-updates.icon-btn:focus-visible {
+  background: transparent !important;
+  color: var(--accent, #0a7);
+}
+
+/* 主题/设置/锁等顶栏图标按钮：仅颜色，弱化底色 */
+.topbar-actions .icon-btn:hover,
+.topbar-actions .icon-btn:active {
+  background: transparent !important;
+}
+.topbar-actions .icon-btn:hover svg { color: var(--accent, #0a7); }
+.theme-ico { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.theme-ico .half-sun-rays { fill: none; }
+.theme-ico .half-moon { fill: currentColor; stroke: none; }
+
+/* 内嵌管理模型：与配置平级、无遮罩 */
+.manage-inline .modal-head { display: none !important; }
+.manage-inline .modal-foot { display: none !important; }
+.manage-inline {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
   max-width: 100% !important;
   width: 100% !important;
-  box-shadow: none !important;
-  border: none !important;
-  padding: 0 !important;
-  background: transparent !important;
+  height: auto !important;
+  max-height: none !important;
 }

@@ -4571,7 +4571,7 @@
       if (sections[1] && modelHost) modelHost.appendChild(sections[1]);
       loginHost.dataset.filled = "1";
     }
-    // 管理模型弹窗内容内嵌到设置-模型，不再作为遮罩弹窗
+    // 管理模型：整块内容作为「模型」页与配置平级的一栏，去掉遮罩与关闭钮
     const manageHost = $("settings-manage-host");
     const manageModal = $("manage-modal");
     if (manageHost && manageModal && !manageHost.dataset.filled) {
@@ -4580,7 +4580,14 @@
         manageHost.appendChild(box);
         box.style.display = "block";
         box.style.position = "static";
+        box.classList.add("manage-inline");
+        manageModal.style.display = "none";
         manageHost.dataset.filled = "1";
+        // 关闭/完成按钮在内嵌后无意义
+        if ($("manage-close")) $("manage-close").hidden = true;
+        if ($("manage-done")) $("manage-done").hidden = true;
+        const closeBtn = box.querySelector("#manage-close, .modal-head .mini");
+        if (closeBtn) closeBtn.hidden = true;
       }
     }
   }
