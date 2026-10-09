@@ -104,18 +104,27 @@
   async function refreshAppLock() {
     try {
       const st = await api("GET", "/api/app-lock/status");
-      showLockScreen(!!(st.password_set && !st.unlocked));
+      const vs = await api("GET", "/api/vault/status");
+      const vaultLocked = !!(vs && vs.configured && vs.onboarding_complete && !vs.unlocked);
+      const appLocked = !!(st.password_set && !st.unlocked);
+      showLockScreen(vaultLocked || appLocked);
       const statusText = $("app-lock-status-text");
       if (statusText) {
-        statusText.textContent = st.password_set
-          ? (st.unlocked ? "已设置应用密码 · 当前已解锁" : "已设置应用密码 · 当前已锁定")
-          : "尚未设置应用密码。设置后启动时需要输入密码才能使用。";
+        if (vs && vs.configured) {
+          statusText.textContent = vs.unlocked
+            ? "已设置应用密码（金库）· 当前已解锁。修改密码需先解锁。"
+            : "已设置应用密码（金库）· 当前已锁定，请先解锁再修改。";
+        } else if (st.password_set) {
+          statusText.textContent = st.unlocked
+            ? "已设置应用密码 · 当前已解锁" : "已设置应用密码 · 当前已锁定";
+        } else {
+          statusText.textContent = "尚未设置应用密码。请先完成首次初始化。";
+        }
       }
       const remember = $("app-lock-remember");
       if (remember) remember.checked = !!st.auto_unlock_available;
-      return st;
+      return { ...st, vault: vs };
     } catch (e) {
-      // 锁定中 status 也可访问；其它错误忽略，由各 API 自行提示
       return null;
     }
   }
@@ -126,10 +135,12 @@
     const autoUnlock = !!($("app-lock-auto") || {}).checked;
     const errBox = $("app-lock-error");
     try {
-      if (recovery) {
+      // 金库优先：密码/恢复码都是为了解开 DEK
+      const vs = await api("GET", "/api/vault/status");
+      if (vs && vs.configured) {
         await api("POST", "/api/vault/unlock", {
-          recovery_code: recovery,
           password: password || undefined,
+          recovery_code: recovery || undefined,
         });
       } else {
         await api("POST", "/api/app-lock/unlock", { password, auto_unlock: autoUnlock });
@@ -137,6 +148,7 @@
       if (errBox) errBox.textContent = "";
       showLockScreen(false);
       log("应用已解锁", "ok");
+      await refreshAppLock();
     } catch (e) {
       if (errBox) errBox.textContent = e.error || e.message || "解锁失败";
     }
@@ -161,6 +173,20 @@
     const next = ($("app-lock-new") || {}).value || "";
     const autoUnlock = !!($("app-lock-remember") || {}).checked;
     try {
+      const vs = await api("GET", "/api/vault/status");
+      if (vs && vs.configured) {
+        if (!next) {
+          log("请填写新密码（至少 6 位）", "warn");
+          return;
+        }
+        await api("POST", "/api/vault/set-password", {
+          password: next, current_password: current,
+        });
+        log("应用密码已更新", "ok");
+        closeAppLockModal();
+        refreshAppLock();
+        return;
+      }
       const st = await api("GET", "/api/app-lock/status");
       if (!next && st.password_set) {
         log("未填写新密码，仅更新自动解锁选项", "info");
@@ -225,7 +251,9 @@
       try {
         await api("POST", "/api/vault/complete-onboarding", {});
         modal.style.display = "none";
-        log("恢复码已确认保存，金库初始化完成", "ok");
+        log("恢复码已确认保存，金库已上锁，请用密码解锁后使用", "ok");
+        await refreshAppLock();
+        showLockScreen(true);
       } catch (e) {
         log(e.error || e.message || "完成初始化失败", "err");
       }

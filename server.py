@@ -668,6 +668,32 @@ def vault_complete_onboarding():
     if not VAULT.is_unlocked():
         return JSONResponse({"ok": False, "error": "金库未解锁"}, status_code=403)
     VAULT.complete_onboarding()
+    # 初始化完成后立刻上锁并加密落盘：刷新/重启后必须解锁才能用
+    try:
+        _vault_save_db_encrypted()
+    except OSError as exc:
+        log.warning("初始化后加密数据库失败：%s", exc)
+    VAULT.lock()
+    return {"ok": True, "locked": True, **_vault_status_payload()}
+
+
+class VaultSetPasswordIn(BaseModel):
+    current_password: str = ""
+    password: str = ""
+
+
+@app.post("/api/vault/set-password")
+def vault_set_password(body: VaultSetPasswordIn):
+    password = body.password or ""
+    if len(password) < 6:
+        return JSONResponse({"ok": False, "error": "应用密码至少 6 位"}, status_code=400)
+    try:
+        if VAULT.is_unlocked():
+            VAULT.set_password(password)
+        else:
+            VAULT.set_password(password, current_password=body.current_password or None)
+    except vault_mod.VaultError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
     return {"ok": True, **_vault_status_payload()}
 
 
