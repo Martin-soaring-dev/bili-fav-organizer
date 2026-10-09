@@ -406,7 +406,7 @@ def _load_persisted_token() -> str | None:
 APP_UNLOCK_BLOB = USER_DATA_DIR / "app_unlock.blob"
 _APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
 _PBKDF2_ITERS = 200_000
-_APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/")
+_APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/", "/api/cookie")
 
 
 def _app_lock_secrets() -> dict:
@@ -2931,7 +2931,14 @@ def login_qr_poll():
 @app.get("/api/login/status")
 def login_status():
     cfg = load_config()
-    return {"configured": bool((cfg.get("cookie_string") or "").strip())}
+    ck = cfg.get("cookie_string", "") or ""
+    mid = ""
+    for part in ck.split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == "DedeUserID":
+            mid = v.strip()
+            break
+    return {"configured": bool(ck.strip()), "mid": mid}
 
 
 # ============ 收藏夹画像 ============

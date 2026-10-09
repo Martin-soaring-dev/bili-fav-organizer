@@ -261,6 +261,22 @@
       }
     }
 
+    async function syncMidFromCookie() {
+      try {
+        const me = await api("GET", "/api/login/status");
+        let mid = me && me.mid;
+        if (!mid) {
+          const ck = await api("GET", "/api/cookie");
+          mid = ck && ck.mid;
+        }
+        if (mid) {
+          setMid(String(mid));
+          return String(mid);
+        }
+      } catch (_) { /* ignore */ }
+      return "";
+    }
+
     async function generateVaultQr() {
       const btn = $("vault-qr-btn");
       const box = $("vault-qr-box");
@@ -280,10 +296,16 @@
         qrTimer = setInterval(async () => {
           try {
             const p = await api("GET", "/api/login/qr/poll", undefined, { timeoutMs: 15000 });
-            if (p && p.status === "ok" && p.mid) {
-              if (qrTimer) clearInterval(qrTimer);
-              if (box) box.style.display = "none";
-              setMid(p.mid);
+            if (p && p.status === "ok") {
+              let mid = p.mid || "";
+              if (!mid) mid = await syncMidFromCookie();
+              if (mid) {
+                if (qrTimer) clearInterval(qrTimer);
+                if (box) box.style.display = "none";
+                setMid(mid);
+                return;
+              }
+              if (statusEl) statusEl.textContent = "登录成功，正在读取账号 ID…";
               return;
             }
             if (p && statusEl) statusEl.textContent = p.message || "等待扫码 ...";
@@ -303,15 +325,16 @@
     const qrBtn = $("vault-qr-btn");
     if (qrBtn) qrBtn.onclick = generateVaultQr;
 
-    // 已有 Cookie 时直接取 mid，免重复扫码
-    try {
-      const login = await api("GET", "/api/login/status");
-      if (login && login.configured) {
-        const me = await api("GET", "/api/cookie");
-        const mid = me && (me.mid || me.DedeUserID || "");
-        if (mid) setMid(String(mid));
+    // 已有 Cookie / 别处扫码成功：立刻同步 mid，并持续探测直到拿到
+    await syncMidFromCookie();
+    const midTimer = setInterval(async () => {
+      if (midInput && midInput.value) {
+        clearInterval(midTimer);
+        return;
       }
-    } catch (_) { /* 未登录则继续扫码 */ }
+      const mid = await syncMidFromCookie();
+      if (mid) clearInterval(midTimer);
+    }, 2000);
 
     if (submitHandlerBound) return;
     submitHandlerBound = true;
