@@ -400,6 +400,163 @@ def _load_persisted_token() -> str | None:
         return None
 
 
+# ---------- 应用密码（手动解锁；可选 DPAPI 本机自动解锁） ----------
+APP_UNLOCK_BLOB = USER_DATA_DIR / "app_unlock.blob"
+_APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
+_PBKDF2_ITERS = 200_000
+_APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version")
+
+
+def _app_lock_secrets() -> dict:
+    data, _ = _read_json_file(SECRETS_FILE)
+    return {
+        "salt": str(data.get("app_lock_salt") or ""),
+        "hash": str(data.get("app_lock_hash") or ""),
+    }
+
+
+def _save_app_lock_secrets(salt: str, hash_hex: str) -> None:
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    prev, _ = _read_json_file(SECRETS_FILE)
+    if hash_hex:
+        prev["app_lock_salt"] = salt
+        prev["app_lock_hash"] = hash_hex
+    else:
+        prev.pop("app_lock_salt", None)
+        prev.pop("app_lock_hash", None)
+    _atomic_write(SECRETS_FILE, prev)
+
+
+def _hash_password(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERS).hex()
+
+
+def _password_matches(password: str) -> bool:
+    sec = _app_lock_secrets()
+    if not sec["hash"] or not sec["salt"]:
+        return False
+    try:
+        salt = bytes.fromhex(sec["salt"])
+    except ValueError:
+        return False
+    expected = sec["hash"]
+    return secrets.compare_digest(_hash_password(password, salt), expected)
+
+
+def _set_auto_unlock(enabled: bool) -> None:
+    if enabled:
+        try:
+            USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+            APP_UNLOCK_BLOB.write_bytes(_dpapi_protect(b"app-unlock"))
+        except OSError as exc:
+            log.warning("无法写入本机自动解锁材料：%s", exc)
+    else:
+        try:
+            APP_UNLOCK_BLOB.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _try_auto_unlock() -> bool:
+    try:
+        raw = APP_UNLOCK_BLOB.read_bytes()
+    except OSError:
+        return False
+    try:
+        return _dpapi_unprotect(raw) == b"app-unlock"
+    except (OSError, ValueError):
+        return False
+
+
+def _app_lock_status() -> dict:
+    return {
+        "password_set": _APP_LOCK["enabled"],
+        "unlocked": _APP_LOCK["unlocked"],
+        "auto_unlock_available": APP_UNLOCK_BLOB.is_file(),
+        "failed_attempts": _APP_LOCK["failed_attempts"],
+    }
+
+
+def _app_lock_refresh() -> None:
+    """按 secrets.json 刷新进程内锁定状态（启动或修改密码后调用）。"""
+    sec = _app_lock_secrets()
+    _APP_LOCK["enabled"] = bool(sec["hash"] and sec["salt"])
+    if not _APP_LOCK["enabled"]:
+        _APP_LOCK["unlocked"] = True
+        _APP_LOCK["failed_attempts"] = 0
+        _set_auto_unlock(False)
+        return
+    if not _APP_LOCK["unlocked"]:
+        _APP_LOCK["unlocked"] = _try_auto_unlock()
+
+
+class AppLockPasswordIn(BaseModel):
+    password: str = ""
+    current_password: str = ""
+    auto_unlock: bool = False
+
+
+@app.get("/api/app-lock/status")
+def app_lock_status():
+    return _app_lock_status()
+
+
+@app.post("/api/app-lock/set-password")
+def app_lock_set_password(body: AppLockPasswordIn):
+    password = body.password or ""
+    if len(password) < 6:
+        return JSONResponse({"ok": False, "error": "应用密码至少 6 位"}, status_code=400)
+    if _APP_LOCK["enabled"]:
+        if not _password_matches(body.current_password or ""):
+            return JSONResponse({"ok": False, "error": "当前应用密码不正确"}, status_code=403)
+    salt = secrets.token_bytes(16)
+    _save_app_lock_secrets(salt.hex(), _hash_password(password, salt))
+    _APP_LOCK["enabled"] = True
+    _APP_LOCK["unlocked"] = True
+    _APP_LOCK["failed_attempts"] = 0
+    _set_auto_unlock(bool(body.auto_unlock))
+    emit("ok", "已设置应用密码")
+    return {"ok": True, **_app_lock_status()}
+
+
+@app.post("/api/app-lock/unlock")
+def app_lock_unlock(body: AppLockPasswordIn):
+    if not _APP_LOCK["enabled"]:
+        _APP_LOCK["unlocked"] = True
+        return {"ok": True, **_app_lock_status()}
+    if not _password_matches(body.password or ""):
+        _APP_LOCK["failed_attempts"] += 1
+        return JSONResponse({"ok": False, "error": "应用密码不正确",
+                             "failed_attempts": _APP_LOCK["failed_attempts"]},
+                            status_code=403)
+    _APP_LOCK["unlocked"] = True
+    _APP_LOCK["failed_attempts"] = 0
+    if body.auto_unlock:
+        _set_auto_unlock(True)
+    return {"ok": True, **_app_lock_status()}
+
+
+@app.post("/api/app-lock/lock")
+def app_lock_lock():
+    if _APP_LOCK["enabled"]:
+        _APP_LOCK["unlocked"] = False
+        _set_auto_unlock(False)
+    return {"ok": True, **_app_lock_status()}
+
+
+@app.post("/api/app-lock/remove")
+def app_lock_remove(body: AppLockPasswordIn):
+    if not _APP_LOCK["enabled"]:
+        return {"ok": True, **_app_lock_status()}
+    if not _password_matches(body.current_password or ""):
+        return JSONResponse({"ok": False, "error": "当前应用密码不正确"}, status_code=403)
+    _save_app_lock_secrets("", "")
+    _set_auto_unlock(False)
+    _APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
+    emit("warn", "已移除应用密码")
+    return {"ok": True, **_app_lock_status()}
+
+
 def _begin_job(key: str, state: dict, *, error: str = "") -> JSONResponse | None:
     """在锁内占坑：长任务两两互斥，避免 check-then-act 双开。"""
     with _JOB_START_LOCK:
@@ -1629,6 +1786,12 @@ async def local_api_guard(request, call_next):
         return JSONResponse({"ok": False, "error": "非法 Host"}, status_code=403)
     path = request.url.path
     method = request.method.upper()
+    # 应用密码锁定：只放行解锁/状态与静态资源
+    if (_APP_LOCK["enabled"] and not _APP_LOCK["unlocked"]
+            and path.startswith("/api/")
+            and not path.startswith(_APP_LOCK_OPEN_PATHS)):
+        return JSONResponse({"ok": False, "code": "app_locked",
+                             "error": "应用已锁定，请先解锁"}, status_code=403)
     need_token = (method not in ("GET", "HEAD", "OPTIONS") or
                   path in ("/api/data/export", "/api/cookie"))
     if need_token:
@@ -4755,6 +4918,10 @@ def main():
     restored = _load_persisted_token()
     if restored != _LOCAL_API_TOKEN:
         log.warning("token.blob 解密结果与当前 token 不一致（跨用户或损坏）")
+    _app_lock_refresh()
+    if _APP_LOCK["enabled"]:
+        log.info("应用密码已启用，当前状态：%s",
+                 "已解锁（本机自动）" if _APP_LOCK["unlocked"] else "已锁定")
     _UVICORN_SERVER = uvicorn.Server(config)
     _UVICORN_SERVER.run()
 

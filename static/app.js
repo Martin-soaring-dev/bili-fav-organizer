@@ -72,6 +72,10 @@
         const err = new Error(message);
         err.error = message;
         if (data && data.code === "scan_issue_pending") refreshScanIssues(true);
+        if (data && data.code === "app_locked") {
+          const screen = document.getElementById("app-lock-screen");
+          if (screen) screen.hidden = false;
+        }
         throw err;
       }
       return data;
@@ -79,6 +83,115 @@
       if (timeoutId !== null) clearTimeout(timeoutId);
     }
   }
+
+  // ---------- 应用密码 ----------
+  const lockScreen = $("app-lock-screen");
+  const lockModal = $("app-lock-modal");
+
+  function showLockScreen(show) {
+    if (!lockScreen) return;
+    lockScreen.hidden = !show;
+    if (show) {
+      const input = $("app-lock-password");
+      if (input) { input.value = ""; input.focus(); }
+    }
+  }
+
+  async function refreshAppLock() {
+    try {
+      const st = await api("GET", "/api/app-lock/status");
+      showLockScreen(!!(st.password_set && !st.unlocked));
+      const statusText = $("app-lock-status-text");
+      if (statusText) {
+        statusText.textContent = st.password_set
+          ? (st.unlocked ? "已设置应用密码 · 当前已解锁" : "已设置应用密码 · 当前已锁定")
+          : "尚未设置应用密码。设置后启动时需要输入密码才能使用。";
+      }
+      const remember = $("app-lock-remember");
+      if (remember) remember.checked = !!st.auto_unlock_available;
+      return st;
+    } catch (e) {
+      // 锁定中 status 也可访问；其它错误忽略，由各 API 自行提示
+      return null;
+    }
+  }
+
+  async function submitUnlock() {
+    const password = ($("app-lock-password") || {}).value || "";
+    const autoUnlock = !!($("app-lock-auto") || {}).checked;
+    const errBox = $("app-lock-error");
+    try {
+      await api("POST", "/api/app-lock/unlock", { password, auto_unlock: autoUnlock });
+      if (errBox) errBox.textContent = "";
+      showLockScreen(false);
+      log("应用已解锁", "ok");
+    } catch (e) {
+      if (errBox) errBox.textContent = e.error || e.message || "解锁失败";
+    }
+  }
+
+  function openAppLockModal() {
+    if (!lockModal) return;
+    lockModal.style.display = "flex";
+    const cur = $("app-lock-current");
+    const neu = $("app-lock-new");
+    if (cur) cur.value = "";
+    if (neu) neu.value = "";
+    refreshAppLock();
+  }
+
+  function closeAppLockModal() {
+    if (lockModal) lockModal.style.display = "none";
+  }
+
+  async function saveAppLock() {
+    const current = ($("app-lock-current") || {}).value || "";
+    const next = ($("app-lock-new") || {}).value || "";
+    const autoUnlock = !!($("app-lock-remember") || {}).checked;
+    try {
+      const st = await api("GET", "/api/app-lock/status");
+      if (!next && st.password_set) {
+        log("未填写新密码，仅更新自动解锁选项", "info");
+        return;
+      }
+      if (!next && !st.password_set) {
+        log("请填写至少 6 位的应用密码", "warn");
+        return;
+      }
+      await api("POST", "/api/app-lock/set-password", {
+        password: next, current_password: current, auto_unlock: autoUnlock,
+      });
+      log("应用密码已保存", "ok");
+      closeAppLockModal();
+      refreshAppLock();
+    } catch (e) {
+      log(e.error || e.message || "保存应用密码失败", "err");
+    }
+  }
+
+  async function removeAppLock() {
+    const current = ($("app-lock-current") || {}).value || "";
+    try {
+      await api("POST", "/api/app-lock/remove", { current_password: current });
+      log("已移除应用密码", "warn");
+      closeAppLockModal();
+      refreshAppLock();
+    } catch (e) {
+      log(e.error || e.message || "移除失败", "err");
+    }
+  }
+
+  if ($("app-lock-btn")) $("app-lock-btn").addEventListener("click", openAppLockModal);
+  if ($("app-lock-close")) $("app-lock-close").addEventListener("click", closeAppLockModal);
+  if ($("app-lock-unlock-btn")) $("app-lock-unlock-btn").addEventListener("click", submitUnlock);
+  if ($("app-lock-password")) {
+    $("app-lock-password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitUnlock();
+    });
+  }
+  if ($("app-lock-save")) $("app-lock-save").addEventListener("click", saveAppLock);
+  if ($("app-lock-remove")) $("app-lock-remove").addEventListener("click", removeAppLock);
+  refreshAppLock();
 
   function setUpdateStatus(message, state = "") {
     const box = $("update-status");

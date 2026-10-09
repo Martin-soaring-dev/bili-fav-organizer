@@ -910,3 +910,25 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .profile-intro-count.over-limit { color: var(--danger, #c33); }
 .profile-intro-hint { margin: 3px 0 0; font-size: 11px; line-height: 1.6; }
 .theme-mode { padding: 5px 8px; font-size: 12px; }
+
+/* 应用密码 / 锁定 */
+.app-lock-screen {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.72);
+  display: flex; align-items: center; justify-content: center;
+}
+.app-lock-screen[hidden] { display: none !important; }
+.app-lock-box {
+  width: min(360px, 92vw);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  padding: 28px 24px; display: flex; flex-direction: column; gap: 12px;
+}
+.app-lock-title { font-size: 18px; font-weight: 600; }
+.app-lock-input, .app-lock-form input[type="password"] {
+  width: 100%; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text);
+}
+.app-lock-auto { display: flex; gap: 8px; align-items: center; font-size: 13px; opacity: .9; }
+.app-lock-error { color: #e5534b; font-size: 13px; min-height: 1.2em; }
+.app-lock-form { display: flex; flex-direction: column; gap: 8px; }
+.app-lock-form label { font-size: 13px; opacity: .9; }

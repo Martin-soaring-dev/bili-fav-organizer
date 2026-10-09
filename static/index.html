@@ -22,6 +22,7 @@
       <span id="update-status" class="update-status" aria-live="polite"></span>
     </div>
     <div class="topbar-actions">
+      <button id="app-lock-btn" class="btn mini-btn" title="应用密码与锁定">🔒 应用密码</button>
       <button id="data-import-btn" class="btn mini-btn">📥 读取项目数据</button>
       <button id="data-export-btn" class="btn mini-btn">📤 导出项目数据</button>
       <button id="data-clear-btn" class="btn mini-btn danger">🗑 清除当前数据</button>
@@ -657,6 +658,42 @@
     <div class="modal-body" id="plan-list"></div>
     <div class="modal-foot">
       <button id="plan-save" class="btn primary">确认方案（进入执行）</button>
+    </div>
+  </div>
+</div>
+
+<!-- 应用锁定遮罩 -->
+<div id="app-lock-screen" class="app-lock-screen" hidden>
+  <div class="app-lock-box">
+    <div class="app-lock-title">🔒 应用已锁定</div>
+    <p class="muted">输入应用密码以继续使用。密码只存在本机。</p>
+    <input id="app-lock-password" type="password" autocomplete="current-password"
+           placeholder="应用密码" class="app-lock-input">
+    <label class="app-lock-auto"><input id="app-lock-auto" type="checkbox"> 本机自动解锁（绑定当前 Windows 用户）</label>
+    <button id="app-lock-unlock-btn" class="btn primary">解锁</button>
+    <div id="app-lock-error" class="app-lock-error" role="alert"></div>
+  </div>
+</div>
+
+<!-- 应用密码管理 -->
+<div id="app-lock-modal" class="modal" style="display:none">
+  <div class="modal-box compact-modal">
+    <div class="modal-head">
+      <span>🔒 应用密码</span>
+      <button id="app-lock-close" class="mini">关闭</button>
+    </div>
+    <div class="modal-body app-lock-form">
+      <p class="muted" id="app-lock-status-text"></p>
+      <label for="app-lock-current">当前密码（已设置时必填）</label>
+      <input id="app-lock-current" type="password" autocomplete="current-password">
+      <label for="app-lock-new">新密码（至少 6 位；留空表示不修改）</label>
+      <input id="app-lock-new" type="password" autocomplete="new-password">
+      <label class="app-lock-auto"><input id="app-lock-remember" type="checkbox"> 本机自动解锁（DPAPI 绑定 Windows 用户）</label>
+      <p class="muted">未设置密码时填写「新密码」即可启用。设置后每次启动需解锁，除非勾选本机自动解锁。</p>
+    </div>
+    <div class="modal-foot">
+      <button id="app-lock-remove" class="btn danger">移除密码</button>
+      <button id="app-lock-save" class="btn primary">保存</button>
     </div>
   </div>
 </div>
