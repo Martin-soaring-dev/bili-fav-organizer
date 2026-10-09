@@ -125,8 +125,8 @@
       if (statusText) {
         if (vs && vs.configured) {
           statusText.textContent = vs.unlocked
-            ? "已设置应用密码（金库）· 当前已解锁。修改密码需先解锁。"
-            : "已设置应用密码（金库）· 当前已锁定，请先解锁再修改。";
+            ? "已设置应用密码 · 当前已解锁。可修改密码。"
+            : "已设置应用密码 · 当前已锁定，请先解锁。";
         } else if (st.password_set) {
           statusText.textContent = st.unlocked
             ? "已设置应用密码 · 当前已解锁" : "已设置应用密码 · 当前已锁定";
@@ -4142,7 +4142,7 @@
     loadPromptFields();
   }
 
-  function loadPromptFields() {
+  async function loadPromptFields() {
     const map = [
       ["prompt-profile", "prompt_profile"],
       ["prompt-analyze", "prompt_analyze"],
@@ -4151,13 +4151,19 @@
       ["conf-analyze", "confidence_analyze_min"],
       ["conf-merge", "confidence_merge_min"],
     ];
-    api("GET", "/api/config").then((cfg) => {
+    try {
+      const [cfg, defRes] = await Promise.all([
+        api("GET", "/api/config"),
+        api("GET", "/api/prompts/defaults"),
+      ]);
+      const defaults = (defRes && defRes.defaults) || {};
       for (const [elId, key] of map) {
         const el = $(elId);
         if (!el) continue;
-        if (cfg[key] !== undefined && cfg[key] !== null && cfg[key] !== "") el.value = cfg[key];
+        const hasUser = cfg[key] !== undefined && cfg[key] !== null && cfg[key] !== "";
+        el.value = hasUser ? cfg[key] : (defaults[key] ?? el.value);
       }
-    }).catch(() => {});
+    } catch (_) {}
   }
 
   if ($("settings-btn")) $("settings-btn").addEventListener("click", () => openSettings());
@@ -4244,19 +4250,90 @@
       }
     });
   }
-  for (const [btnId, key] of [
-    ["reset-prompt-profile", "prompt_profile"],
-    ["reset-prompt-analyze", "prompt_analyze"],
-    ["reset-prompt-merge", "prompt_merge"],
-  ]) {
-    const el = $(btnId);
-    if (el) el.addEventListener("click", () => {
-      const field = $(key === "prompt_profile" ? "prompt-profile"
-        : key === "prompt_analyze" ? "prompt-analyze" : "prompt-merge");
-      if (field) field.value = "";
-      log("已清空，保存后恢复内置默认提示词", "info");
+  async function saveOnePrompt(kind) {
+    const pKey = kind === "profile" ? "prompt_profile" : kind === "analyze" ? "prompt_analyze" : "prompt_merge";
+    const cKey = kind === "profile" ? "confidence_profile_min" : kind === "analyze" ? "confidence_analyze_min" : "confidence_merge_min";
+    const pEl = $(kind === "profile" ? "prompt-profile" : kind === "analyze" ? "prompt-analyze" : "prompt-merge");
+    const cEl = $(kind === "profile" ? "conf-profile" : kind === "analyze" ? "conf-analyze" : "conf-merge");
+    try {
+      await api("POST", "/api/config", {
+        [pKey]: (pEl && pEl.value) || "",
+        [cKey]: Number((cEl && cEl.value) || 0),
+      });
+      if ($("settings-advanced-state")) $("settings-advanced-state").textContent = "本项已保存";
+    } catch (e) {
+      log(e.error || e.message || "保存失败", "err");
+    }
+  }
+  async function resetOnePrompt(kind) {
+    try {
+      const defRes = await api("GET", "/api/prompts/defaults");
+      const d = (defRes && defRes.defaults) || {};
+      const pEl = $(kind === "profile" ? "prompt-profile" : kind === "analyze" ? "prompt-analyze" : "prompt-merge");
+      const cEl = $(kind === "profile" ? "conf-profile" : kind === "analyze" ? "conf-analyze" : "conf-merge");
+      const pKey = kind === "profile" ? "prompt_profile" : kind === "analyze" ? "prompt_analyze" : "prompt_merge";
+      const cKey = kind === "profile" ? "confidence_profile_min" : kind === "analyze" ? "confidence_analyze_min" : "confidence_merge_min";
+      if (pEl) pEl.value = d[pKey] || "";
+      if (cEl) cEl.value = d[cKey] ?? 0.5;
+      await api("POST", "/api/config", { [pKey]: "", [cKey]: d[cKey] ?? 0.5 });
+      log("本项已恢复默认", "ok");
+    } catch (e) {
+      log(e.error || e.message || "恢复默认失败", "err");
+    }
+  }
+  if ($("save-prompt-profile")) $("save-prompt-profile").onclick = () => saveOnePrompt("profile");
+  if ($("save-prompt-analyze")) $("save-prompt-analyze").onclick = () => saveOnePrompt("analyze");
+  if ($("save-prompt-merge")) $("save-prompt-merge").onclick = () => saveOnePrompt("merge");
+  if ($("reset-prompt-profile")) $("reset-prompt-profile").onclick = () => resetOnePrompt("profile");
+  if ($("reset-prompt-analyze")) $("reset-prompt-analyze").onclick = () => resetOnePrompt("analyze");
+  if ($("reset-prompt-merge")) $("reset-prompt-merge").onclick = () => resetOnePrompt("merge");
+  if ($("settings-reset-all-prompts")) {
+    $("settings-reset-all-prompts").onclick = async () => {
+      await resetOnePrompt("profile");
+      await resetOnePrompt("analyze");
+      await resetOnePrompt("merge");
+      if ($("settings-advanced-state")) $("settings-advanced-state").textContent = "已全部恢复默认";
+    };
+  }
+  // 数据目录
+  if ($("settings-data-open")) {
+    $("settings-data-open").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/data/open-folder");
+      } catch (e) {
+        log(e.error || e.message || "无法打开目录", "err");
+      }
     });
   }
+  async function refreshDataPath() {
+    try {
+      const p = await api("GET", "/api/data/paths");
+      const el = $("settings-data-path");
+      if (el) el.value = p.data_dir || "";
+    } catch (_) {}
+  }
+  if ($("settings-data-import")) $("settings-data-import").addEventListener("click", () => {
+    const b = $("data-import-btn"); if (b) b.click();
+  });
+  if ($("settings-data-export")) $("settings-data-export").addEventListener("click", () => {
+    const b = $("data-export-btn"); if (b) b.click();
+  });
+  if ($("settings-data-clear")) $("settings-data-clear").addEventListener("click", () => {
+    const b = $("data-clear-btn"); if (b) b.click();
+  });
+  if ($("settings-theme-mode")) {
+    $("settings-theme-mode").addEventListener("change", () => {
+      const v = $("settings-theme-mode").value;
+      const top = $("theme-mode");
+      if (top) top.value = v;
+      top && top.dispatchEvent(new Event("change"));
+    });
+  }
+  const _openSettings = openSettings;
+  openSettings = function (tab) {
+    _openSettings(tab);
+    refreshDataPath();
+  };
   if ($("settings-cookie-method")) {
     $("settings-cookie-method").addEventListener("change", () => {
       const qr = $("settings-cookie-method").value === "qr";

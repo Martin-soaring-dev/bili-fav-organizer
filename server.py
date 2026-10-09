@@ -406,7 +406,8 @@ def _load_persisted_token() -> str | None:
 APP_UNLOCK_BLOB = USER_DATA_DIR / "app_unlock.blob"
 _APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
 _PBKDF2_ITERS = 200_000
-_APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/", "/api/cookie")
+_APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/",
+                        "/api/cookie", "/api/prompts/defaults", "/api/data/paths")
 
 
 def _app_lock_secrets() -> dict:
@@ -586,6 +587,39 @@ def _vault_save_db_encrypted() -> None:
     VAULT.encrypt_file(src, VAULT_DB_ENC)
 
 
+def _vault_migrate_plain_db_if_needed() -> str | None:
+    """老用户明文库迁移：mid 一致则继承并加密。返回说明或 None。"""
+    src = store.DB_FILE
+    enc = VAULT_DB_ENC
+    if not src.is_file() or enc.is_file() or not VAULT.is_unlocked():
+        return None
+    # 若金库已绑定 mid，且 cookie 中 mid 不一致则拒绝导入
+    bound = str(VAULT.state.bound_mid or "")
+    if bound:
+        cfg = load_config()
+        ck = cfg.get("cookie_string", "") or ""
+        cookie_mid = ""
+        for part in ck.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "DedeUserID":
+                cookie_mid = v.strip()
+                break
+        if cookie_mid and cookie_mid != bound:
+            return "检测到其它账号的明文数据，未导入"
+    try:
+        VAULT.encrypt_file(src, enc)
+        backup = src.with_suffix(".sqlite3.plain-backup")
+        try:
+            if not backup.exists():
+                shutil.copy2(src, backup)
+        except OSError:
+            pass
+        return "已继承本地数据并完成加密"
+    except (OSError, vault_mod.VaultError) as exc:
+        log.warning("明文库迁移失败：%s", exc)
+        return None
+
+
 def _vault_restore_db_if_needed() -> bool:
     """若只有密文库且金库已解锁，则解出工作库。"""
     if store.DB_FILE.is_file() or not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
@@ -627,11 +661,12 @@ def vault_onboarding(body: VaultInitIn):
         code = VAULT.initialize(bound_mid=body.bound_mid, password=password)
     except vault_mod.VaultError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-    # 同步旧 app-lock：视为已设密码并解锁
-    _save_app_lock_secrets("", "")  # 密码哈希由 vault 接管后，app-lock 可选兼容
+    migrated = _vault_migrate_plain_db_if_needed()
+    _save_app_lock_secrets("", "")
     _APP_LOCK.update(enabled=False, unlocked=True)
-    emit("ok", "金库初始化完成，请保存恢复码")
-    return {"ok": True, "recovery_code": code, **_vault_status_payload()}
+    emit("ok", "本地加密已启用，请保存恢复码")
+    return {"ok": True, "recovery_code": code, "migrated": migrated,
+            **_vault_status_payload()}
 
 
 @app.post("/api/vault/unlock")
@@ -648,8 +683,10 @@ def vault_unlock(body: VaultUnlockIn):
     except vault_mod.VaultError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
     restored = _vault_restore_db_if_needed()
+    migrated = _vault_migrate_plain_db_if_needed()
     _APP_LOCK.update(enabled=False, unlocked=True)
-    return {"ok": True, "db_restored": restored, **_vault_status_payload()}
+    return {"ok": True, "db_restored": restored, "migrated": migrated,
+            **_vault_status_payload()}
 
 
 @app.post("/api/vault/lock")
@@ -1230,6 +1267,56 @@ def set_config(cfg: ConfigIn):
         cur["confidence_merge_min"] = max(0.0, min(1.0, float(cfg.confidence_merge_min)))
     save_config(cur)
     return {"ok": True, "config": get_config()}
+
+
+DEFAULT_PROMPTS = {
+    "prompt_profile": (
+        "你是收藏夹整理助手。请根据抽样条目为收藏夹写出简介、主题、典型内容、范围外提示，"
+        "并给出 coherence 与 0~1 confidence。只返回 JSON。"
+    ),
+    "prompt_analyze": (
+        "你是 B 站视频归类助手。请根据收藏夹画像，为每条视频给出 recommended 收藏夹、"
+        "action（move_to_existing/create_new/skip）、reason（≤20 字）与 confidence 0~1。只返回 JSON。"
+    ),
+    "prompt_merge": (
+        "你是收藏夹合并顾问。请根据画像与代表条目，提出合并组（target_id、source_ids、final_name、"
+        "reason、confidence）。只返回 JSON。"
+    ),
+}
+DEFAULT_CONFIDENCE = {
+    "confidence_profile_min": 0.5,
+    "confidence_analyze_min": 0.5,
+    "confidence_merge_min": 0.5,
+}
+
+
+@app.get("/api/prompts/defaults")
+def prompts_defaults():
+    return {"ok": True, "defaults": {**DEFAULT_PROMPTS, **DEFAULT_CONFIDENCE}}
+
+
+@app.get("/api/data/paths")
+def data_paths():
+    return {
+        "ok": True,
+        "data_dir": str(USER_DATA_DIR),
+        "db_file": str(store.DB_FILE),
+    }
+
+
+@app.post("/api/data/open-folder")
+def data_open_folder():
+    try:
+        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "win32":
+            os.startfile(str(USER_DATA_DIR))  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(USER_DATA_DIR)])
+        else:
+            subprocess.Popen(["xdg-open", str(USER_DATA_DIR)])
+        return {"ok": True}
+    except OSError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 # ============ 供应商 / 模型管理 ============

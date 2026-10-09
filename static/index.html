@@ -22,7 +22,7 @@
       <span id="update-status" class="update-status" aria-live="polite"></span>
     </div>
     <div class="topbar-actions">
-      <button id="settings-btn" class="btn mini-btn" title="设置">⚙ 设置</button>
+      <button id="settings-btn" class="btn mini-btn" title="设置">⚙</button>
       <button id="lock-now-btn" class="btn mini-btn" title="锁定">🔒</button>
       <button id="data-import-btn" class="btn mini-btn">📥 读取项目数据</button>
       <button id="data-export-btn" class="btn mini-btn">📤 导出项目数据</button>
@@ -763,7 +763,9 @@
       <button type="button" data-tab="account" class="settings-nav-item active">账号</button>
       <button type="button" data-tab="model" class="settings-nav-item">模型</button>
       <button type="button" data-tab="security" class="settings-nav-item">安全</button>
+      <button type="button" data-tab="display" class="settings-nav-item">显示</button>
       <button type="button" data-tab="favorites" class="settings-nav-item">收藏</button>
+      <button type="button" data-tab="data" class="settings-nav-item">数据</button>
       <button type="button" data-tab="advanced" class="settings-nav-item">高级</button>
     </nav>
     <div class="settings-content">
@@ -815,19 +817,19 @@
       </section>
 
       <section class="settings-tab" data-tab-panel="security" hidden>
-        <h3>密码管理</h3>
+        <h3>修改密码</h3>
         <div class="settings-block">
           <p class="muted" id="settings-security-status">—</p>
-          <label>当前密码（未解锁或改密时）</label>
+          <label>当前密码（未解锁时必填）</label>
           <input id="settings-sec-current" type="password" autocomplete="current-password">
           <label>新密码（至少 6 位）</label>
           <input id="settings-sec-new" type="password" autocomplete="new-password">
           <label>再次输入新密码</label>
           <input id="settings-sec-new2" type="password" autocomplete="new-password">
           <div class="row">
-            <button id="settings-sec-reset" class="btn primary" type="button">重置密码</button>
+            <button id="settings-sec-reset" class="btn primary" type="button">修改密码</button>
           </div>
-          <p class="muted">已解锁时可直接重置；重置不会丢失收藏数据。</p>
+          <p class="muted">修改密码不会丢失收藏数据。请使用便于自己记忆的密码并妥善保管恢复码。</p>
         </div>
         <hr class="settings-sep">
         <h3>验证方式</h3>
@@ -841,6 +843,19 @@
         </div>
       </section>
 
+      <section class="settings-tab" data-tab-panel="display" hidden>
+        <h3>界面</h3>
+        <div class="settings-block">
+          <label>主题</label>
+          <select id="settings-theme-mode" class="theme-mode">
+            <option value="system">跟随系统</option>
+            <option value="dark">深色</option>
+            <option value="light">浅色</option>
+          </select>
+          <p class="muted">与顶栏主题选择同步。</p>
+        </div>
+      </section>
+
       <section class="settings-tab" data-tab-panel="favorites" hidden>
         <h3>本地收藏数据</h3>
         <div class="settings-block">
@@ -849,14 +864,37 @@
         </div>
       </section>
 
+      <section class="settings-tab" data-tab-panel="data" hidden>
+        <h3>项目数据</h3>
+        <div class="settings-block">
+          <div class="row">
+            <button id="settings-data-import" class="btn ghost" type="button">📥 读取项目数据</button>
+            <button id="settings-data-export" class="btn ghost" type="button">📤 导出项目数据</button>
+            <button id="settings-data-clear" class="btn danger" type="button">🗑 清除当前数据</button>
+          </div>
+          <p class="muted">导出不含 Cookie 与 API Key；清除前会自动备份。</p>
+          <label>数据目录</label>
+          <input id="settings-data-path" type="text" readonly>
+          <button id="settings-data-open" class="btn ghost" type="button">打开目录</button>
+        </div>
+      </section>
+
       <section class="settings-tab" data-tab-panel="advanced" hidden>
+        <div class="row">
+          <button id="settings-save-advanced" class="btn primary" type="button">全部保存</button>
+          <button id="settings-reset-all-prompts" class="btn ghost" type="button">全部恢复默认</button>
+          <span id="settings-advanced-state" class="muted"></span>
+        </div>
         <h3>收藏夹画像</h3>
         <div class="settings-block">
           <label>提示词</label>
           <textarea id="prompt-profile" rows="5"></textarea>
           <label>置信度阈值（0~1）</label>
           <input id="conf-profile" type="number" min="0" max="1" step="0.05">
-          <button id="reset-prompt-profile" class="btn ghost" type="button">恢复默认</button>
+          <div class="row">
+            <button id="save-prompt-profile" class="btn" type="button">保存本项</button>
+            <button id="reset-prompt-profile" class="btn ghost" type="button">恢复默认</button>
+          </div>
         </div>
         <hr class="settings-sep">
         <h3>LLM 归类分析</h3>
@@ -865,7 +903,10 @@
           <textarea id="prompt-analyze" rows="5"></textarea>
           <label>置信度阈值（0~1）</label>
           <input id="conf-analyze" type="number" min="0" max="1" step="0.05">
-          <button id="reset-prompt-analyze" class="btn ghost" type="button">恢复默认</button>
+          <div class="row">
+            <button id="save-prompt-analyze" class="btn" type="button">保存本项</button>
+            <button id="reset-prompt-analyze" class="btn ghost" type="button">恢复默认</button>
+          </div>
         </div>
         <hr class="settings-sep">
         <h3>AI 合并建议</h3>
@@ -874,11 +915,10 @@
           <textarea id="prompt-merge" rows="5"></textarea>
           <label>置信度阈值（0~1）</label>
           <input id="conf-merge" type="number" min="0" max="1" step="0.05">
-          <button id="reset-prompt-merge" class="btn ghost" type="button">恢复默认</button>
-        </div>
-        <div class="settings-block">
-          <button id="settings-save-advanced" class="btn primary" type="button">保存高级设置</button>
-          <span id="settings-advanced-state" class="muted"></span>
+          <div class="row">
+            <button id="save-prompt-merge" class="btn" type="button">保存本项</button>
+            <button id="reset-prompt-merge" class="btn ghost" type="button">恢复默认</button>
+          </div>
         </div>
       </section>
     </div>
