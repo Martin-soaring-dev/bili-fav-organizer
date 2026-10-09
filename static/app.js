@@ -248,6 +248,73 @@
     }
     modal.style.display = "flex";
     const err = $("vault-onboard-error");
+    const statusEl = $("vault-qr-status");
+    const midInput = $("vault-onboard-mid");
+    let qrTimer = null;
+
+    function setMid(mid) {
+      if (midInput) midInput.value = mid || "";
+      if (statusEl) {
+        statusEl.textContent = mid
+          ? `✅ 已登录，账号 mid=${mid}，请设置应用密码`
+          : "尚未登录，请扫码";
+      }
+    }
+
+    async function generateVaultQr() {
+      const btn = $("vault-qr-btn");
+      const box = $("vault-qr-box");
+      const img = $("vault-qr-img");
+      if (statusEl) statusEl.textContent = "生成中 ...";
+      if (btn) btn.disabled = true;
+      try {
+        const r = await api("POST", "/api/login/qr/generate", undefined, { timeoutMs: 20000 });
+        if (!r || !r.ok) {
+          if (statusEl) statusEl.textContent = "失败：" + ((r && r.error) || "无法生成二维码");
+          return;
+        }
+        if (img) img.src = r.image;
+        if (box) box.style.display = "flex";
+        if (statusEl) statusEl.textContent = "请用手机 B 站 App 扫码登录";
+        if (qrTimer) clearInterval(qrTimer);
+        qrTimer = setInterval(async () => {
+          try {
+            const p = await api("GET", "/api/login/qr/poll", undefined, { timeoutMs: 15000 });
+            if (p && p.status === "ok" && p.mid) {
+              if (qrTimer) clearInterval(qrTimer);
+              if (box) box.style.display = "none";
+              setMid(p.mid);
+              return;
+            }
+            if (p && statusEl) statusEl.textContent = p.message || "等待扫码 ...";
+            if (p && p.status === "expired") {
+              if (qrTimer) clearInterval(qrTimer);
+              if (btn) btn.disabled = false;
+            }
+          } catch (_) { /* 忽略单次轮询失败 */ }
+        }, 1500);
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e.error || e.message || "生成二维码失败";
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    const qrBtn = $("vault-qr-btn");
+    if (qrBtn) qrBtn.onclick = generateVaultQr;
+
+    // 已有 Cookie 时直接取 mid，免重复扫码
+    try {
+      const login = await api("GET", "/api/login/status");
+      if (login && login.configured) {
+        const me = await api("GET", "/api/cookie");
+        const mid = me && (me.mid || me.DedeUserID || "");
+        if (mid) setMid(String(mid));
+      }
+    } catch (_) { /* 未登录则继续扫码 */ }
+
+    if (submitHandlerBound) return;
+    submitHandlerBound = true;
     const submit = $("vault-onboard-submit");
     if (submit) {
       submit.onclick = async () => {
@@ -255,6 +322,10 @@
         const p1 = ($("vault-onboard-password") || {}).value || "";
         const p2 = ($("vault-onboard-password2") || {}).value || "";
         if (err) err.textContent = "";
+        if (!mid) {
+          if (err) err.textContent = "请先扫码登录 B 站账号";
+          return;
+        }
         if (p1.length < 6) {
           if (err) err.textContent = "应用密码至少 6 位";
           return;
@@ -263,13 +334,9 @@
           if (err) err.textContent = "两次输入的密码不一致";
           return;
         }
-        if (!mid) {
-          if (err) err.textContent = "请填写 B 站用户 ID（mid）";
-          return;
-        }
         try {
           const res = await api("POST", "/api/vault/onboarding", {
-            bound_mid: mid.trim(), password: p1,
+            bound_mid: String(mid).trim(), password: p1,
           });
           modal.style.display = "none";
           showVaultRecovery(res.recovery_code);
@@ -279,6 +346,7 @@
       };
     }
   }
+  let submitHandlerBound = false;
   maybeShowVaultOnboarding();
 
   function setUpdateStatus(message, state = "") {

@@ -700,14 +700,22 @@
   </div>
 </div>
 
-<!-- 金库首次初始化 -->
+<!-- 金库首次初始化：扫码绑定 + 设密码 -->
 <div id="vault-onboarding-modal" class="modal" style="display:none">
   <div class="modal-box vault-recovery-box">
-    <div class="vault-warn-banner">🔐 首次使用 · 请设置应用密码</div>
+    <div class="vault-warn-banner">🔐 首次使用 · 扫码登录并设置应用密码</div>
     <div class="modal-body vault-onboarding-body">
-      <p class="muted">设置密码后将生成<strong>恢复码</strong>，请务必离线保存。未完成初始化前无法使用整理功能。</p>
-      <label for="vault-onboard-mid">B 站用户 ID（mid，扫码登录后自动填入；可先手动填）</label>
-      <input id="vault-onboard-mid" type="text" placeholder="例如 12345678">
+      <p class="muted">请先用手机 B 站 App 扫码登录，用于绑定你的账号；然后设置<strong>应用密码</strong>并保存<strong>恢复码</strong>。未完成前无法使用整理功能。</p>
+
+      <div class="vault-qr-step">
+        <button id="vault-qr-btn" class="btn ghost" type="button">生成登录二维码</button>
+        <div id="vault-qr-box" class="vault-qr-box" style="display:none">
+          <img id="vault-qr-img" alt="B站登录二维码" width="180" height="180">
+        </div>
+        <div id="vault-qr-status" class="muted vault-qr-status">尚未登录</div>
+        <input id="vault-onboard-mid" type="hidden" value="">
+      </div>
+
       <label for="vault-onboard-password">应用密码（至少 6 位）</label>
       <input id="vault-onboard-password" type="password" autocomplete="new-password">
       <label for="vault-onboard-password2">再次输入密码</label>

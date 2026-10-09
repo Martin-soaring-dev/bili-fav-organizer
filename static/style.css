@@ -949,3 +949,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   background: #fff3cd; border: 2px solid #b00020; border-radius: 8px;
   color: #222; user-select: all;
 }
+
+.vault-qr-box {
+  display: flex; justify-content: center; padding: 12px;
+  background: #fff; border-radius: 8px; border: 1px solid var(--border);
+}
+.vault-qr-status { font-size: 13px; min-height: 1.4em; }
+.vault-qr-step { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 14px; }

@@ -406,7 +406,7 @@ def _load_persisted_token() -> str | None:
 APP_UNLOCK_BLOB = USER_DATA_DIR / "app_unlock.blob"
 _APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
 _PBKDF2_ITERS = 200_000
-_APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version")
+_APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/")
 
 
 def _app_lock_secrets() -> dict:
@@ -1039,10 +1039,17 @@ def get_session_cookie() -> bili_api.CookieInfo:
 
 @app.get("/api/cookie")
 def get_cookie():
-    """返回当前是否已配置 cookie（不回显原值，只给尾 4 位与长度）。"""
+    """返回当前是否已配置 cookie（不回显原值，只给尾 4 位、长度与 mid）。"""
     cfg = load_config()
     ck = cfg.get("cookie_string", "") or ""
-    return {"configured": bool(ck.strip()), "length": len(ck), "masked": _mask(ck)}
+    mid = ""
+    for part in ck.split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == "DedeUserID":
+            mid = v.strip()
+            break
+    return {"configured": bool(ck.strip()), "length": len(ck), "masked": _mask(ck),
+            "mid": mid}
 
 
 class CookieIn(BaseModel):
@@ -2909,7 +2916,8 @@ def login_qr_poll():
                 cur["cookie_string"] = f"SESSDATA={sessdata}; bili_jct={jct}; DedeUserID={uid}"
                 save_config(cur)
                 LOGIN["session"] = None
-                return {"ok": True, "status": "ok", "message": "登录成功，Cookie 已保存"}
+                return {"ok": True, "status": "ok", "message": "登录成功，Cookie 已保存",
+                        "mid": str(uid)}
             return {"ok": False, "status": "error", "message": "登录成功但未解析到 cookie"}
         mapping = {86101: ("waiting", "未扫码"),
                    86090: ("scanned", "已扫码，请在手机上确认"),
