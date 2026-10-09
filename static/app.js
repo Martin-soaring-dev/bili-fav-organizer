@@ -142,7 +142,9 @@
         await unlockWithVault({ useHello: true });
         return true;
       }
-      if (status) status.textContent = (r && r.message) || "无法使用 Hello，请改用密码";
+      const msg = (r && r.message) || "无法使用 Windows Hello，请改用应用密码";
+      if (status) status.textContent = msg;
+      log(msg, "warn");
       setLockMode("password");
       return false;
     } catch (e) {
@@ -4298,8 +4300,8 @@
   }
   if ($("settings-manage-models")) {
     $("settings-manage-models").addEventListener("click", () => {
-      const open = $("manage-models-btn");
-      if (open) open.click();
+      selectSettingsTab("model");
+      migrateMainPanelsIntoSettings();
     });
   }
   if ($("settings-open-library")) {
@@ -4563,11 +4565,24 @@
     const loginHost = $("settings-login-host");
     const modelHost = $("settings-model-host");
     const conn = $("connection-content");
-    if (!conn || !loginHost || loginHost.dataset.filled) return;
-    const sections = conn.querySelectorAll(":scope > .conn-section");
-    if (sections[0]) loginHost.appendChild(sections[0]);
-    if (sections[1] && modelHost) modelHost.appendChild(sections[1]);
-    loginHost.dataset.filled = "1";
+    if (conn && loginHost && !loginHost.dataset.filled) {
+      const sections = conn.querySelectorAll(":scope > .conn-section");
+      if (sections[0]) loginHost.appendChild(sections[0]);
+      if (sections[1] && modelHost) modelHost.appendChild(sections[1]);
+      loginHost.dataset.filled = "1";
+    }
+    // 管理模型弹窗内容内嵌到设置-模型，不再作为遮罩弹窗
+    const manageHost = $("settings-manage-host");
+    const manageModal = $("manage-modal");
+    if (manageHost && manageModal && !manageHost.dataset.filled) {
+      const box = manageModal.querySelector(".manage-modal-box, .modal-box");
+      if (box) {
+        manageHost.appendChild(box);
+        box.style.display = "block";
+        box.style.position = "static";
+        manageHost.dataset.filled = "1";
+      }
+    }
   }
 
   const THEME_CYCLE = ["system", "light", "dark"];

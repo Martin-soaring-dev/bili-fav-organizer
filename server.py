@@ -811,9 +811,15 @@ try {
     if text == "ok":
         return {"ok": True, "status": "ok", "message": "验证通过"}
     if text == "cancel":
-        return {"ok": False, "status": "cancel", "message": "已取消"}
+        return {"ok": False, "status": "cancel", "message": "已取消，请改用应用密码"}
+    if text.startswith("unsupported"):
+        detail = text.split(":", 1)[1] if ":" in text else ""
+        msg = "无法使用 Windows Hello：未启用 PIN/人脸/指纹，或系统接口不可用"
+        if detail:
+            msg += f"（{detail}）"
+        return {"ok": False, "status": "unsupported", "message": msg}
     return {"ok": False, "status": "unsupported",
-            "message": text or "不可用（未配置 Windows Hello 或系统拒绝）"}
+            "message": text or "Windows Hello 不可用，请改用应用密码解锁"}
 
 
 def _begin_job(key: str, state: dict, *, error: str = "") -> JSONResponse | None:
@@ -1427,7 +1433,17 @@ def data_open_folder():
     try:
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if sys.platform == "win32":
-            os.startfile(str(USER_DATA_DIR))  # noqa: S606
+            # explorer 打开并尽量置顶，避免落在后台
+            subprocess.Popen(["explorer", str(USER_DATA_DIR)])
+            time.sleep(0.4)
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                hwnd = user32.FindWindowW("CabinetWClass", None)
+                if hwnd:
+                    user32.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(USER_DATA_DIR)])
         else:
