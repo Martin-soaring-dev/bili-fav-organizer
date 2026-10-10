@@ -8,9 +8,13 @@ const CAPTION_H = 32;
 const CAPTION_BUTTONS_W = 138;   // Win11 三个系统按钮：46 × 3
 
 const CSS = `
-  html, body { background: transparent !important; }
+  /* Mica 要透上来，但必须由主题底色主导 —— 否则暗色模式整块是白的 */
+  html, body {
+    background: color-mix(in srgb, var(--bg2, #262626) 90%, transparent) !important;
+  }
   body { padding-top: ${CAPTION_H}px; box-sizing: border-box; }
   #app { height: calc(100vh - ${CAPTION_H}px) !important; }
+  :root { --shell-caption: ${CAPTION_H}px; }
   #shell-caption {
     position: fixed; top: 0; left: 0; right: ${CAPTION_BUTTONS_W}px;
     height: ${CAPTION_H}px; z-index: 2147483000;
@@ -46,6 +50,7 @@ window.addEventListener('DOMContentLoaded', () => {
 contextBridge.exposeInMainWorld('shell', {
   captionHeight: CAPTION_H,
   isDesktopShell: true,
+  raiseWindow: () => ipcRenderer.invoke('shell:raise-window'),
   terminal: {
     spawn: opts => ipcRenderer.invoke('terminal:spawn', opts),
     write: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),

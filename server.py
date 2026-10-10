@@ -1552,9 +1552,9 @@ def data_open_folder():
         USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if sys.platform == "win32":
             path = str(USER_DATA_DIR)
-            # explorer /select 直接定位；随后按窗口标题激活资源管理器（不是本应用）
+            # 直接打开这个文件夹本身；/select 会开在上一级并选中它，不是用户要的
             ps = (
-                "Start-Process explorer.exe -ArgumentList '/select,\"" + path + "\"';\n"
+                "Start-Process explorer.exe -ArgumentList '\"" + path + "\"';\n"
                 "Start-Sleep -Milliseconds 600;\n"
                 "$name = Split-Path '" + path + "' -Leaf;\n"
                 "$wshell = New-Object -ComObject WScript.Shell;\n"

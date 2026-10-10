@@ -86,6 +86,21 @@ function killAllTerminals() {
   }
 }
 
+function registerShellIpc() {
+  // Windows Hello 的验证框跟着前台窗口走：先把本窗口提到最前，它才不会被压在下面
+  ipcMain.handle('shell:raise-window', () => {
+    if (win && !win.isDestroyed()) {
+      win.setAlwaysOnTop(true);
+      win.moveTop();
+      win.focus();
+      setTimeout(() => {
+        if (win && !win.isDestroyed()) win.setAlwaysOnTop(false);
+      }, 2500);
+    }
+    return { ok: true };
+  });
+}
+
 function registerTerminalIpc() {
   ipcMain.handle('terminal:spawn', async (_e, opts) => {
     // PTY 走主进程，天然绕过 HTTP 门禁 —— 必须显式复刻同一条锁定规则
@@ -330,6 +345,7 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+  registerShellIpc();
   registerTerminalIpc();
   createTray();
   createWindow();

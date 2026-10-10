@@ -999,7 +999,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 /* 设置中心：右侧覆盖面板 */
 .settings-panel {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 120;
+  position: fixed; top: var(--shell-caption, 0px); right: 0; bottom: 0; z-index: 120;
   left: 350px; /* 侧栏320+标签30，不遮挡侧栏标签 */
   width: auto;
   color: var(--text, #eee);

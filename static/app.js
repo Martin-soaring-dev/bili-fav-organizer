@@ -144,6 +144,7 @@
     const status = $("lock-hello-status");
     if (status) status.textContent = "正在请求 Windows Hello…";
     try {
+      if (window.shell && window.shell.raiseWindow) window.shell.raiseWindow().catch(() => {});
       const r = await api("POST", "/api/vault/hello-verify", {}, { timeoutMs: 35000 });
       if (r && r.ok) {
         await unlockWithVault({ useHello: true });
@@ -4418,6 +4419,7 @@
     };
     setState("正在请求 Windows Hello…", "");
     try {
+      if (window.shell && window.shell.raiseWindow) window.shell.raiseWindow().catch(() => {});
       await api("POST", "/api/vault/bind-device", {});
       const vs = await api("GET", "/api/vault/status");
       if (vs && vs.has_device_wrap) setState("已绑定", "ok");
