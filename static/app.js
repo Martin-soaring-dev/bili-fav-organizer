@@ -133,6 +133,7 @@
   }
 
   let helloTried = false;
+  let helloAutoConsumed = false;   // 启动时的自动验证只发生一次
   async function tryWindowsHelloAuto() {
     const status = $("lock-hello-status");
     if (status) status.textContent = "正在请求 Windows Hello…";
@@ -162,8 +163,9 @@
     if (opts && opts.useHello) {
       // Hello 已在上一步验证过：只解 DEK，不再弹第二次
       try {
-        await api("POST", "/api/vault/unlock-device", { skip_hello: true });
-        finishUnlock();
+        const r = await api("POST", "/api/vault/unlock-device", { skip_hello: true });
+        if (r && r.selftest && r.selftest.detail) log("解密自检：" + r.selftest.detail, "info");
+        await finishUnlock();
         return;
       } catch (e) {
         if (errBox) errBox.textContent = e.error || e.message || "解锁失败，请使用应用密码";
@@ -171,25 +173,28 @@
         return;
       }
     }
+    let r = null;
     if (vs && vs.configured) {
-      await api("POST", "/api/vault/unlock", {
+      r = await api("POST", "/api/vault/unlock", {
         password: password || undefined,
         recovery_code: recovery || undefined,
       });
     } else {
-      await api("POST", "/api/app-lock/unlock", { password });
+      r = await api("POST", "/api/app-lock/unlock", { password });
     }
-    finishUnlock();
+    if (r && r.selftest && r.selftest.detail) log("解密自检：" + r.selftest.detail, "info");
+    await finishUnlock();
   }
 
-  function finishUnlock() {
+  async function finishUnlock() {
     vaultUnlockedCached = true;
     const errBox = $("app-lock-error");
     if (errBox) errBox.textContent = "";
     showLockScreen(false);
     helloTried = false;
     log("应用已解锁", "ok");
-    refreshAppLock();
+    await syncAfterUnlock();
+    await refreshAppLock();
     if (pendingHelloBind) {
       pendingHelloBind = false;
       log("解锁完成，正在完成 Windows Hello 绑定…", "info");
@@ -197,9 +202,23 @@
     }
   }
 
+  // 解锁后立刻把连接状态、统计与各面板刷到当前值 —— 否则界面还停在「未连接」
+  async function syncAfterUnlock() {
+    await checkConn();
+    await refreshStats();
+    try { await refreshOrganizationReadiness(); } catch (_) {}
+    try { await refreshTree(); } catch (_) {}
+    try { await loadFolderMerge(); } catch (_) {}
+    if (folderProfileListLoaded) {
+      try { await loadFolderProfiles(); } catch (_) {}
+    }
+  }
+
   async function beginUnlockFlow() {
     if (helloTried) return;
     helloTried = true;
+    const auto = !helloAutoConsumed;
+    helloAutoConsumed = true;
     let bound = false;
     try {
       const vs = await api("GET", "/api/vault/status");
@@ -211,7 +230,13 @@
       return;
     }
     setLockMode("hello");
-    await tryWindowsHelloAuto();
+    if (auto) {
+      await tryWindowsHelloAuto();
+    } else {
+      // 手动锁定后不再自动弹验证，等用户自己点按钮
+      const status = $("lock-hello-status");
+      if (status) status.textContent = "点击上方按钮进行 Windows Hello 验证";
+    }
   }
 
   async function submitUnlock() {

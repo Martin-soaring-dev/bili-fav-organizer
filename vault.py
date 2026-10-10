@@ -299,3 +299,16 @@ class Vault:
         raw = Path(src).read_bytes()
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(self.decrypt(raw))
+
+    def decrypt_head(self, blob: bytes, length: int) -> bytes:
+        """只解出 blob 的前 length 字节明文，**不做完整性校验**。
+
+        GCM 密文是流式的，前缀可以独立解开；解锁后的「解密自检」用它确认这把 DEK
+        真的能解开本地数据，而不必把整个库读进内存。要验完整性仍需整段 decrypt()。
+        """
+        dek = self._require_dek()
+        if len(blob) < NONCE_LEN + 16 + length:
+            raise VaultError("密文过短")
+        nonce = blob[:NONCE_LEN]
+        ct = blob[NONCE_LEN + 16:NONCE_LEN + 16 + length]
+        return AES.new(dek, AES.MODE_GCM, nonce=nonce).decrypt(ct)

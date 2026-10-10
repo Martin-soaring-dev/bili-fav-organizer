@@ -14,6 +14,7 @@ from pathlib import Path
 from fastapi.responses import JSONResponse
 
 import server
+import store
 import vault as vault_mod
 
 
@@ -36,10 +37,14 @@ class VaultDeviceSecretTests(unittest.TestCase):
             server.APP_UNLOCK_BLOB,
             server.DEVICE_SECRET_BLOB,
             server.VAULT,
+            store.DATA_DIR,
         )
         server.USER_DATA_DIR = root
         server.APP_UNLOCK_BLOB = root / "app_unlock.blob"
         server.DEVICE_SECRET_BLOB = root / "device_secret.blob"
+        # 解锁会做解密自检，自检读的是 store.DATA_DIR 下的加密快照 —— 不隔离会去碰真实库
+        store.DATA_DIR = root / "data"
+        store.DATA_DIR.mkdir(parents=True, exist_ok=True)
 
         vault = vault_mod.Vault(root / "vault.json")
         vault.initialize(bound_mid="1", password="secret12",
@@ -50,7 +55,7 @@ class VaultDeviceSecretTests(unittest.TestCase):
 
     def tearDown(self):
         (server.USER_DATA_DIR, server.APP_UNLOCK_BLOB,
-         server.DEVICE_SECRET_BLOB, server.VAULT) = self._old
+         server.DEVICE_SECRET_BLOB, server.VAULT, store.DATA_DIR) = self._old
         server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
         self._tmp.cleanup()
 

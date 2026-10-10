@@ -521,6 +521,30 @@ def _write_device_secret(secret: str) -> None:
     DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
 
 
+SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def _dek_selftest() -> dict:
+    """验证当前 DEK 真的能解开本地数据，而不只是 unwrap 成功。
+
+    直接取加密快照的头部解一段：GCM 密文是流式的，前缀可独立解开，而 SQLite 库头
+    是确定的 16 字节。不匹配就说明这把 DEK 与磁盘上的数据不是一对（例如金库重建过），
+    此时继续放行只会把用户带进「已解锁但数据读不出来」的状态。
+    """
+    enc = store.DATA_DIR / "library.sqlite3.enc"
+    if not enc.is_file():
+        return {"ok": True, "detail": "没有加密快照，跳过数据解密测试"}
+    try:
+        with enc.open("rb") as fh:
+            raw = fh.read(vault_mod.NONCE_LEN + 16 + 16)
+        head = VAULT.decrypt_head(raw, 16)
+        if head == SQLITE_MAGIC:
+            return {"ok": True, "detail": "加密快照可正确解密"}
+        return {"ok": False, "detail": "解密结果不是 SQLite 库头，DEK 与本地数据不匹配"}
+    except (OSError, ValueError, vault_mod.VaultError) as exc:
+        return {"ok": False, "detail": f"解密自检失败：{exc}"}
+
+
 class AppLockPasswordIn(BaseModel):
     password: str = ""
     current_password: str = ""
@@ -744,8 +768,18 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
         VAULT.unlock_with_secret("device", secret)
     except (OSError, ValueError, vault_mod.VaultError) as exc:
         return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"}, status_code=400)
+    # 与密码解锁保持一致：先把库恢复出来，再确认这把 DEK 真的能解开它
+    restored = _vault_restore_db_if_needed()
+    migrated = _vault_migrate_plain_db_if_needed()
+    test = _dek_selftest()
+    if not test.get("ok"):
+        VAULT.lock()
+        return JSONResponse({"ok": False,
+                             "error": f"解密自检未通过：{test.get('detail')}",
+                             "selftest": test}, status_code=500)
     _APP_LOCK.update(unlocked=True)
-    return {"ok": True, **_vault_status_payload()}
+    return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
+            **_vault_status_payload()}
 
 
 @app.post("/api/vault/unlock")
@@ -763,8 +797,14 @@ def vault_unlock(body: VaultUnlockIn):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
     restored = _vault_restore_db_if_needed()
     migrated = _vault_migrate_plain_db_if_needed()
+    test = _dek_selftest()
+    if not test.get("ok"):
+        VAULT.lock()
+        return JSONResponse({"ok": False,
+                             "error": f"解密自检未通过：{test.get('detail')}",
+                             "selftest": test}, status_code=500)
     _APP_LOCK.update(enabled=False, unlocked=True)
-    return {"ok": True, "db_restored": restored, "migrated": migrated,
+    return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
 
 
