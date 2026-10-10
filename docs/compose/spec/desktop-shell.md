@@ -1,7 +1,7 @@
 ---
 feature: desktop-shell
 status: in-progress
-updated: 2026-10-10
+updated: 2026-10-11
 branch: feat/desktop-shell
 commits: # 留空
 ---
@@ -9,6 +9,28 @@ commits: # 留空
 # 桌面化迁移（Electron 壳 + 后端重写为 Node/TS）
 
 ## Report
+
+### T2 后端托管化（2026-10-11）
+
+壳不再假设端口，也不再只杀直接子进程。
+
+| 项 | 落地方式 | 实测 |
+|---|---|---|
+| 动态端口 | 壳传 `--port 0` 让系统分配；后端起监听后往 stdout 打一行 `BFO_READY {"port":…,"pid":…}`，壳解析这一行拿真实端口（不存在「先猜端口再启动」的竞态）。设 `BFO_PORT` 时退回固定端口，供 dev 与旧后端双跑对比 | 连续三次启动分别拿到 43234 / 45509 / 26833，不再是 8080 |
+| 就绪握手 | 那一行本身就是就绪信号：socket 已在收连接，而 token/vault 初始化发生在 `uvicorn.run()` 之前，必然已完成。壳随后再探放行端点 `/api/vault/status` 兜底 | 探针 200；冒烟断言「页面来自动态端口」通过 |
+| 优雅退出 | 关 stdin → 后端的父进程看门狗收到 EOF → 置 `_SHUTDOWN`（先断 SSE 长连接）→ 请 uvicorn 退出；等 7s 不退才 `taskkill /T /F` 整树强杀 | 499ms、exit code 0、走优雅分支、端口已释放 |
+| 不留孤儿 | 同一个看门狗：壳被强杀（`taskkill /F` 不带 `/T`）后后端自行退出，`server.log` 留「托管方已退出，后端自行关闭」 | 实测 1.1s 自退，端口释放 |
+| 日志转发 | 后端 stdout/stderr 按行转发，与壳日志一起写 `%LOCALAPPDATA%\BiliFavOrganizer\shell.log`（同步追加，退出不丢最后几行） | shell.log 可见 `[py]`/`[py!]` 全量启动与关闭日志 |
+| Hello 黑窗 | `subprocess.run(powershell …)` 补 `CREATE_NO_WINDOW`（Hello 与「打开数据目录」两处） | pythonw（无控制台父进程）差分实验：默认参数弹出**可见**的 `CASCADIA_HOSTING_WINDOW_CLASS` 窗口（连续 26 次采样可见），加 flag 后新窗口数为 0 |
+| 超时口径 | Python 侧 35s → 50s，让脚本自己的 `Wait(45000)` 成为唯一时限（原 35s 会先杀掉脚本，把「用户还在看 Hello 对话框」误判成取消） | 45s < 50s，脚本内时限胜出 |
+
+顺带修掉 / 发现的问题：
+
+- `tools/shell-smoke.mjs` 的断言停留在 T1 的 32px 空拖动带，而标题栏合并（`10e8cb7`）按用户要求去掉了空带、让顶栏本身充当标题栏，因此这些断言必然失败（5 条）。已改为按当前设计断言：无空拖动带、顶栏即 drag 区域、给系统按钮让位 138px、页面半透明、内容满高；并新增「页面来自动态端口」。现 12/12 通过。
+- 新增 `tools/shell-quit.mjs`：从主进程 inspector 触发 `app.quit()`，断言「优雅退出而非强杀 + 端口释放 + 无孤儿 + 壳记录退出」。
+- 退出顺序有个坑：收摊时先 `win.destroy()` 会触发 `window-all-closed → app.quit()` 再入，若这一轮没被拦下就会打断收摊并留下孤儿后端（实测复现：壳提前死、日志没落盘、后端卡住）。现改为收摊期间 `before-quit` 一律 `preventDefault`，真正的退出只走收摊末尾的 `app.exit(0)`；`window-all-closed` 在收摊期间也不再触发退出。
+- 退出慢的根因不在壳：SSE（`/api/events/stream`）会一直挂着，客户端断开它也不返回，uvicorn 只能等满 `timeout_graceful_shutdown`（5s）再强拆并抛 `CancelledError`。补上自更新路径早就有的 `_SHUTDOWN.set()` 后，7412ms → 499ms，traceback 消失。
+- **既有失败，与本次改动无关**：`tests/test_vault_api.py` 两个解锁用例在改动前的 `HEAD`（`10e8cb7`）上同样失败（用干净 worktree 复现）。原因是解锁自检（`8ab48d5` 新增）要求解密结果是 SQLite 库头，而 fixture 只换了临时 `VAULT_DB_ENC` 路径、没先生成真实的加密库，于是返回 500「解密自检未通过：解密结果不是 SQLite 库头」。修法是在 fixture 里走一次真实加密落盘。
 
 ## [S1] Problem
 
@@ -101,7 +123,7 @@ commits: # 留空
 ## Tasks
 
 - [x] T1: Electron 壳骨架（无边框 + 系统标题栏 overlay + Mica + 单实例），加载现有前端，后端仍用 Python — acceptance: 起窗口、拖动区带 `-webkit-app-region: drag`、页面底色透明、内容高度 = 视口 − 32、`/api/*` 走通现有 Python 后端、单实例锁生效、窗口尺寸写入 `config.json`；**材质观感归 T8 验收**（页面仍不透明时 Mica 看不见） (covers: S2.1, S2.3)
-- [ ] T2: 后端托管化（动态端口回传、就绪握手、优雅退出、日志转发、Hello 黑窗与超时修复） — acceptance: 端口由托管方分配并回传；关闭后进程组干净退出；解锁不出现控制台窗口 (covers: S2.5, S2.7; depends: T1)
+- [x] T2: 后端托管化（动态端口回传、就绪握手、优雅退出、日志转发、Hello 黑窗与超时修复） — acceptance: 端口由托管方分配并回传（实测 43234/45509/26833）；关闭后进程组干净退出（499ms、code 0、端口释放、无孤儿）；解锁不出现控制台窗口（pythonw 差分实验：默认弹可见控制台窗口，加 `CREATE_NO_WINDOW` 后为 0） (covers: S2.5, S2.7; depends: T1)
 - [ ] T3: Node 侧 `store`（SQLite v7 schema、迁移、CRUD） — acceptance: 双跑对比 videos/folders/folder_items/analyses/plans 计数与抽样记录逐条一致 (covers: S2.2, S2.5, S2.6; depends: T2)
 - [ ] T4: Node 侧 `vault`（DEK/多 KEK、DPAPI、恢复码） — acceptance: 现有 `vault.json` 在 Node 侧解锁成功，且 Node 产出的 blob 能被 Python 侧解开 (covers: S2.5, S2.6; depends: T2)
 - [ ] T5: Node 侧 `bili_api`（WBI 签名、收藏夹读写） — acceptance: 只读接口双跑结果一致；签名实现与 Python 同参同值 (covers: S2.2; depends: T2)

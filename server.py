@@ -917,10 +917,14 @@ try {
 }
 '''
     try:
-        # 必须允许交互：Windows Hello 需要弹出系统对话框
+        # 必须允许交互：Windows Hello 需要弹出系统对话框。
+        # CREATE_NO_WINDOW 只是不给自己开控制台（GUI 启动时那一下黑窗），不影响 Hello 对话框。
+        # 时限交给脚本自己的 Wait(45000)：原来 Python 侧 35s 会先杀掉脚本，
+        # 于是「用户还在看对话框」被误报成取消 —— 这里放宽到 50s 兜底。
         out = subprocess.run(
             ["powershell", "-NoProfile", "-STA", "-Command", ps],
-            capture_output=True, text=True, timeout=35, encoding="utf-8", errors="replace",
+            capture_output=True, text=True, timeout=50, encoding="utf-8", errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
         )
         text = (out.stdout or "").strip().splitlines()[-1] if out.stdout else ""
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -1564,6 +1568,7 @@ def data_open_folder():
             subprocess.run(
                 ["powershell", "-NoProfile", "-Command", ps],
                 capture_output=True, timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
             )
         elif sys.platform == "darwin":
             subprocess.Popen(["open", str(USER_DATA_DIR)])
@@ -5544,14 +5549,66 @@ def index():
     return HTMLResponse(html, headers={"Cache-Control": "no-cache, must-revalidate"})
 
 
+def _bind_ready_port(server, announce: bool) -> None:
+    """等 socket 真正开始监听，再确定并（可选）回传端口。
+
+    `--port 0` 时端口由系统分配，只有绑定后才知道，所以端口不能靠调用方猜；
+    托管方（Electron 壳）读回传的这一行拿真实端口，双方之间没有竞态。
+    这一行同时也是就绪信号：能打出来就说明已经在收连接，而 main() 里的初始化
+    （token、vault 元数据）都发生在 uvicorn 启动之前，必然是完成的。
+    """
+    global _APP_PORT
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if getattr(server, "started", False):
+            port = _APP_PORT
+            try:
+                port = int(server.servers[0].sockets[0].getsockname()[1])
+            except (AttributeError, IndexError, OSError):
+                pass
+            else:
+                # 更新脚本会把这个真实端口带回去重启进程，别让它拿到 0
+                _APP_PORT = port
+            if announce:
+                sys.stdout.write(
+                    f"BFO_READY {json.dumps({'port': port, 'pid': os.getpid()})}\n")
+                sys.stdout.flush()
+            return
+        time.sleep(0.05)
+    if announce:
+        sys.stdout.write("BFO_READY_FAILED 后端未在 30 秒内开始监听\n")
+        sys.stdout.flush()
+
+
+def _watch_parent_pipe() -> None:
+    """stdin 是托管方给的管道：它一死管道就 EOF，据此收掉自己。
+
+    缺了这层，壳被强杀后会留下孤儿后端占着端口与 vault，下次启动还得先去找它。
+    """
+    try:
+        while sys.stdin.buffer.read(1):
+            pass
+    except (OSError, ValueError):
+        pass
+    log.warning("托管方已退出，后端自行关闭")
+    # 次序与更新替换那条路一致：先断开 SSE 长连接（它会一直挂着，不主动断 uvicorn
+    # 只能等满优雅超时再强拆，既慢又会抛 CancelledError），再请 uvicorn 退出。
+    _SHUTDOWN.set()
+    if _UVICORN_SERVER is not None:
+        _UVICORN_SERVER.should_exit = True
+
+
 def main():
     global _UVICORN_SERVER, _APP_PORT
     parser = argparse.ArgumentParser(description="B站收藏夹整理")
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--port", type=int, default=8080,
+                        help="监听端口；0 表示由系统分配（托管模式）")
     parser.add_argument("--log-file", default="server.log",
                         help="服务日志文件（默认保存在用户数据目录，可指定其它名字）")
     parser.add_argument("--no-browser", action="store_true",
                         help="启动服务后不自动打开浏览器")
+    parser.add_argument("--handshake", action="store_true",
+                        help="就绪后在 stdout 打印一行 BFO_READY（供托管方读取端口）")
     args = parser.parse_args()
     _APP_PORT = args.port
 
@@ -5604,6 +5661,11 @@ def main():
     except vault_mod.VaultError as exc:
         log.error("加密库元数据无法读取：%s", exc)
     _UVICORN_SERVER = uvicorn.Server(config)
+    if args.port == 0 or args.handshake:
+        threading.Thread(target=_bind_ready_port, args=(_UVICORN_SERVER, args.handshake),
+                         daemon=True, name="bind-port").start()
+    if os.environ.get("BFO_PARENT_PIPE") == "1":
+        threading.Thread(target=_watch_parent_pipe, daemon=True, name="parent-pipe").start()
     _UVICORN_SERVER.run()
 
 

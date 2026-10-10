@@ -1,6 +1,5 @@
 'use strict';
-// Electron 壳（T1）：只负责窗口、单实例、以及把现有 Python 后端拉起来。
-// 后端契约、动态端口与握手在 T2 处理；这里刻意保持最小。
+// Electron 壳：窗口、托盘、单实例，以及托管 Python 后端（拉起 → 握手 → 收摊）。
 const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
@@ -11,18 +10,51 @@ const REPO_ROOT = path.join(__dirname, '..');
 const APP_ICON = path.join(REPO_ROOT, 'packaging', 'BiliFavOrganizer.ico');
 const APP_DATA_ROOT = path.join(process.env.LOCALAPPDATA || app.getPath('appData'), 'BiliFavOrganizer');
 const CONFIG_FILE = path.join(APP_DATA_ROOT, 'config.json');
-const PORT = Number(process.env.BFO_PORT || 8080);
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+const SHELL_LOG = path.join(APP_DATA_ROOT, 'shell.log');
 const CAPTION_H = 32;
+
+// 端口：托管模式下交给系统分配（--port 0），壳从后端的握手行拿真实端口。
+// 设了 BFO_PORT 就改用固定端口，方便 dev 里跟旧后端双跑对比（此时允许复用已在跑的实例）。
+const FIXED_PORT = Number(process.env.BFO_PORT || 0);
+let backendUrl = FIXED_PORT ? `http://127.0.0.1:${FIXED_PORT}` : null;
 
 // Electron 自己的缓存目录也收在同一个根下，别在 %APPDATA% 另开一处
 app.setPath('userData', path.join(APP_DATA_ROOT, 'shell'));
 
-let backend = null;        // 本进程拉起的 Python 后端；复用已有实例时为 null
+let backend = null;        // 本进程拉起的 Python 后端
 let win = null;
 let tray = null;
+let shuttingDown = false;
 
-const log = (...a) => console.log('[shell]', ...a);
+/* ---------------- 日志 ---------------- */
+// 打包后没有控制台，壳自己的日志必须落盘，否则出问题只能靠猜。
+// 用同步追加：退出路径上的最后几行不能被进程退出丢在缓冲区里。
+function openShellLog() {
+  try {
+    fs.mkdirSync(APP_DATA_ROOT, { recursive: true });
+    try {
+      if (fs.statSync(SHELL_LOG).size > 2 * 1024 * 1024) fs.rmSync(SHELL_LOG);
+    } catch { /* 首次运行还没有这个文件 */ }
+  } catch (e) {
+    console.warn('[shell] 无法准备 shell.log：', e.message);
+  }
+}
+
+function logLine(tag, text) {
+  const line = `[${tag}] ${text}`;
+  console.log(line);
+  try {
+    fs.appendFileSync(SHELL_LOG, `${line}\n`);
+  } catch { /* 磁盘写不进去也不能影响主流程 */ }
+}
+
+const log = (...a) => logLine('shell', a.join(' '));
+
+// 后端输出按行转发：一行一条，方便与 shell.log 里的壳日志对照
+function forwardBackend(tag, chunk) {
+  const text = String(chunk);
+  for (const l of text.split(/\r?\n/)) if (l.trim()) logLine(tag, l);
+}
 
 /* ---------------- 窗口与托盘 ---------------- */
 function showWindow() {
@@ -73,8 +105,9 @@ function resolveShell() {
 
 // 与 /api/* 同一条门禁：拿一个确实被门禁保护的端点做判据
 async function isAppUnlocked() {
+  if (!backendUrl) return false;
   try {
-    const r = await fetch(`${BASE_URL}/api/status`, { signal: AbortSignal.timeout(2000) });
+    const r = await fetch(`${backendUrl}/api/status`, { signal: AbortSignal.timeout(2000) });
     return r.ok;
   } catch { return false; }
 }
@@ -196,13 +229,14 @@ function debounce(fn, ms) {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
-/* ---------------- 后端 ---------------- */
+/* ---------------- 后端托管 ---------------- */
 // 就绪探针只能用「解锁前也放行」的端点：/api/* 在 vault 未解锁时一律 403，
 // 所以拿 /api/status 当探针会永远等不到。这两个在 server.py 的放行名单里。
 async function probeBackend(ms = 1500) {
+  if (!backendUrl) return { ok: false, status: 0, error: '端口未知' };
   for (const path of ['/api/vault/status', '/api/version']) {
     try {
-      const r = await fetch(`${BASE_URL}${path}`, { signal: AbortSignal.timeout(ms) });
+      const r = await fetch(`${backendUrl}${path}`, { signal: AbortSignal.timeout(ms) });
       if (r.ok) return { ok: true, path, status: r.status };
       return { ok: false, path, status: r.status };
     } catch (e) {
@@ -222,38 +256,132 @@ function resolvePython() {
   return 'python';
 }
 
-async function ensureBackend() {
-  const existing = await probeBackend();
-  if (existing.ok) {
-    log(`复用已在运行的后端 ${BASE_URL}（探针 ${existing.path}）`);
+const HANDSHAKE_TIMEOUT = 30000;
+
+// 等后端那一行 BFO_READY：它既给出真实端口，也等于「已在收连接」的就绪信号
+function awaitHandshake(child) {
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    let settled = false;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('exit', onExit);
+      fn(arg);
+    };
+    const onExit = code => finish(reject, new Error(`后端在就绪前退出（code=${code}），详见 shell.log`));
+    const timer = setTimeout(() => finish(reject, new Error('后端 30 秒内未回传端口')), HANDSHAKE_TIMEOUT);
+
+    child.stdout.on('data', d => {
+      buf += String(d);
+      let i;
+      while (!settled && (i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line) continue;
+        if (line.startsWith('BFO_READY ')) {
+          try {
+            finish(resolve, JSON.parse(line.slice('BFO_READY '.length)));
+          } catch (e) {
+            finish(reject, new Error(`握手行无法解析：${line}（${e.message}）`));
+          }
+        } else if (line.startsWith('BFO_READY_FAILED')) {
+          finish(reject, new Error(line));
+        } else {
+          logLine('py', line);
+        }
+      }
+    });
+    child.stderr.on('data', d => forwardBackend('py!', d));
+    child.on('exit', onExit);
+  });
+}
+
+function waitExit(child, ms) {
+  if (child.exitCode !== null || child.signalCode) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const onExit = () => { clearTimeout(t); resolve(true); };
+    const t = setTimeout(() => { child.removeListener('exit', onExit); resolve(false); }, ms);
+    child.once('exit', onExit);
+  });
+}
+
+// 整棵进程树：后端自己也会拉 powershell（Hello/DPAPI 自检），只杀直接子进程会漏
+function treeKill(pid) {
+  return new Promise(resolve => {
+    if (process.platform !== 'win32') {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* 已经没了 */ }
+      return resolve();
+    }
+    const k = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+    k.on('exit', () => resolve());
+    k.on('error', () => resolve());
+  });
+}
+
+// 收摊：先礼后兵。关掉 stdin 让后端自己走优雅退出（uvicorn timeout_graceful_shutdown=5），
+// 超时才整棵树强杀。这样不会留下孤儿后端占着端口与 vault。
+async function stopBackend() {
+  const child = backend;
+  if (!child) return;
+  backend = null;
+  if (child.exitCode !== null || child.signalCode) return;
+  try { child.stdin.end(); } catch { /* 管道已经关了 */ }
+  if (await waitExit(child, 7000)) {
+    log('Python 后端已优雅退出');
     return;
   }
-  const py = resolvePython();
-  log(`拉起 Python 后端：${py} server.py --port ${PORT} --no-browser`);
-  backend = spawn(py, ['server.py', '--port', String(PORT), '--no-browser'], {
-    cwd: REPO_ROOT,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  backend.stdout.on('data', d => process.stdout.write(`[py] ${d}`));
-  backend.stderr.on('data', d => process.stderr.write(`[py] ${d}`));
-  backend.on('exit', (code, sig) => {
-    log(`Python 后端退出 code=${code} signal=${sig}`);
-    backend = null;
-  });
+  log('优雅退出超时，强杀后端进程树');
+  await treeKill(child.pid);
+}
 
-  const deadline = Date.now() + 30000;
-  let last = null;
-  while (Date.now() < deadline) {
-    if (!backend) throw new Error('Python 后端启动后立即退出，见上方日志');
-    last = await probeBackend();
-    if (last.ok) {
-      log(`后端就绪（探针 ${last.path}）`);
+async function ensureBackend() {
+  // 只有固定端口模式才谈得上「复用已在跑的实例」（比如 dev 里手工起的旧后端）
+  if (FIXED_PORT) {
+    const existing = await probeBackend();
+    if (existing.ok) {
+      log(`复用已在运行的后端 ${backendUrl}（探针 ${existing.path}）`);
       return;
     }
-    await new Promise(r => setTimeout(r, 400));
   }
-  throw new Error(`后端在 30 秒内未就绪，最后探针结果：${JSON.stringify(last)}`);
+
+  const py = resolvePython();
+  const port = FIXED_PORT;   // 0 = 交给系统分配
+  log(`拉起 Python 后端：${py} server.py --port ${port} --no-browser --handshake`);
+  const child = spawn(py, ['server.py', '--port', String(port), '--no-browser', '--handshake'], {
+    cwd: REPO_ROOT,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+    env: {
+      ...process.env,
+      BFO_PARENT_PIPE: '1',      // 壳一死，管道 EOF，后端自己收摊
+      PYTHONUNBUFFERED: '1',     // 否则日志卡在 Python 的块缓冲里，落不到 shell.log
+      PYTHONIOENCODING: 'utf-8',
+    },
+  });
+  backend = child;
+  child.on('exit', (code, sig) => {
+    log(`Python 后端退出 code=${code} signal=${sig}`);
+    if (backend === child) backend = null;
+  });
+
+  let info;
+  try {
+    info = await awaitHandshake(child);
+  } catch (e) {
+    await stopBackend();
+    throw e;
+  }
+  backendUrl = `http://127.0.0.1:${info.port}`;
+  log(`后端就绪 pid=${info.pid} port=${info.port}`);
+
+  const probe = await probeBackend(3000);
+  if (!probe.ok) {
+    await stopBackend();
+    throw new Error(`后端回传端口 ${info.port}，但端点不可用：${JSON.stringify(probe)}`);
+  }
+  log(`门禁探针通过（${probe.path} → ${probe.status}）`);
 }
 
 /* ---------------- 窗口 ---------------- */
@@ -300,7 +428,7 @@ function createWindow() {
   win.once('ready-to-show', () => {
     win.show();
     const b = win.getBounds();
-    log(`窗口就绪 material=mica titleBar=hidden url=${BASE_URL} bounds=${b.width}x${b.height}+${b.x}+${b.y}`);
+    log(`窗口就绪 material=mica titleBar=hidden url=${backendUrl} bounds=${b.width}x${b.height}+${b.x}+${b.y}`);
   });
   win.webContents.on('did-fail-load', (_e, code, desc, url) => {
     log(`加载失败 code=${code} ${desc} ${url}`);
@@ -317,7 +445,7 @@ function createWindow() {
     if (win && !win.isDestroyed()) win.setTitleBarOverlay(overlayTheme());
   });
 
-  win.loadURL(BASE_URL);
+  win.loadURL(backendUrl);
 }
 
 /* ---------------- 生命周期 ---------------- */
@@ -338,6 +466,8 @@ app.on('second-instance', () => {
 Menu.setApplicationMenu(null);
 
 app.whenReady().then(async () => {
+  openShellLog();
+  log(`壳启动 pid=${process.pid} 端口模式=${FIXED_PORT ? `固定 ${FIXED_PORT}` : '系统分配'}`);
   try {
     await ensureBackend();
   } catch (e) {
@@ -351,13 +481,28 @@ app.whenReady().then(async () => {
   createWindow();
 });
 
-app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => {
+app.on('window-all-closed', () => {
+  // 收摊期间窗口会先被拆掉，这里不能再触发一轮退出
+  if (shuttingDown) return;
+  app.quit();
+});
+
+app.on('before-quit', (e) => {
   app.isQuitting = true;
-  killAllTerminals();
-  if (backend) {
-    log('关闭 Python 后端');
-    backend.kill();
-    backend = null;
-  }
+  // 收摊期间把所有退出请求都拦下：真正的退出只走收摊末尾的 app.exit(0)，
+  // 否则任何一次再入（window-all-closed、重复 app.quit()）都会打断收摊，
+  // 把后端变成孤儿。
+  e.preventDefault();
+  if (shuttingDown) return;
+  shuttingDown = true;
+  (async () => {
+    killAllTerminals();
+    // 先拆窗口：页面上的长轮询（登录二维码那种）会一直挂着，不拆的话后端要卡满
+    // uvicorn 的 timeout_graceful_shutdown（5s）才强拆连接。拆掉渲染进程等于把这些
+    // 连接关掉，后端才可能立刻收摊。destroy() 不触发 close，不会走进「收进托盘」。
+    if (win && !win.isDestroyed()) win.destroy();
+    await stopBackend();
+    log('壳退出');
+    app.exit(0);
+  })();
 });

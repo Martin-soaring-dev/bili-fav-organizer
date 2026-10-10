@@ -10,7 +10,6 @@ import { join } from 'node:path';
 const PORT = Number(process.argv[2] || 9222);
 const INSPECT = Number(process.argv[3] || 9229);
 const CONFIG = join(process.env.LOCALAPPDATA, 'BiliFavOrganizer', 'config.json');
-const CAPTION_H = 32;
 
 async function cdp(endpoint) {
   const ws = new WebSocket(endpoint);
@@ -47,14 +46,19 @@ const evaluate = async expression =>
 
 const results = await evaluate(`(() => {
   const strip = document.getElementById('shell-caption');
+  const topbar = document.querySelector('.topbar');
   const bodyStyle = getComputedStyle(document.body);
   const app = document.getElementById('app');
+  // 页面底色是 color-mix(...) 也算半透明，这里把 alpha 抠出来判断
+  const bg = bodyStyle.backgroundColor;
+  const alpha = bg.match(/\\/\\s*([\\d.]+)\\s*\\)/) || bg.match(/rgba?\\([^)]*,\\s*([\\d.]+)\\s*\\)$/);
   return {
     url: location.href,
-    captionStrip: !!strip,
-    captionDrag: strip ? getComputedStyle(strip).webkitAppRegion : null,
-    captionHeight: strip ? strip.getBoundingClientRect().height : null,
-    bodyTransparent: bodyStyle.backgroundColor,
+    emptyStrip: !!strip,
+    topbarDrag: topbar ? getComputedStyle(topbar).webkitAppRegion : null,
+    topbarPadRight: topbar ? getComputedStyle(topbar).paddingRight : null,
+    bodyBackground: bg,
+    bodyAlpha: alpha ? Number(alpha[1]) : 1,
     bodyPaddingTop: bodyStyle.paddingTop,
     appHeight: app ? app.getBoundingClientRect().height : null,
     innerHeight: window.innerHeight,
@@ -98,15 +102,20 @@ try {
 
 const checks = [
   ['preload 桥已注入', results.preloadBridge === true],
-  ['拖动带存在', results.captionStrip === true],
-  ['拖动带是 drag 区域', results.captionDrag === 'drag'],
-  ['拖动带高度 = 32', results.captionHeight === CAPTION_H],
-  ['页面底色透明（Mica 能透）', /rgba\(0, 0, 0, 0\)|transparent/.test(results.bodyTransparent)],
-  ['内容区高度 = 视口 - 32', Math.abs(results.appHeight - (results.innerHeight - CAPTION_H)) < 1],
+  // 顶栏本身就是标题栏：不再另垫一条 32px 空拖动带
+  ['没有空拖动带', results.emptyStrip === false],
+  ['顶栏是 drag 区域', results.topbarDrag === 'drag'],
+  ['顶栏给系统按钮让位 138px', results.topbarPadRight === '138px'],
+  ['页面底色半透明（Mica 能透，但仍由主题底色主导）',
+    results.bodyAlpha > 0.5 && results.bodyAlpha < 1],
+  ['页面不再额外让高', results.bodyPaddingTop === '0px'],
+  ['内容区满高（视口高度）', Math.abs(results.appHeight - results.innerHeight) < 1],
   ['应用已启动（topbar 存在）', results.appBooted === true],
   // 用版本号而不是统计数字：统计要 vault 解锁后才有，版本来自放行端点，与解锁状态无关
   ['已完成一次后端往返（版本号已渲染）',
     !!results.appVersion && !results.appVersion.includes('—')],
+  // T2：页面必须来自后端回传的动态端口，而不是写死的 8080
+  ['页面来自动态端口', /^http:\/\/127\.0\.0\.1:(?!8080)\d+\/$/.test(results.url)],
   ['窗口尺寸改到目标值',
     bounds && bounds.width === TARGET_BOUNDS.width && bounds.height === TARGET_BOUNDS.height],
   ['窗口尺寸已写入 config.json', !!persisted && persisted.width === TARGET_BOUNDS.width],
