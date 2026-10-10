@@ -1444,8 +1444,21 @@
   librarySortMode.value = localStorage.getItem("library-sort-mode") || "bili";
   librarySortDirection.value = localStorage.getItem("library-sort-direction") || "asc";
 
+  // 浏览器本体可整体挪窝：弹窗里一份，设置 → 收藏 里一份（同一份 DOM，避免两套状态）
+  const libraryBrowserRoot = $("library-browser");
+  const libraryBrowserHome = libraryBrowserRoot.parentElement;
+
+  function mountLibraryBrowser(host) {
+    if (libraryBrowserRoot.parentElement !== host) host.appendChild(libraryBrowserRoot);
+  }
+
   $("library-view-btn").addEventListener("click", async () => {
     libraryModal.style.display = "flex";
+    mountLibraryBrowser(libraryBrowserHome);
+    await loadLibraryBrowser();
+  });
+
+  async function loadLibraryBrowser() {
     $("library-meta").textContent = "正在读取本地收藏夹和扫描状态…";
     try {
       const [tree, directory, profileData] = await Promise.all([
@@ -1479,7 +1492,7 @@
       $("library-folders").textContent = "";
       $("library-items").textContent = "";
     }
-  });
+  }
   $("library-close").addEventListener("click", () => { libraryModal.style.display = "none"; });
   libraryModal.addEventListener("click", e => { if (e.target === libraryModal) libraryModal.style.display = "none"; });
 
@@ -4179,6 +4192,34 @@
   function closeSettings() {
     const panel = $("settings-panel");
     if (panel) panel.hidden = true;
+  }
+  async function showFavoritesInSettings() {
+    const host = $("settings-favorites-host");
+    if (!host) return;
+    mountLibraryBrowser(host);
+    renderFavoritesOverview(host).catch(() => {});
+    await loadLibraryBrowser();
+  }
+
+  // 概览数字只是附带信息，失败也不影响下面的浏览器
+  async function renderFavoritesOverview(host) {
+    const status = await api("GET", "/api/status");
+    const st = (status || {}).stats || {};
+    const overview = document.createElement("div");
+    overview.className = "fav-overview";
+    [["收藏夹", st.folders], ["本地视频", st.videos],
+     ["已分析", st.analyzed], ["已定案", st.planned]].forEach(([label, value]) => {
+      const cell = document.createElement("div");
+      cell.className = "fav-stat";
+      const num = document.createElement("b");
+      num.textContent = value ?? "—";
+      const name = document.createElement("span");
+      name.textContent = label;
+      cell.append(num, name);
+      overview.appendChild(cell);
+    });
+    host.querySelector(":scope > .fav-overview")?.remove();
+    host.prepend(overview);
   }
   function selectSettingsTab(name) {
     document.querySelectorAll(".settings-nav-item").forEach((el) => {

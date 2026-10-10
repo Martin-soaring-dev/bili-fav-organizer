@@ -2046,8 +2046,16 @@ INVALID_TITLE = "已失效视频"
 
 
 def _is_invalid(video: dict) -> bool:
-    """防火墙：只有标题**恰好**是「已失效视频」才算失效视频。"""
-    return (video.get("title") or "").strip() == INVALID_TITLE
+    """防火墙：标题**恰好**是「已失效视频」，或 B 站标了 attr=1（失效位），才算失效视频。
+
+    只认标题会漏掉「标题已从历史备份恢复原文」的失效条目，此时 attr 位是唯一可靠信号。
+    """
+    if (video.get("title") or "").strip() == INVALID_TITLE:
+        return True
+    try:
+        return int(video.get("attr") or 0) == 1
+    except (TypeError, ValueError):
+        return False
 
 
 def _autobackup_data(tag: str = "autobackup") -> str:
