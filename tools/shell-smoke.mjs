@@ -72,30 +72,46 @@ const results = await evaluate(`(() => {
   };
 })()`);
 
-// 窗口尺寸落盘：从主进程改一次窗口大小，等一下再读 config.json
+// 窗口尺寸落盘：从主进程改一次窗口大小，等一下再读 config.json。
+// 跑之前先把原尺寸记下来，验完还原 —— 这个检查不该顺手改掉用户的窗口几何。
 const TARGET_BOUNDS = { width: 1120, height: 720, x: 120, y: 90 };
 let bounds = null;
 let persisted = null;
+let originalBounds = null;
+let restored = null;
+const evalInMain = async (cdpConn, expression) => {
+  const res = await cdpConn.send('Runtime.evaluate', { expression, returnByValue: true });
+  if (res.exceptionDetails) throw new Error(JSON.stringify(res.exceptionDetails));
+  return res.result.value;
+};
+// 主进程里 require 不是全局的，得从 process.mainModule 上取
+const BOUNDS_EXPR = method => `(() => {
+  try {
+    const BW = process.mainModule.require('electron').BrowserWindow;
+    const w = BW.getAllWindows()[0];
+    if (!w) return { error: 'no window' };
+    ${method}
+  } catch (e) { return { error: e.message }; }
+})()`;
 try {
   const mainTargets = await (await fetch(`http://127.0.0.1:${INSPECT}/json/list`)).json();
   const main = mainTargets[0];
   if (!main?.webSocketDebuggerUrl) throw new Error(`主进程 inspector 不可用：${JSON.stringify(mainTargets)}`);
   const mainCdp = await cdp(main.webSocketDebuggerUrl);
-  // 主进程里 require 不是全局的，得从 process.mainModule 上取
-  const expr = `(() => {
-    try {
-      const BW = process.mainModule.require('electron').BrowserWindow;
-      const w = BW.getAllWindows()[0];
-      w.setBounds(${JSON.stringify(TARGET_BOUNDS)});
-      return w.getBounds();
-    } catch (e) { return { error: e.message }; }
-  })()`;
-  const res = await mainCdp.send('Runtime.evaluate', { expression: expr, returnByValue: true });
-  if (res.exceptionDetails) throw new Error(JSON.stringify(res.exceptionDetails));
-  bounds = res.result.value;
-  mainCdp.close();
+  const original = await evalInMain(mainCdp, BOUNDS_EXPR('return w.getBounds();'));
+  originalBounds = original;
+  bounds = await evalInMain(mainCdp,
+    BOUNDS_EXPR(`w.setBounds(${JSON.stringify(TARGET_BOUNDS)}); return w.getBounds();`));
   await new Promise(r => setTimeout(r, 1500));
   persisted = JSON.parse(readFileSync(CONFIG, 'utf8')).shell_window || null;
+
+  if (original && !original.error) {
+    restored = await evalInMain(mainCdp,
+      BOUNDS_EXPR(`w.setBounds(${JSON.stringify(original)}); return w.getBounds();`));
+    await new Promise(r => setTimeout(r, 1500));   // 等防抖落盘
+    restored.persisted = JSON.parse(readFileSync(CONFIG, 'utf8')).shell_window || null;
+  }
+  mainCdp.close();
 } catch (e) {
   bounds = { error: e.message };
 }
@@ -119,12 +135,16 @@ const checks = [
   ['窗口尺寸改到目标值',
     bounds && bounds.width === TARGET_BOUNDS.width && bounds.height === TARGET_BOUNDS.height],
   ['窗口尺寸已写入 config.json', !!persisted && persisted.width === TARGET_BOUNDS.width],
+  ['跑完已还原原窗口尺寸',
+    !!restored?.persisted && restored.persisted.width === originalBounds?.width
+      && restored.persisted.height === originalBounds?.height],
 ];
 
 console.log(JSON.stringify({
   page: results,
   windowBounds: bounds,
   persistedShellWindow: persisted,
+  restoredWindow: restored,
   checks: checks.map(([name, ok]) => `${ok ? 'PASS' : 'FAIL'}  ${name}`),
   failed: checks.filter(([, ok]) => !ok).length,
 }, null, 2));
