@@ -18,13 +18,6 @@
       <a class="brand-credit" href="https://github.com/Martin-soaring-dev/bili-fav-organizer"
          target="_blank" rel="noopener noreferrer"
          title="作者 Martin-soaring-dev · 许可 PolyForm Noncommercial License 1.0.0（仅限非商业用途，保留署名与来源）">© Martin-soaring-dev</a>
-      <button id="check-updates" class="icon-btn update-check-btn" type="button"
-              title="检查更新" aria-label="检查更新">
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-          <path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.3 0 6 2.7 6 6s-2.7 6-6 6-6-2.7-6-6H4c0 4.4 3.6 8 8 8s8-3.6 8-8-3.6-8-8-8z"/>
-        </svg>
-      </button>
-      <span id="update-status" class="update-status" aria-live="polite"></span>
     </div>
     <div class="topbar-right">
       <div class="status-strip">
@@ -80,9 +73,42 @@
   </header>
 
   <div class="layout">
-    <!-- 侧栏：rail = 内容 + 竖排标签（📌 / 日志 / 终端） -->
+    <!-- 左：图标栏（底部 显示 / 设置 / 锁定） -->
+    <nav class="rail" id="app-rail" aria-label="快捷操作">
+      <span class="rail-gap"></span>
+      <button id="rail-display" class="rail-btn" type="button" title="主题" aria-label="切换主题">
+        <svg class="theme-ico theme-ico-auto" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+          <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>
+        </svg>
+        <svg class="theme-ico theme-ico-light" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" hidden>
+          <circle cx="12" cy="12" r="4.2" fill="currentColor"/>
+          <path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6"
+                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <svg class="theme-ico theme-ico-dark" viewBox="0 0 24 24" width="19" height="19" aria-hidden="true" hidden>
+          <path d="M20.2 14.2A8.4 8.4 0 0 1 9.8 3.8 7.8 7.8 0 1 0 20.2 14.2z" fill="currentColor"/>
+        </svg>
+      </button>
+      <button id="rail-settings" class="rail-btn" type="button" title="设置" aria-label="设置">
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+          <path fill="currentColor" d="M19.14 12.94a7.1 7.1 0 0 0 .06-.94 7.1 7.1 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.3 7.3 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.24-1.12.56-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.67 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.1 7.1 0 0 0-.06.94c0 .32.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.35.61.22l2.39-.96c.5.38 1.04.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.24 1.12-.56 1.62-.94l2.39.96c.19.13.47.02.61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
+        </svg>
+      </button>
+      <button id="rail-lock" class="rail-btn" type="button" title="锁定" aria-label="锁定">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5.5" y="10.5" width="13" height="9" rx="2.5"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>
+      </button>
+    </nav>
+
+    <!-- 侧栏：标签栏贴右边缘，日志/终端面板恒在它左侧 -->
     <div class="sidebar-shell pinned" id="sidebar-shell">
       <div class="sidebar-rail" id="sidebar-rail">
+        <div class="sidebar-tabs" id="sidebar-tabs">
+          <button type="button" class="sidebar-tab sidebar-pin is-on" id="pin-log" title="钉住侧栏" aria-label="钉住">📌</button>
+          <span class="tab-sep" aria-hidden="true"></span>
+          <button type="button" class="sidebar-tab active" data-panel="log" title="运行日志">日志</button>
+          <button type="button" class="sidebar-tab" data-panel="term" title="终端">终端</button>
+        </div>
         <aside class="sidebar" id="log-area">
           <div class="panel-title">
             <span id="sidebar-title">运行日志</span>
@@ -96,12 +122,6 @@
             <div class="term-host" id="term-host"></div>
           </div>
         </aside>
-        <div class="sidebar-tabs" id="sidebar-tabs">
-          <button type="button" class="sidebar-tab sidebar-pin is-on" id="pin-log" title="钉住侧栏" aria-label="钉住">📌</button>
-          <span class="tab-sep" aria-hidden="true"></span>
-          <button type="button" class="sidebar-tab active" data-panel="log" title="运行日志">日志</button>
-          <button type="button" class="sidebar-tab" data-panel="term" title="终端">终端</button>
-        </div>
       </div>
     </div>
 
@@ -853,6 +873,8 @@
       <button type="button" data-tab="favorites" class="settings-nav-item">收藏</button>
       <button type="button" data-tab="data" class="settings-nav-item">数据</button>
       <button type="button" data-tab="advanced" class="settings-nav-item">高级</button>
+      <hr class="settings-nav-sep">
+      <button type="button" data-tab="about" class="settings-nav-item">关于</button>
     </nav>
     <div class="settings-content">
       <section class="settings-tab" data-tab-panel="account">
@@ -993,6 +1015,43 @@
           <div class="row">
             <button id="save-prompt-merge" class="btn" type="button">保存本项</button>
             <button id="reset-prompt-merge" class="btn ghost" type="button">恢复默认</button>
+          </div>
+        </div>
+      </section>
+      <section class="settings-tab" data-tab-panel="about" hidden>
+        <h3>关于</h3>
+        <div class="settings-about">
+          <div class="about-card">
+            <h4>软件与作者</h4>
+            <dl>
+              <dt>名称</dt><dd>B站收藏夹智能整理</dd>
+              <dt>简介</dt><dd>整理 B 站收藏夹的本地工具：扫描收藏明细 → 生成收藏夹画像 → LLM 归类分析 → 预归类方案 → 确认执行。所有数据保存在本机，不上传。</dd>
+              <dt>作者</dt><dd>Martin-soaring-dev</dd>
+              <dt>许可</dt><dd>PolyForm Noncommercial License 1.0.0 —— 仅限非商业用途，保留署名与来源，不得商用。可查看 <b>packaging/使用说明.txt</b>（许可摘要）与 <b>NOTICE</b>。</dd>
+              <dt>仓库</dt><dd><a class="brand-credit" href="https://github.com/Martin-soaring-dev/bili-fav-organizer" target="_blank" rel="noopener noreferrer">github.com/Martin-soaring-dev/bili-fav-organizer</a></dd>
+              <dt>构建</dt><dd id="about-build">dev（开发构建）</dd>
+              <dt>运行环境</dt><dd>Electron 桌面壳 + 本机 Python 后端</dd>
+              <dt>数据目录</dt><dd><code id="about-datadir">C:\Users\Martin\AppData\Local\BiliFavOrganizer</code></dd>
+              <dt>致谢</dt><dd>B 站 API · FastAPI · xterm.js · node-pty · Electron</dd>
+            </dl>
+          </div>
+          <div class="about-card">
+            <h4>检查更新</h4>
+            <dl>
+              <dt>当前版本</dt><dd id="about-version">—</dd>
+              <dt>最新版本</dt><dd id="about-latest">尚未检查</dd>
+            </dl>
+            <div class="row" style="margin-top:12px">
+              <button id="check-updates" class="btn primary update-check-btn" type="button">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                  <path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.3 0 6 2.7 6 6s-2.7 6-6 6-6-2.7-6-6H4c0 4.4 3.6 8 8 8s8-3.6 8-8-3.6-8-8-8z"/>
+                </svg>
+                检查更新
+              </button>
+              <button id="about-download-update" class="btn" type="button" disabled>下载更新</button>
+            </div>
+            <p class="muted" id="about-update-note" style="margin-top:10px">检查更新会读取 GitHub 发布页；开发构建（dev）不做版本比较，如需正式版请手动下载 Release 包。</p>
+            <p><span id="update-status" class="update-status" aria-live="polite"></span></p>
           </div>
         </div>
       </section>

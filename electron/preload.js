@@ -12,14 +12,15 @@ const CSS = `
   html, body {
     background: color-mix(in srgb, var(--bg2, #262626) 90%, transparent) !important;
   }
-  body { padding-top: ${CAPTION_H}px; box-sizing: border-box; }
-  #app { height: calc(100vh - ${CAPTION_H}px) !important; }
-  :root { --shell-caption: ${CAPTION_H}px; }
-  #shell-caption {
-    position: fixed; top: 0; left: 0; right: ${CAPTION_BUTTONS_W}px;
-    height: ${CAPTION_H}px; z-index: 2147483000;
+  :root { --shell-caption: ${CAPTION_H}px; --topbar-h: ${CAPTION_H}px; }
+  /* 顶栏即标题栏：整体可拖动，右侧让开系统按钮，不再垫一条空带 */
+  .topbar {
     -webkit-app-region: drag;
-    user-select: none;
+    padding-right: ${CAPTION_BUTTONS_W}px !important;
+    min-height: ${CAPTION_H}px;
+  }
+  .topbar button, .topbar a, .topbar select, .topbar input {
+    -webkit-app-region: no-drag;
   }
 `;
 
@@ -35,11 +36,6 @@ window.addEventListener('DOMContentLoaded', () => {
   style.id = 'shell-style';
   style.textContent = CSS;
   document.head.appendChild(style);
-
-  const strip = document.createElement('div');
-  strip.id = 'shell-caption';
-  strip.setAttribute('aria-hidden', 'true');
-  document.body.appendChild(strip);
 
   if (pendingSettings) {
     pendingSettings = false;

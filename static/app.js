@@ -4266,6 +4266,10 @@
       refreshUsage();
     }
     if (name === "favorites") showFavoritesInSettings();
+    if (name === "about") {
+      const av = $("about-version"), pv = $("app-version");
+      if (av && pv) av.textContent = pv.textContent;
+    }
     if (name === "advanced") loadPromptFields();
     if (name === "model") {
       // 进入「模型」页时刷新供应商/模型列表
@@ -4689,7 +4693,7 @@
     const btn = $("theme-cycle-btn");
     if (btn) {
       btn.title = THEME_TITLE[v] || THEME_TITLE.system;
-      btn.querySelectorAll(".theme-ico").forEach((svg) => {
+      document.querySelectorAll(".theme-ico").forEach((svg) => {
         const kind = svg.classList.contains("theme-ico-auto") ? "system"
           : svg.classList.contains("theme-ico-light") ? "light"
           : "dark";
@@ -4894,6 +4898,9 @@
         pinBtn.classList.toggle("is-on", pinned);
         pinBtn.title = pinned ? "已钉住（点击取消，悬停显示）" : "未钉住（悬停标签区展开）";
       }
+      // 让设置面板等浮层跟随侧栏实际宽度，收起时不留白
+      document.documentElement.style.setProperty(
+        "--sidebar-shell-w", pinned ? "350px" : "30px");
     }
 
     function setPanel(name) {
@@ -5011,6 +5018,17 @@
     });
   })();
 
+
+  // 左侧图标栏：代理到既有按钮，原有绑定不动
+  $("rail-display")?.addEventListener("click", () => $("theme-cycle-btn")?.click());
+  $("rail-settings")?.addEventListener("click", () => $("settings-btn")?.click());
+  $("rail-lock")?.addEventListener("click", () => $("lock-now-btn")?.click());
+
+  // 设置子菜单「检查更新」→ 切到关于并触发检查
+  $("settings-nav-update")?.addEventListener("click", () => {
+    selectSettingsTab("about");
+    checkForUpdates();
+  });
 
   init();
   migrateMainPanelsIntoSettings();
