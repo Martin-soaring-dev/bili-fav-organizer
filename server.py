@@ -404,7 +404,7 @@ def _load_persisted_token() -> str | None:
 
 # ---------- 应用密码（手动解锁；可选 DPAPI 本机自动解锁） ----------
 APP_UNLOCK_BLOB = USER_DATA_DIR / "app_unlock.blob"
-# 金库的设备 secret 必须与应用密码的本机材料分开放：
+# 加密库的设备 secret 必须与应用密码的本机材料分开放：
 # 两者都会被写入/删除，混用同一个文件会互相覆盖，导致 Hello 验证通过却解不开 DEK。
 DEVICE_SECRET_BLOB = USER_DATA_DIR / "device_secret.blob"
 _APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
@@ -500,17 +500,17 @@ def _app_lock_refresh() -> None:
 
 
 def _read_device_secret() -> str:
-    """读取金库设备 secret。
+    """读取加密库设备 secret。
 
-    兼容旧布局：早期把金库 secret 与应用密码材料都写在 app_unlock.blob 里，
-    解出来不是字面量 b"app-unlock" 的就是金库的随机 secret —— 迁到独立文件，
+    兼容旧布局：早期把加密库 secret 与应用密码材料都写在 app_unlock.blob 里，
+    解出来不是字面量 b"app-unlock" 的就是加密库的随机 secret —— 迁到独立文件，
     否则应用密码的自动解锁会把它覆盖掉。
     """
     if DEVICE_SECRET_BLOB.is_file():
         return _dpapi_unprotect(DEVICE_SECRET_BLOB.read_bytes()).decode("utf-8")
     raw = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes())
     if raw == b"app-unlock":
-        raise OSError("app_unlock.blob 里是应用密码材料，不是金库设备 secret")
+        raise OSError("app_unlock.blob 里是应用密码材料，不是加密库设备 secret")
     DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
     DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(raw))
     return raw.decode("utf-8")
@@ -528,7 +528,7 @@ def _dek_selftest() -> dict:
     """验证当前 DEK 真的能解开本地数据，而不只是 unwrap 成功。
 
     直接取加密快照的头部解一段：GCM 密文是流式的，前缀可独立解开，而 SQLite 库头
-    是确定的 16 字节。不匹配就说明这把 DEK 与磁盘上的数据不是一对（例如金库重建过），
+    是确定的 16 字节。不匹配就说明这把 DEK 与磁盘上的数据不是一对（例如加密库重建过），
     此时继续放行只会把用户带进「已解锁但数据读不出来」的状态。
     """
     enc = store.DATA_DIR / "library.sqlite3.enc"
@@ -621,7 +621,7 @@ def _vault_status_payload() -> dict:
     st = VAULT.state
     return {
         "configured": st.password_set,
-        # 未配置金库 = 旧版开放模式，视为已解锁
+        # 未配置加密库 = 旧版开放模式，视为已解锁
         "unlocked": st.unlocked or not st.password_set,
         "onboarding_complete": st.onboarding_complete,
         "bound_mid": st.bound_mid,
@@ -645,7 +645,7 @@ def _vault_migrate_plain_db_if_needed() -> str | None:
     enc = VAULT_DB_ENC
     if not src.is_file() or enc.is_file() or not VAULT.is_unlocked():
         return None
-    # 若金库已绑定 mid，且 cookie 中 mid 不一致则拒绝导入
+    # 若加密库已绑定 mid，且 cookie 中 mid 不一致则拒绝导入
     bound = str(VAULT.state.bound_mid or "")
     if bound:
         cfg = load_config()
@@ -673,7 +673,7 @@ def _vault_migrate_plain_db_if_needed() -> str | None:
 
 
 def _vault_restore_db_if_needed() -> bool:
-    """若只有密文库且金库已解锁，则解出工作库。"""
+    """若只有密文库且加密库已解锁，则解出工作库。"""
     if store.DB_FILE.is_file() or not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
         return False
     try:
@@ -729,7 +729,7 @@ def vault_unbind_device():
         VAULT.save_meta()
     except Exception:
         pass
-    # 只清金库自己的设备 secret；app_unlock.blob 是应用密码的材料，不要动
+    # 只清加密库自己的设备 secret；app_unlock.blob 是应用密码的材料，不要动
     try:
         DEVICE_SECRET_BLOB.unlink(missing_ok=True)
     except OSError:
@@ -822,7 +822,7 @@ def vault_lock():
 @app.post("/api/vault/complete-onboarding")
 def vault_complete_onboarding():
     if not VAULT.is_unlocked():
-        return JSONResponse({"ok": False, "error": "金库未解锁"}, status_code=403)
+        return JSONResponse({"ok": False, "error": "加密库未解锁"}, status_code=403)
     VAULT.complete_onboarding()
     # 初始化完成后立刻上锁并加密落盘：刷新/重启后必须解锁才能用
     try:
@@ -867,7 +867,7 @@ def vault_bind_device(body: VaultBindDeviceIn | None = None):
     if not VAULT.state.password_set:
         return JSONResponse({"ok": False, "error": "请先设置应用密码"}, status_code=400)
     if not VAULT.is_unlocked():
-        return JSONResponse({"ok": False, "error": "请先解锁金库"}, status_code=403)
+        return JSONResponse({"ok": False, "error": "请先解锁加密库"}, status_code=403)
     if not (body and body.skip_hello):
         hello = vault_hello_verify()
         if not hello.get("ok"):
@@ -2439,7 +2439,7 @@ async def local_api_guard(request, call_next):
             and not path.startswith(_APP_LOCK_OPEN_PATHS)):
         return JSONResponse({"ok": False, "code": "app_locked",
                              "error": "应用已锁定，请先解锁"}, status_code=403)
-    # 金库强制门闩：未初始化 / 未完成引导 / 未解锁时，业务 API 一律拒绝
+    # 加密库强制门闩：未初始化 / 未完成引导 / 未解锁时，业务 API 一律拒绝
     # 测试钩子 BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL=1 时跳过（与 token 同理）
     if (path.startswith("/api/") and not _insecure_local()
             and not path.startswith(_APP_LOCK_OPEN_PATHS + ("/api/vault/",))):
@@ -2453,10 +2453,10 @@ async def local_api_guard(request, call_next):
                                 status_code=403)
         if not vst.onboarding_complete:
             return JSONResponse({"ok": False, "code": "app_onboarding",
-                                 "error": "请先完成金库初始化（保存恢复码）"}, status_code=403)
+                                 "error": "请先完成加密库初始化（保存恢复码）"}, status_code=403)
         if not vst.unlocked:
             return JSONResponse({"ok": False, "code": "app_locked",
-                                 "error": "金库已锁定，请先解锁"}, status_code=403)
+                                 "error": "加密库已锁定，请先解锁"}, status_code=403)
     need_token = (method not in ("GET", "HEAD", "OPTIONS") or
                   path in ("/api/data/export", "/api/cookie"))
     # 解锁引导路径：仍校验 Origin，但不强制页面 token（锁屏/Hello 在启动瞬间可能尚未同步）
@@ -5602,7 +5602,7 @@ def main():
     try:
         VAULT.load_meta()
     except vault_mod.VaultError as exc:
-        log.error("金库元数据无法读取：%s", exc)
+        log.error("加密库元数据无法读取：%s", exc)
     _UVICORN_SERVER = uvicorn.Server(config)
     _UVICORN_SERVER.run()
 

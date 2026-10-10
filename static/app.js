@@ -380,7 +380,7 @@
   if ($("app-lock-remove")) $("app-lock-remove").addEventListener("click", removeAppLock);
   refreshAppLock();
 
-  // ---------- 金库 / 恢复码 ----------
+  // ---------- 加密库 / 恢复码 ----------
   function showVaultRecovery(code) {
     const modal = $("vault-recovery-modal");
     const codeEl = $("vault-recovery-code");
@@ -400,7 +400,7 @@
       try {
         await api("POST", "/api/vault/complete-onboarding", {});
         modal.style.display = "none";
-        log("恢复码已确认保存，金库已上锁，请用密码解锁后使用", "ok");
+        log("恢复码已确认保存，加密库已上锁，请用密码解锁后使用", "ok");
         await refreshAppLock();
         showLockScreen(true);
       } catch (e) {
@@ -4311,8 +4311,8 @@
       const box = $("settings-security-status");
       if (box) {
         box.textContent = vs && vs.configured
-          ? (vs.unlocked ? "金库：已设置应用密码 · 已解锁" : "金库：已设置应用密码 · 未解锁")
-          : "金库：尚未初始化";
+          ? (vs.unlocked ? "加密库：已设置应用密码 · 已解锁" : "加密库：已设置应用密码 · 未解锁")
+          : "加密库：尚未初始化";
       }
       const hello = $("settings-sec-hello-state");
       if (hello && vs) {
@@ -4452,7 +4452,7 @@
             st.classList.remove("muted");
             st.style.color = "";
           }
-          log("请先解锁金库（一次即可），解锁后将自动完成 Windows Hello 绑定", "warn");
+          log("请先解锁加密库（一次即可），解锁后将自动完成 Windows Hello 绑定", "warn");
           showLockScreen(true);
           return;
         }
@@ -4762,7 +4762,7 @@
   function downloadExportZip() {
     // 在用户点击手势内同步发起下载（await 会丢失手势，浏览器会静默拦截）
     if (!vaultUnlockedCached) {
-      log("导出失败：金库已锁定，请先解锁", "err");
+      log("导出失败：加密库已锁定，请先解锁", "err");
       const screen = document.getElementById("app-lock-screen");
       if (screen) screen.hidden = false;
       return;

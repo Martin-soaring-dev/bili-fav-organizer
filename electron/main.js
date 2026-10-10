@@ -1,12 +1,13 @@
 'use strict';
 // Electron 壳（T1）：只负责窗口、单实例、以及把现有 Python 后端拉起来。
 // 后端契约、动态端口与握手在 T2 处理；这里刻意保持最小。
-const { app, BrowserWindow, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const REPO_ROOT = path.join(__dirname, '..');
+const APP_ICON = path.join(REPO_ROOT, 'packaging', 'BiliFavOrganizer.ico');
 const APP_DATA_ROOT = path.join(process.env.LOCALAPPDATA || app.getPath('appData'), 'BiliFavOrganizer');
 const CONFIG_FILE = path.join(APP_DATA_ROOT, 'config.json');
 const PORT = Number(process.env.BFO_PORT || 8080);
@@ -18,8 +19,38 @@ app.setPath('userData', path.join(APP_DATA_ROOT, 'shell'));
 
 let backend = null;        // 本进程拉起的 Python 后端；复用已有实例时为 null
 let win = null;
+let tray = null;
 
 const log = (...a) => console.log('[shell]', ...a);
+
+/* ---------------- 窗口与托盘 ---------------- */
+function showWindow() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function createTray() {
+  if (tray) return;
+  const img = nativeImage.createFromPath(APP_ICON);
+  tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img);
+  tray.setToolTip('B站收藏夹智能整理');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示主界面', click: showWindow },
+    {
+      label: '设置',
+      click: () => {
+        showWindow();
+        if (win && !win.isDestroyed()) win.webContents.send('shell:open-settings');
+      },
+    },
+    { type: 'separator' },
+    { label: '退出', click: () => { app.isQuitting = true; app.quit(); } },
+  ]));
+  tray.on('click', showWindow);   // 左键单击也唤起主界面
+  log('托盘已就绪');
+}
 
 /* ---------------- config.json（沿用应用自己的文件，不新建） ---------------- */
 function readConfig() {
@@ -122,6 +153,7 @@ function createWindow() {
     minWidth: 940,
     minHeight: 640,
     show: false,
+    icon: APP_ICON,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     titleBarOverlay: overlayTheme(),
@@ -132,6 +164,14 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // 关闭 = 收进托盘，不退出；托盘菜单「退出」才真正退出
+  win.on('close', (e) => {
+    if (app.isQuitting) return;
+    e.preventDefault();
+    win.hide();
+    log('窗口已关闭，转入托盘运行');
   });
 
   win.once('ready-to-show', () => {
@@ -182,11 +222,13 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+  createTray();
   createWindow();
 });
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => {
+  app.isQuitting = true;
   if (backend) {
     log('关闭 Python 后端');
     backend.kill();

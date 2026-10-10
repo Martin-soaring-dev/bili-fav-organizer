@@ -2,7 +2,7 @@
 // 壳层注入：只补「窗口需要、而页面本来不需要」的两样东西——
 // 顶部的系统标题栏占位带，以及让 Mica 能透上来的透明底。
 // 刻意不改 static/ 下的任何文件：视觉整合是 T8 的范围。
-const { contextBridge } = require('electron');
+const { contextBridge, ipcRenderer } = require('electron');
 
 const CAPTION_H = 32;
 const CAPTION_BUTTONS_W = 138;   // Win11 三个系统按钮：46 × 3
@@ -19,6 +19,13 @@ const CSS = `
   }
 `;
 
+let pendingSettings = false;
+ipcRenderer.on('shell:open-settings', () => {
+  const btn = document.getElementById('settings-btn');
+  if (btn) btn.click();
+  else pendingSettings = true;
+});
+
 window.addEventListener('DOMContentLoaded', () => {
   const style = document.createElement('style');
   style.id = 'shell-style';
@@ -29,6 +36,11 @@ window.addEventListener('DOMContentLoaded', () => {
   strip.id = 'shell-caption';
   strip.setAttribute('aria-hidden', 'true');
   document.body.appendChild(strip);
+
+  if (pendingSettings) {
+    pendingSettings = false;
+    document.getElementById('settings-btn')?.click();
+  }
 });
 
 contextBridge.exposeInMainWorld('shell', {

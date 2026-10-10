@@ -128,7 +128,7 @@ class VaultState:
 
 
 class Vault:
-    """进程内金库：管理 wraps 元数据与内存中的 DEK。"""
+    """进程内加密库：管理 wraps 元数据与内存中的 DEK。"""
 
     def __init__(self, meta_path: Path):
         self.meta_path = Path(meta_path)
@@ -147,9 +147,9 @@ class Vault:
         try:
             data = json.loads(self.meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            raise VaultError("金库元数据损坏") from exc
+            raise VaultError("加密库元数据损坏") from exc
         if not isinstance(data, dict) or "wraps" not in data:
-            raise VaultError("金库元数据损坏")
+            raise VaultError("加密库元数据损坏")
         self._meta = data
 
     def save_meta(self) -> None:
@@ -179,7 +179,7 @@ class Vault:
 
     def _require_dek(self) -> bytes:
         if self._dek is None:
-            raise VaultError("金库未解锁")
+            raise VaultError("加密库未解锁")
         return self._dek
 
     def _set_wrap(self, name: str, wrap: dict) -> None:
@@ -211,7 +211,7 @@ class Vault:
         if dek is None:
             wraps = self._meta.get("wraps") or {}
             if "password" not in wraps or not current_password:
-                raise VaultError("金库未解锁且无法验证当前密码")
+                raise VaultError("加密库未解锁且无法验证当前密码")
             dek = unwrap_dek(wraps["password"], current_password)
             self._dek = dek
         self._set_wrap("password", wrap_dek(dek, password))
