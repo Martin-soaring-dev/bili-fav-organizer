@@ -62,6 +62,7 @@ commits: # 留空
 | 加密 | `node:crypto` | md5、hmac-sha256、aes-256-gcm 往返通过 |
 | DPAPI | 主进程 spawn `powershell -NoProfile -STA -Command`，`windowsHide: true`，调 `crypt32.CryptProtectData/CryptUnprotectData` | 返回 True，236 字节密文 |
 | Windows Hello | 同一通道调 WinRT `UserConsentVerifier.RequestVerificationAsync` | `CheckAvailabilityAsync` → `Available` |
+| Hello 设备 secret | 独立文件 `device_secret.blob`（DPAPI），与应用密码的 `app_unlock.blob` **分开存放**；旧布局里挤在 `app_unlock.blob` 的随机 secret 迁移过去 | 已修（2026-10-10）：两套材料曾共用一个文件，应用密码的自动解锁会覆盖/删除它，表现为「Hello 验证通过却仍要输密码」。T4 的 Node 侧必须保持这个分离 |
 | 本地安全门 | 沿用现有 `/api/*` 的 token 校验与 Host / Origin / Sec-Fetch 门禁 | 契约不变 |
 | 就绪探针 | 只能用放行端点 `/api/vault/status`、`/api/version`（名单见 `server.py:409`） | 实测：用 `/api/status` 当探针永远拿到 403（vault 门闩），换放行端点后 200 |
 

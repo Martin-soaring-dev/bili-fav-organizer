@@ -1,0 +1,123 @@
+# -*- coding: utf-8 -*-
+"""Hello 设备 secret 必须与应用密码的本机材料分开存放。
+
+回归背景：两者曾共用 app_unlock.blob，应用密码的自动解锁会写固定字面量
+b"app-unlock" 并在关闭时删除该文件，把金库的设备 secret 一并覆盖/抹掉 ——
+表现为「Windows Hello 验证通过，却仍然要求输入应用密码」。
+"""
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from fastapi.responses import JSONResponse
+
+import server
+import vault as vault_mod
+
+
+def _payload(res):
+    if isinstance(res, JSONResponse):
+        return json.loads(res.body), res.status_code
+    return res, 200
+
+
+class VaultDeviceSecretTests(unittest.TestCase):
+    # 生产路径在 setUp 重新绑定前取，否则「两个名字指向同一个文件」这类回归测不出来
+    _prod_app_unlock = server.APP_UNLOCK_BLOB
+    _prod_device_secret = server.DEVICE_SECRET_BLOB
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        root = Path(self._tmp.name)
+        self._old = (
+            server.USER_DATA_DIR,
+            server.APP_UNLOCK_BLOB,
+            server.DEVICE_SECRET_BLOB,
+            server.VAULT,
+        )
+        server.USER_DATA_DIR = root
+        server.APP_UNLOCK_BLOB = root / "app_unlock.blob"
+        server.DEVICE_SECRET_BLOB = root / "device_secret.blob"
+
+        vault = vault_mod.Vault(root / "vault.json")
+        vault.initialize(bound_mid="1", password="secret12",
+                         recovery_code="AAAA-BBBB-CCCC-DDDD-EEEE")
+        vault.save_meta()
+        server.VAULT = vault
+        server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
+
+    def tearDown(self):
+        (server.USER_DATA_DIR, server.APP_UNLOCK_BLOB,
+         server.DEVICE_SECRET_BLOB, server.VAULT) = self._old
+        server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
+        self._tmp.cleanup()
+
+    def test_production_paths_are_distinct(self):
+        """两套密钥材料必须落在两个文件里；共用一个文件时会互相覆盖。"""
+        self.assertNotEqual(
+            self._prod_app_unlock, self._prod_device_secret,
+            "APP_UNLOCK_BLOB 与 DEVICE_SECRET_BLOB 必须是不同文件")
+
+    def test_bind_writes_its_own_file_not_app_unlock(self):
+        body, code = _payload(server.vault_bind_device())
+        self.assertEqual(200, code, body)
+        self.assertTrue(body["has_device_wrap"])
+        self.assertTrue(server.DEVICE_SECRET_BLOB.is_file(),
+                        "设备 secret 应写入 device_secret.blob")
+        self.assertFalse(server.APP_UNLOCK_BLOB.exists(),
+                         "绑定 Hello 不该碰应用密码的 app_unlock.blob")
+
+    def test_app_lock_auto_unlock_toggle_keeps_device_secret(self):
+        _payload(server.vault_bind_device())
+        before = server.DEVICE_SECRET_BLOB.read_bytes()
+
+        # 应用密码开启/关闭本机自动解锁：会写入并删除 app_unlock.blob
+        server._set_auto_unlock(True)
+        self.assertTrue(server.APP_UNLOCK_BLOB.is_file())
+        self.assertEqual(b"app-unlock", server._dpapi_unprotect(
+            server.APP_UNLOCK_BLOB.read_bytes()))
+        server._set_auto_unlock(False)
+        self.assertFalse(server.APP_UNLOCK_BLOB.exists())
+
+        self.assertTrue(server.DEVICE_SECRET_BLOB.is_file(),
+                        "应用密码的自动解锁不应删除金库设备 secret")
+        self.assertEqual(before, server.DEVICE_SECRET_BLOB.read_bytes())
+
+        server.VAULT.lock()
+        body, code = _payload(server.vault_unlock_device(
+            server.VaultUnlockDeviceIn(skip_hello=True)))
+        self.assertEqual(200, code, body)
+        self.assertTrue(server.VAULT.is_unlocked())
+
+    def test_migrates_device_secret_from_legacy_shared_blob(self):
+        # 旧布局：金库的随机 secret 与应用密码材料挤在同一个 app_unlock.blob
+        secret = "legacy-device-secret-0001"
+        server.APP_UNLOCK_BLOB.write_bytes(
+            server._dpapi_protect(secret.encode("utf-8")))
+        server.VAULT.bind_device_blob(secret)
+        server.VAULT.lock()
+
+        body, code = _payload(server.vault_unlock_device(
+            server.VaultUnlockDeviceIn(skip_hello=True)))
+        self.assertEqual(200, code, body)
+        self.assertTrue(server.DEVICE_SECRET_BLOB.is_file(),
+                        "旧布局的设备 secret 应被迁到独立文件")
+        self.assertEqual(secret, server._dpapi_unprotect(
+            server.DEVICE_SECRET_BLOB.read_bytes()).decode("utf-8"))
+        # 迁移不该改写应用密码的材料
+        self.assertEqual(secret, server._dpapi_unprotect(
+            server.APP_UNLOCK_BLOB.read_bytes()).decode("utf-8"))
+
+    def test_missing_wrap_while_locked_explains_what_to_do(self):
+        server.VAULT.lock()
+        body, code = _payload(server.vault_unlock_device(
+            server.VaultUnlockDeviceIn(skip_hello=True)))
+        self.assertEqual(400, code, body)
+        self.assertIn("缺少 Hello 设备密钥", body["error"])
+        self.assertFalse(server.VAULT.is_unlocked())
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -404,6 +404,9 @@ def _load_persisted_token() -> str | None:
 
 # ---------- 应用密码（手动解锁；可选 DPAPI 本机自动解锁） ----------
 APP_UNLOCK_BLOB = USER_DATA_DIR / "app_unlock.blob"
+# 金库的设备 secret 必须与应用密码的本机材料分开放：
+# 两者都会被写入/删除，混用同一个文件会互相覆盖，导致 Hello 验证通过却解不开 DEK。
+DEVICE_SECRET_BLOB = USER_DATA_DIR / "device_secret.blob"
 _APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
 _PBKDF2_ITERS = 200_000
 _APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/",
@@ -494,6 +497,28 @@ def _app_lock_refresh() -> None:
         return
     if not _APP_LOCK["unlocked"]:
         _APP_LOCK["unlocked"] = _try_auto_unlock()
+
+
+def _read_device_secret() -> str:
+    """读取金库设备 secret。
+
+    兼容旧布局：早期把金库 secret 与应用密码材料都写在 app_unlock.blob 里，
+    解出来不是字面量 b"app-unlock" 的就是金库的随机 secret —— 迁到独立文件，
+    否则应用密码的自动解锁会把它覆盖掉。
+    """
+    if DEVICE_SECRET_BLOB.is_file():
+        return _dpapi_unprotect(DEVICE_SECRET_BLOB.read_bytes()).decode("utf-8")
+    raw = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes())
+    if raw == b"app-unlock":
+        raise OSError("app_unlock.blob 里是应用密码材料，不是金库设备 secret")
+    DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
+    DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(raw))
+    return raw.decode("utf-8")
+
+
+def _write_device_secret(secret: str) -> None:
+    DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
+    DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
 
 
 class AppLockPasswordIn(BaseModel):
@@ -680,8 +705,9 @@ def vault_unbind_device():
         VAULT.save_meta()
     except Exception:
         pass
+    # 只清金库自己的设备 secret；app_unlock.blob 是应用密码的材料，不要动
     try:
-        APP_UNLOCK_BLOB.unlink(missing_ok=True)
+        DEVICE_SECRET_BLOB.unlink(missing_ok=True)
     except OSError:
         pass
     return {"ok": True, **_vault_status_payload()}
@@ -701,13 +727,19 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
             return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
                                 status_code=403)
     try:
-        if APP_UNLOCK_BLOB.is_file():
-            secret = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes()).decode("utf-8")
-        else:
+        try:
+            secret = _read_device_secret()
+        except OSError:
             secret = secrets.token_urlsafe(32)
-            USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-            APP_UNLOCK_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
+            _write_device_secret(secret)
         if not VAULT.state.has_device_wrap:
+            # 新建包装要拿 DEK，而 DEK 此刻锁着 —— 拿不到就明确告诉用户该做什么
+            if not VAULT.is_unlocked():
+                return JSONResponse(
+                    {"ok": False,
+                     "error": "缺少 Hello 设备密钥：请先用应用密码解锁一次，"
+                              "再到「设置 → 安全」重新绑定 Windows Hello"},
+                    status_code=400)
             VAULT.bind_device_blob(secret)
         VAULT.unlock_with_secret("device", secret)
     except (OSError, ValueError, vault_mod.VaultError) as exc:
@@ -791,8 +823,7 @@ def vault_bind_device():
     secret = secrets.token_urlsafe(32)
     try:
         VAULT.bind_device_blob(secret)
-        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        APP_UNLOCK_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
+        _write_device_secret(secret)
     except (vault_mod.VaultError, OSError) as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
     return {"ok": True, **_vault_status_payload()}
