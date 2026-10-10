@@ -61,7 +61,7 @@ class VaultDeviceSecretTests(unittest.TestCase):
             "APP_UNLOCK_BLOB 与 DEVICE_SECRET_BLOB 必须是不同文件")
 
     def test_bind_writes_its_own_file_not_app_unlock(self):
-        body, code = _payload(server.vault_bind_device())
+        body, code = _payload(server.vault_bind_device(server.VaultBindDeviceIn(skip_hello=True)))
         self.assertEqual(200, code, body)
         self.assertTrue(body["has_device_wrap"])
         self.assertTrue(server.DEVICE_SECRET_BLOB.is_file(),
@@ -69,8 +69,47 @@ class VaultDeviceSecretTests(unittest.TestCase):
         self.assertFalse(server.APP_UNLOCK_BLOB.exists(),
                          "绑定 Hello 不该碰应用密码的 app_unlock.blob")
 
+    def test_bind_verifies_hello_by_default(self):
+        """绑定写入的是「能解开 DEK 的设备密钥」，默认必须先过一次 Windows Hello。"""
+        seen = []
+        original = server.vault_hello_verify
+        server.vault_hello_verify = lambda: (seen.append(1) or {"ok": True, "status": "ok"})
+        try:
+            body, code = _payload(server.vault_bind_device())
+            self.assertEqual(200, code, body)
+            self.assertEqual(1, len(seen), "默认应请求一次 Windows Hello 验证")
+        finally:
+            server.vault_hello_verify = original
+
+    def test_bind_cancelled_by_hello_writes_nothing(self):
+        seen = []
+        original = server.vault_hello_verify
+        server.vault_hello_verify = lambda: (seen.append(1) or
+                                             {"ok": False, "status": "cancel", "message": "已取消"})
+        try:
+            body, code = _payload(server.vault_bind_device())
+            self.assertEqual(403, code, body)
+            self.assertFalse(server.VAULT.state.has_device_wrap,
+                             "Hello 未通过时不得写入设备包装")
+            self.assertFalse(server.DEVICE_SECRET_BLOB.exists(),
+                             "Hello 未通过时不得写入设备 secret")
+        finally:
+            server.vault_hello_verify = original
+
+    def test_bind_skip_hello_does_not_prompt(self):
+        seen = []
+        original = server.vault_hello_verify
+        server.vault_hello_verify = lambda: (seen.append(1) or {"ok": True, "status": "ok"})
+        try:
+            body, code = _payload(server.vault_bind_device(
+                server.VaultBindDeviceIn(skip_hello=True)))
+            self.assertEqual(200, code, body)
+            self.assertEqual(0, len(seen), "skip_hello 不应再弹一次 Hello")
+        finally:
+            server.vault_hello_verify = original
+
     def test_app_lock_auto_unlock_toggle_keeps_device_secret(self):
-        _payload(server.vault_bind_device())
+        _payload(server.vault_bind_device(server.VaultBindDeviceIn(skip_hello=True)))
         before = server.DEVICE_SECRET_BLOB.read_bytes()
 
         # 应用密码开启/关闭本机自动解锁：会写入并删除 app_unlock.blob

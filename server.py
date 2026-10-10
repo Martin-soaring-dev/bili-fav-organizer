@@ -813,13 +813,26 @@ def vault_set_password(body: VaultSetPasswordIn):
     return {"ok": True, **_vault_status_payload()}
 
 
+class VaultBindDeviceIn(BaseModel):
+    skip_hello: bool = False
+
+
 @app.post("/api/vault/bind-device")
-def vault_bind_device():
-    """绑定 Windows/DPAPI 设备包装（须先有应用密码并解锁）。"""
+def vault_bind_device(body: VaultBindDeviceIn | None = None):
+    """绑定 Windows/DPAPI 设备包装（须先有应用密码并解锁）。
+
+    绑定会把「能解开 DEK 的设备密钥」写进本机，属于敏感操作，因此默认先做一次
+    Windows Hello 验证 —— 和解锁时一致；取消或验证失败则不写入任何东西。
+    """
     if not VAULT.state.password_set:
         return JSONResponse({"ok": False, "error": "请先设置应用密码"}, status_code=400)
     if not VAULT.is_unlocked():
         return JSONResponse({"ok": False, "error": "请先解锁金库"}, status_code=403)
+    if not (body and body.skip_hello):
+        hello = vault_hello_verify()
+        if not hello.get("ok"):
+            return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
+                                status_code=403)
     secret = secrets.token_urlsafe(32)
     try:
         VAULT.bind_device_blob(secret)

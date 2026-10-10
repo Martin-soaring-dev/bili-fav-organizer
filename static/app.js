@@ -4377,20 +4377,27 @@
     });
   }
   async function completeHelloBind() {
+    const st = $("settings-sec-hello-state");
+    const setState = (text, tone) => {
+      if (!st) return;
+      st.textContent = text;
+      st.classList.remove("muted");
+      st.style.color = tone === "ok" ? "var(--green)" : tone === "err" ? "var(--danger)" : "";
+      if (!tone) st.classList.add("muted");
+    };
+    setState("正在请求 Windows Hello…", "");
     try {
       await api("POST", "/api/vault/bind-device", {});
       const vs = await api("GET", "/api/vault/status");
-      const st = $("settings-sec-hello-state");
-      if (st && vs && vs.has_device_wrap) {
-        st.textContent = "已绑定";
-        st.classList.remove("muted");
-        st.style.color = "var(--green)";
-      }
-      log("Windows Hello 绑定成功", "ok"); updateHelloBtn();
+      if (vs && vs.has_device_wrap) setState("已绑定", "ok");
+      log("Windows Hello 绑定成功", "ok");
+      updateHelloBtn();
       refreshSettingsData();
       return true;
     } catch (e) {
-      log(e.error || e.message || "绑定失败", "err");
+      const msg = e.error || e.message || "绑定失败";
+      setState(msg, "err");
+      log(msg, "err");
       return false;
     }
   }
@@ -4414,6 +4421,12 @@
         if (!vs.unlocked) {
           // 要求用户先解锁一次，解锁成功后自动继续绑定
           pendingHelloBind = true;
+          const st = $("settings-sec-hello-state");
+          if (st) {
+            st.textContent = "请先解锁一次，解锁后自动完成绑定";
+            st.classList.remove("muted");
+            st.style.color = "";
+          }
           log("请先解锁金库（一次即可），解锁后将自动完成 Windows Hello 绑定", "warn");
           showLockScreen(true);
           return;
