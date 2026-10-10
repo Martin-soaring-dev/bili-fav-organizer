@@ -46,4 +46,13 @@ window.addEventListener('DOMContentLoaded', () => {
 contextBridge.exposeInMainWorld('shell', {
   captionHeight: CAPTION_H,
   isDesktopShell: true,
+  terminal: {
+    spawn: opts => ipcRenderer.invoke('terminal:spawn', opts),
+    write: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
+    resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
+    kill: id => ipcRenderer.invoke('terminal:kill', { id }),
+    lockdown: () => ipcRenderer.invoke('terminal:lockdown'),
+    onData: cb => ipcRenderer.on('terminal:data', (_e, m) => cb(m)),
+    onExit: cb => ipcRenderer.on('terminal:exit', (_e, m) => cb(m)),
+  },
 });

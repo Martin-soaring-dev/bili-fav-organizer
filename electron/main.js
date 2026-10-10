@@ -5,6 +5,7 @@ const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, ipcMain } = re
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const pty = require('node-pty');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const APP_ICON = path.join(REPO_ROOT, 'packaging', 'BiliFavOrganizer.ico');
@@ -50,6 +51,113 @@ function createTray() {
   ]));
   tray.on('click', showWindow);   // 左键单击也唤起主界面
   log('托盘已就绪');
+}
+
+/* ---------------- 终端 PTY ---------------- */
+const terminals = new Map();      // id -> node-pty 实例
+const TERM_CWD = APP_DATA_ROOT;   // 与 /api/terminal/exec 的工作目录一致
+
+function resolveShell() {
+  const dirs = (process.env.PATH || '').split(';');
+  for (const name of ['pwsh.exe', 'powershell.exe']) {
+    for (const dir of dirs) {
+      try {
+        if (dir && fs.existsSync(path.join(dir, name))) {
+          return { exe: path.join(dir, name), args: ['-NoLogo'] };
+        }
+      } catch { /* 路径里可能有非法字符，跳过 */ }
+    }
+  }
+  return { exe: process.env.ComSpec || 'cmd.exe', args: [] };
+}
+
+// 与 /api/* 同一条门禁：拿一个确实被门禁保护的端点做判据
+async function isAppUnlocked() {
+  try {
+    const r = await fetch(`${BASE_URL}/api/status`, { signal: AbortSignal.timeout(2000) });
+    return r.ok;
+  } catch { return false; }
+}
+
+function killAllTerminals() {
+  for (const [id, p] of terminals) {
+    try { p.kill(); } catch { /* 已退出 */ }
+    terminals.delete(id);
+  }
+}
+
+function registerTerminalIpc() {
+  ipcMain.handle('terminal:spawn', async (_e, opts) => {
+    // PTY 走主进程，天然绕过 HTTP 门禁 —— 必须显式复刻同一条锁定规则
+    if (!(await isAppUnlocked())) {
+      return { ok: false, error: 'app_locked', message: '应用已锁定，请先解锁' };
+    }
+    const id = String((opts && opts.id) || 'main');
+    const prev = terminals.get(id);
+    if (prev) {
+      try { prev.kill(); } catch { /* 已退出 */ }
+      terminals.delete(id);
+    }
+    const shell = resolveShell();
+    let p;
+    try {
+      p = pty.spawn(shell.exe, shell.args, {
+        name: 'xterm-256color',
+        cols: Math.max(20, Number(opts && opts.cols) || 100),
+        rows: Math.max(5, Number(opts && opts.rows) || 30),
+        cwd: TERM_CWD,
+        env: process.env,
+      });
+    } catch (e) {
+      return { ok: false, error: String((e && e.message) || e) };
+    }
+    terminals.set(id, p);
+    log(`终端已启动 id=${id} shell=${shell.exe}`);
+    p.onData(data => {
+      if (win && !win.isDestroyed()) win.webContents.send('terminal:data', { id, data });
+    });
+    p.onExit(e => {
+      terminals.delete(id);
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('terminal:exit', { id, code: e.exitCode });
+      }
+    });
+    return { ok: true, id, shell: shell.exe };
+  });
+
+  ipcMain.handle('terminal:write', (_e, m) => {
+    const p = terminals.get(String(m && m.id));
+    if (!p) return { ok: false, error: '终端不存在' };
+    p.write(String((m && m.data) || ''));
+    return { ok: true };
+  });
+
+  ipcMain.handle('terminal:resize', (_e, m) => {
+    const p = terminals.get(String(m && m.id));
+    if (!p) return { ok: false };
+    try {
+      p.resize(Math.max(20, (m && m.cols) | 0), Math.max(5, (m && m.rows) | 0));
+    } catch { /* 尺寸非法，忽略 */ }
+    return { ok: true };
+  });
+
+  ipcMain.handle('terminal:kill', (_e, m) => {
+    const id = String(m && m.id);
+    const p = terminals.get(id);
+    if (p) {
+      try { p.kill(); } catch { /* 已退出 */ }
+      terminals.delete(id);
+    }
+    return { ok: true };
+  });
+
+  // 锁定时回收所有 PTY，不留后台 shell
+  ipcMain.handle('terminal:lockdown', () => {
+    const n = terminals.size;
+    killAllTerminals();
+    log(`锁定时回收终端 ${n} 个`);
+    return { ok: true, killed: n };
+  });
 }
 
 /* ---------------- config.json（沿用应用自己的文件，不新建） ---------------- */
@@ -222,6 +330,7 @@ app.whenReady().then(async () => {
     app.quit();
     return;
   }
+  registerTerminalIpc();
   createTray();
   createWindow();
 });
@@ -229,6 +338,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => {
   app.isQuitting = true;
+  killAllTerminals();
   if (backend) {
     log('关闭 Python 后端');
     backend.kill();

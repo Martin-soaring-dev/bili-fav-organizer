@@ -112,7 +112,13 @@
   function showLockScreen(show) {
     if (!lockScreen) return;
     lockScreen.hidden = !show;
-    if (show) beginUnlockFlow();
+    if (show) {
+      // 锁定时回收终端 PTY，不留后台 shell —— 与 /api/* 门禁同一条边界
+      if (window.shell && window.shell.terminal) {
+        window.shell.terminal.lockdown().catch(() => {});
+      }
+      beginUnlockFlow();
+    }
   }
 
   function setLockMode(mode) {
@@ -4901,8 +4907,7 @@
         el.classList.toggle("active", el.getAttribute("data-panel") === name);
       });
       if (name === "term") {
-        pullTerm().catch(() => {});
-        if (termStatus) termStatus.textContent = "终端已就绪 — 输入命令回车执行";
+        startTerminal().catch(() => {});
       }
     }
 
@@ -4919,37 +4924,89 @@
     applyPin();
     setPanel("log");
 
-    // 终端输出轮询
-    let termSince = 0;
-    async function pullTerm() {
-      try {
-        const r = await api("GET", "/api/terminal/output?since=" + termSince);
-        if (r && r.lines && r.lines.length) {
-          const box = $("term-output");
-          if (box) { box.textContent += r.lines.join(""); box.scrollTop = box.scrollHeight; }
-          termSince = r.next;
-        }
-        if (termStatus) termStatus.textContent = "终端已就绪";
-      } catch (e) {
-        if (termStatus) termStatus.textContent = e.error || e.message || "终端不可用（可能未解锁）";
+    // ---- 嵌入式终端：xterm.js 渲染 + 主进程 node-pty ----
+    const termHost = $("term-host");
+    let xterm = null;
+    let fitAddon = null;
+    let termId = "main";
+    let termSpawned = false;
+    let termResizeTimer = null;
+
+    function termTheme() {
+      const light = document.documentElement.getAttribute("data-theme") === "light";
+      return light
+        ? { background: "#eef1f4", foreground: "#24303b", cursor: "#087f6b",
+            selectionBackground: "rgba(8,127,107,.28)" }
+        : { background: "#1a1a1a", foreground: "#f2f2f2", cursor: "#00c9a7",
+            selectionBackground: "rgba(0,201,167,.30)" };
+    }
+
+    function ensureTerminal() {
+      if (xterm || !termHost || typeof Terminal === "undefined") return;
+      xterm = new Terminal({
+        fontFamily: "Cascadia Code, Consolas, 'Courier New', monospace",
+        fontSize: 12,
+        cursorBlink: true,
+        scrollback: 5000,
+        theme: termTheme(),
+      });
+      fitAddon = new FitAddon.FitAddon();
+      xterm.loadAddon(fitAddon);
+      xterm.open(termHost);
+      xterm.onData(data => {
+        if (window.shell && window.shell.terminal) window.shell.terminal.write(termId, data);
+      });
+      xterm.onResize(({ cols, rows }) => {
+        if (window.shell && window.shell.terminal) window.shell.terminal.resize(termId, cols, rows);
+      });
+      if (window.shell && window.shell.terminal) {
+        window.shell.terminal.onData(m => {
+          if (m.id === termId && xterm) xterm.write(m.data);
+        });
+        window.shell.terminal.onExit(m => {
+          if (m.id !== termId) return;
+          termSpawned = false;
+          if (xterm) xterm.writeln("\r\n[进程已退出 code=" + m.code + "]");
+          if (termStatus) termStatus.textContent = "终端已退出，重新点开本面板可再启动";
+        });
       }
     }
-    setInterval(pullTerm, 800);
-    const tin = $("term-input");
-    if (tin) {
-      tin.addEventListener("keydown", async (e) => {
-        if (e.key !== "Enter") return;
-        const cmd = tin.value.trim();
-        if (!cmd) return;
-        tin.value = "";
-        try { await api("POST", "/api/terminal/exec", { cmd }); }
-        catch (err) {
-          log(err.error || err.message || "终端执行失败", "err");
-          if (termStatus) termStatus.textContent = err.error || err.message || "执行失败";
-        }
-        pullTerm();
-      });
+
+    function fitTerminal() {
+      if (!fitAddon || !xterm) return;
+      try { fitAddon.fit(); } catch (_) {}
     }
+
+    async function startTerminal() {
+      if (!window.shell || !window.shell.terminal) {
+        if (termStatus) termStatus.textContent = "嵌入式终端需要桌面壳（浏览器模式下不可用）";
+        return;
+      }
+      ensureTerminal();
+      if (!xterm) return;
+      fitTerminal();
+      if (termSpawned) { xterm.focus(); return; }
+      if (termStatus) termStatus.textContent = "正在启动终端…";
+      const r = await window.shell.terminal.spawn({ id: termId, cols: xterm.cols, rows: xterm.rows });
+      if (!r || !r.ok) {
+        const msg = (r && (r.message || r.error)) || "终端启动失败";
+        if (termStatus) termStatus.textContent = msg;
+        xterm.writeln("\r\n[" + msg + "]");
+        return;
+      }
+      termSpawned = true;
+      if (termStatus) termStatus.textContent = (r.shell || "PowerShell") + " · 工作目录：数据目录";
+      xterm.focus();
+    }
+
+    // 明暗切换即时换配色；窗口缩放同步行列数
+    new MutationObserver(() => {
+      if (xterm) xterm.options.theme = termTheme();
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    window.addEventListener("resize", () => {
+      clearTimeout(termResizeTimer);
+      termResizeTimer = setTimeout(fitTerminal, 120);
+    });
   })();
 
 
