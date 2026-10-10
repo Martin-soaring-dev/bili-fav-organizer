@@ -1,0 +1,14 @@
+{
+  "name": "bili-fav-organizer-shell",
+  "version": "0.0.0",
+  "private": true,
+  "description": "B站收藏夹智能整理 —— Electron 桌面壳（业务后端仍为 Python，见 docs/compose/spec/desktop-shell.md T1/T2）",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.7.0"
+  }
+}
