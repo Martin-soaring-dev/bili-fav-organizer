@@ -106,8 +106,11 @@ class VaultMigrationTests(unittest.TestCase):
             "selftest": result["unlock"]["body"].get("selftest"),
         }
         self.assertEqual({"http_status": 403, "vault_unlocked": False, "db_exists": False,
-                          "folders": 10, "videos": 500,
+                          "folders": 0, "videos": 0,
                           "selftest": {"ok": False, "detail": "encrypted snapshot corruption"}}, actual)
+        # Data cannot be read from an absent plaintext DB. The encrypted evidence
+        # must remain intact and must never be replaced by an empty SQLite database.
+        self.assertEqual(bytes(damaged), current.encrypted_file.read_bytes())
 
 
 if __name__ == "__main__":
