@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   build:
+    if: ${{ !contains(github.ref_name, '-beta.') }}
     runs-on: windows-latest
     steps:
       - name: Check out source

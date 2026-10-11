@@ -1,0 +1,190 @@
+name: Beta Windows release (legacy and Electron neo)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "publish/v0.209-beta.1"
+    tags:
+      - "v*-beta.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: ${{ github.ref == 'refs/heads/publish/v0.209-beta.1' || contains(github.ref_name, '-beta.') || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    env:
+      BETA_RELEASE_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.1') && 'v0.209-beta.1' || github.ref_name }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install application and packager dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-test.txt pyinstaller
+
+      # 发布门禁：测试不过就不打包（此前 CI 一步都不跑测试，测试红也能发版）
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Embed release version
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.1') && 'v0.209-beta.1' || github.ref_name }}
+        run: |
+          $version = $env:RELEASE_VERSION
+          if ($version -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Unsupported release version: $version" }
+          $source = [System.IO.File]::ReadAllText("server.py")
+          $commit = $env:GITHUB_SHA.Substring(0, 7)
+          $buildDate = (& git log -1 --format=%ad --date=short).Trim()
+          # 每个标记都要求恰好出现一次，避免替换到注释或别的代码行。
+          $fill = [ordered]@{
+            'BUILD_VERSION = "dev"' = ('BUILD_VERSION = "{0}"' -f $version)
+            'BUILD_COMMIT = ""'     = ('BUILD_COMMIT = "{0}"' -f $commit)
+            'BUILD_DATE = ""'       = ('BUILD_DATE = "{0}"' -f $buildDate)
+          }
+          foreach ($marker in $fill.Keys) {
+            if ([regex]::Matches($source, [regex]::Escape($marker)).Count -ne 1) {
+              throw "Build marker '$marker' must appear exactly once."
+            }
+            $source = $source.Replace($marker, $fill[$marker])
+          }
+          [System.IO.File]::WriteAllText("server.py", $source, [System.Text.UTF8Encoding]::new($false))
+
+      - name: Build self-contained application
+        run: pyinstaller --noconfirm --clean BiliFavOrganizer.spec
+
+      - name: Resolve release title and summary from README
+        id: notes
+        shell: pwsh
+        run: |
+          $tag = $env:BETA_RELEASE_TAG
+          $lines = @(Get-Content -Encoding UTF8 README.md)
+          $start = -1
+          $end = $lines.Count
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            $m = [regex]::Match($lines[$i], '^### \[([^\]]+)\]')
+            if (-not $m.Success) { continue }
+            if ($start -lt 0 -and $m.Groups[1].Value -eq $tag) { $start = $i + 1; continue }
+            if ($start -ge 0) { $end = $i; break }
+          }
+          if ($start -lt 0) { throw "README 更新日志没有 $tag 段落，无法生成 Release 标题与摘要。" }
+          if ($end -le $start) { throw "README 的 $tag 段落为空。" }
+          $section = ($lines[$start..($end - 1)] -join "`n").Trim("`r`n ")
+          $bold = [regex]::Match($section, '^\*\*(.+?)\*\*', 'Singleline')
+          if (-not $bold.Success) { throw "README 的 $tag 段落缺少加粗摘要行，无法生成 Release 标题。" }
+          $title = "$tag $($bold.Groups[1].Value.TrimEnd([char[]]@('。', '.')))"
+          # Base64 keeps the Chinese summary intact across the output file and the later env read.
+          $notesB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($section))
+          "title=$title" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "notes_b64=$notesB64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Release title: $title"
+
+      - name: Create portable ZIP
+        id: package
+        shell: pwsh
+        run: |
+          $releaseDir = "dist/BiliFavOrganizer"
+          if (-not (Test-Path "$releaseDir/BiliFavOrganizer.exe")) { throw "Portable executable was not built." }
+          foreach ($name in @("config.json", "secrets.json", "data", "server.log", "write_operations.jsonl")) {
+            if (Test-Path (Join-Path $releaseDir $name)) { throw "Refusing to package local/private data: $name" }
+          }
+          Copy-Item "BiliFavOrganizer.bat" "$releaseDir/BiliFavOrganizer.bat"
+          Copy-Item "packaging/使用说明.txt" "$releaseDir/使用说明.txt"
+          Copy-Item "output/pdf/快速上手.pdf" "$releaseDir/快速上手.pdf"
+          # 便携包必须随附许可全文与 Required Notice，署名与授权条款才算真正交付给使用者。
+          if (-not (Test-Path "LICENSE")) { throw "LICENSE is missing; refusing to publish a package without the license text." }
+          if (-not (Test-Path "NOTICE")) { throw "NOTICE is missing; refusing to publish a package without the required notice." }
+          Copy-Item "LICENSE" "$releaseDir/LICENSE.txt"
+          Copy-Item "NOTICE" "$releaseDir/NOTICE.txt"
+          $version = $env:BETA_RELEASE_TAG -replace '[^A-Za-z0-9._-]', '-'
+          $zip = "BiliFavOrganizer-Windows-x64-$version.zip"
+          $checksum = "$zip.sha256"
+          Compress-Archive -Path "$releaseDir/*" -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zip" | Set-Content $checksum -Encoding ascii
+          "asset_name=$zip" >> $env:GITHUB_OUTPUT
+          "checksum_name=$checksum" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer (Inno Setup)
+        id: installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            Write-Host "未找到 ISCC，尝试用 choco 安装 Inno Setup..."
+            choco install innosetup --no-progress -y
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup 不可用，无法生成安装包。" }
+          $tag = $env:BETA_RELEASE_TAG
+          # Inno 的文件版本必须是数字四段：v0.207 -> 0.207.0.0
+          $numeric = ($tag -replace '-beta[.].*$', '').TrimStart('v','V')
+          $fileVersion = ((($numeric -split '[.]') + @('0','0','0','0'))[0..3]) -join '.'
+          & $iscc "/DAppVersion=$tag" "/DFileVersion=$fileVersion" "packaging\BiliFavOrganizer.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败（退出码 $LASTEXITCODE）。" }
+          $setup = "dist\BiliFavOrganizer-Setup-$tag.exe"
+          if (-not (Test-Path $setup)) { throw "安装包未生成：$setup" }
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $setup)" | Set-Content "$setup.sha256" -Encoding ascii
+          "setup_name=$setup" >> $env:GITHUB_OUTPUT
+          "setup_checksum=$setup.sha256" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Electron dependencies
+        run: npm ci
+
+      - name: Build Electron neo test installer
+        shell: pwsh
+        run: |
+          $neoVersion = $env:BETA_RELEASE_TAG.TrimStart('v') -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
+          npx electron-builder --config electron-builder.yml --win nsis --x64 "-c.extraMetadata.version=$neoVersion"
+          if ($LASTEXITCODE -ne 0) { throw "Electron installer build failed." }
+          # The package.json version is 0.209.0; beta suffix supplied at CI runtime.
+          $expected = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
+          if (-not (Test-Path $expected)) { throw "Electron artifact missing: $expected" }
+          $hash = (Get-FileHash $expected -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $expected)" | Set-Content "$expected.sha256" -Encoding ascii
+
+      - name: Publish release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET_NAME: ${{ steps.package.outputs.asset_name }}
+          CHECKSUM_NAME: ${{ steps.package.outputs.checksum_name }}
+          SETUP_NAME: ${{ steps.installer.outputs.setup_name }}
+          SETUP_CHECKSUM: ${{ steps.installer.outputs.setup_checksum }}
+          RELEASE_TITLE: ${{ steps.notes.outputs.title }}
+          RELEASE_NOTES_B64: ${{ steps.notes.outputs.notes_b64 }}
+          BETA_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.1') && 'v0.209-beta.1' || github.ref_name }}
+        run: |
+          $tag = $env:BETA_RELEASE_TAG
+          $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
+          $neoVersion = $tag.TrimStart('v') -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
+          $neo = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
+          $assets = @($env:ASSET_NAME, $env:CHECKSUM_NAME, $env:SETUP_NAME, $env:SETUP_CHECKSUM, $neo, "$neo.sha256")
+          foreach ($asset in $assets) { if (-not (Test-Path $asset)) { throw "Missing release asset: $asset" } }
+          gh release create $tag @assets --prerelease --target $env:GITHUB_SHA --title $env:RELEASE_TITLE --notes $notes
+          if ($LASTEXITCODE -ne 0) { throw "Could not publish prerelease." }
+
+      - name: Remove one-time publish trigger branch
+        if: ${{ success() && github.ref == 'refs/heads/publish/v0.209-beta.1' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/publish/v0.209-beta.1"
+          if ($LASTEXITCODE -ne 0) { Write-Warning "Release published, but trigger branch cleanup needs manual follow-up." }

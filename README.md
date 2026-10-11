@@ -238,6 +238,16 @@ bili-fav-organizer/
 
 ## 更新日志
 
+### [v0.209-beta.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.209-beta.1)（2026-10-11 · 预发布）
+
+**安全与桌面壳集成预览：应用锁、加密仓库、Windows Hello、设置中心、Electron 桌面壳。当前为测试版，不建议覆盖唯一的正式环境。**
+
+- 集成此前四条 feat 分支：本地 API 安全审查、应用密码、DEK/KEK vault 和恢复码、Windows Hello、设置中心、侧边栏、主题和终端。
+- 提供传统 Windows 安装版与便携版，以及独立命名的 Electron neo 测试安装包。neo 暂时内置 Python 冻结后端，而非最终 Node/TS 后端。
+- **预发布版本与 Electron 托管后端禁用应用内覆盖更新**，避免旧更新器错误终止进程；测试者须手动升级。当前稳定用户仍使用 v0.208。
+- 已通过 GitHub Windows Python CI；Electron 安装、旧数据迁移与 Windows Hello 的真实机器兼容性仍需测试者进一步验证。升级前备份整个用户数据目录，恢复码务必离线保存。
+- 测试版无代码签名，Windows 可能显示未知发布者警告；请仅从本仓库 Release 获取，并核对 SHA256。
+
 ### [v0.208](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.208)（2026-10-08）
 
 **更新收尾清理与失败可见性：不再留下上百 MB 临时目录，更新失败的原因重启后也能看到。**

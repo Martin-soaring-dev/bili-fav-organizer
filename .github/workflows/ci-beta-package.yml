@@ -1,0 +1,51 @@
+name: Beta packaging validation
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/release-beta.yml'
+      - '.github/workflows/ci-beta-package.yml'
+      - 'electron/**'
+      - 'electron-builder.yml'
+      - 'package*.json'
+      - 'server.py'
+      - 'BiliFavOrganizer.spec'
+      - 'requirements*.txt'
+      - 'packaging/**'
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Python dependencies
+        run: |
+          python -m pip install -r requirements-test.txt pyinstaller
+      - name: Run Python regression suite
+        run: python -m unittest discover -s tests -v
+      - name: Build frozen backend
+        run: pyinstaller --noconfirm --clean BiliFavOrganizer.spec
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Build Electron neo NSIS installer (not published)
+        shell: pwsh
+        run: |
+          npx electron-builder --config electron-builder.yml --win nsis --x64 "-c.extraMetadata.version=0.209.0-beta.1"
+          if ($LASTEXITCODE -ne 0) { throw "Electron builder failed" }
+          if (-not (Test-Path "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.1.exe")) {
+            throw "Expected beta installer missing"
+          }
+      - name: Inspect installer artifact
+        shell: pwsh
+        run: |
+          $path = "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.1.exe"
+          Get-Item $path | Select-Object FullName, Length
+          Get-FileHash $path -Algorithm SHA256
