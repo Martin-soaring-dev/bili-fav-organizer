@@ -2,8 +2,9 @@
 feature: desktop-shell
 status: in-progress
 updated: 2026-10-11
-branch: feat/desktop-shell
-commits: # 留空
+branch: main
+release_preparation: release/v0.209-beta.1
+commits: merged via PR #11
 ---
 
 # 桌面化迁移（Electron 壳 + 后端重写为 Node/TS）
