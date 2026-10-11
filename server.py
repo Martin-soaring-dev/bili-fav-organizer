@@ -5590,7 +5590,7 @@ def app_version_get():
         "license": LICENSE_NAME,
         "copyright": COPYRIGHT,
         "install_mode": "installed" if _installed_info() else "portable",
-        "supports_self_update": bool(getattr(sys, "frozen", False) and os.name == "nt"),
+        "supports_self_update": bool(getattr(sys, "frozen", False) and os.name == "nt" and os.environ.get("BFO_PARENT_PIPE") != "1" and "-beta." not in _app_version()),
     }
 
 
@@ -5616,7 +5616,7 @@ def update_check():
         UPDATE_ERROR_FILE.unlink(missing_ok=True)
     except OSError:
         pass
-    supports_self_update = bool(getattr(sys, "frozen", False) and os.name == "nt")
+    supports_self_update = bool(getattr(sys, "frozen", False) and os.name == "nt" and os.environ.get("BFO_PARENT_PIPE") != "1" and "-beta." not in _app_version())
     with _UPDATE_LOCK:
         _UPDATE_RELEASE = release if update_available else None
         UPDATE_STATE.update(
@@ -5642,6 +5642,8 @@ def update_check():
 @app.post("/api/update/install")
 def update_install():
     global _UPDATE_RELEASE
+    if os.environ.get("BFO_PARENT_PIPE") == "1" or "-beta." in _app_version():
+        raise HTTPException(status_code=409, detail="桌面壳托管模式及预发布版本暂不支持应用内覆盖更新，请手动安装新版")
     if not getattr(sys, "frozen", False) or os.name != "nt":
         raise HTTPException(status_code=400, detail="自动覆盖更新仅支持 Windows 便携版")
     if _version_key(_app_version()) is None:
