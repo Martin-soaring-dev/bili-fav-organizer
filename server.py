@@ -761,6 +761,9 @@ def vault_onboarding(body: VaultInitIn):
         return JSONResponse({"ok": False, "error": "应用密码至少 6 位"}, status_code=400)
     if not body.bound_mid:
         return JSONResponse({"ok": False, "error": "缺少绑定的 B 站用户 ID"}, status_code=400)
+    if VAULT_DB_ENC.exists():
+        return JSONResponse({"ok": False, "error": "已有加密快照，禁止重新初始化保险库"},
+                            status_code=409)
     try:
         code = VAULT.initialize(bound_mid=body.bound_mid, password=password)
     except vault_mod.VaultError as exc:
@@ -820,15 +823,18 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
         VAULT.unlock_with_secret("device", secret)
     except (OSError, ValueError, vault_mod.VaultError) as exc:
         return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"}, status_code=400)
-    # 与密码解锁保持一致：先把库恢复出来，再确认这把 DEK 真的能解开它
-    restored = _vault_restore_db_if_needed()
-    migrated = _vault_migrate_plain_db_if_needed()
+    # Verify the authenticated snapshot BEFORE recovering or migrating any data.
+    migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
     test = _dek_selftest()
     if not test.get("ok"):
         VAULT.lock()
         return JSONResponse({"ok": False,
                              "error": f"解密自检未通过：{test.get('detail')}",
-                             "selftest": test}, status_code=500)
+                             "selftest": test}, status_code=403)
+    restored = _vault_restore_db_if_needed()
+    if not store.DB_FILE.is_file():
+        VAULT.lock()
+        return JSONResponse({"ok": False, "error": "加密数据库恢复失败"}, status_code=500)
     _APP_LOCK.update(unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
@@ -847,14 +853,17 @@ def vault_unlock(body: VaultUnlockIn):
             return JSONResponse({"ok": False, "error": "请输入应用密码或恢复码"}, status_code=400)
     except vault_mod.VaultError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
-    restored = _vault_restore_db_if_needed()
-    migrated = _vault_migrate_plain_db_if_needed()
+    migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
     test = _dek_selftest()
     if not test.get("ok"):
         VAULT.lock()
         return JSONResponse({"ok": False,
                              "error": f"解密自检未通过：{test.get('detail')}",
-                             "selftest": test}, status_code=500)
+                             "selftest": test}, status_code=403)
+    restored = _vault_restore_db_if_needed()
+    if not store.DB_FILE.is_file():
+        VAULT.lock()
+        return JSONResponse({"ok": False, "error": "加密数据库恢复失败"}, status_code=500)
     _APP_LOCK.update(enabled=False, unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
@@ -864,7 +873,7 @@ def vault_unlock(body: VaultUnlockIn):
 def vault_lock():
     try:
         _vault_save_db_encrypted()
-    except OSError as exc:
+    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
         return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
                             status_code=500)
     VAULT.lock()
@@ -875,12 +884,14 @@ def vault_lock():
 def vault_complete_onboarding():
     if not VAULT.is_unlocked():
         return JSONResponse({"ok": False, "error": "加密库未解锁"}, status_code=403)
-    VAULT.complete_onboarding()
-    # 初始化完成后立刻上锁并加密落盘：刷新/重启后必须解锁才能用
+    # Do not finalize onboarding or claim success unless a verified snapshot is saved.
     try:
         _vault_save_db_encrypted()
-    except OSError as exc:
-        log.warning("初始化后加密数据库失败：%s", exc)
+        VAULT.complete_onboarding()
+    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
+        log.error("初始化后加密数据库失败：%s", exc)
+        return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
+                            status_code=500)
     VAULT.lock()
     return {"ok": True, "locked": True, **_vault_status_payload()}
 
