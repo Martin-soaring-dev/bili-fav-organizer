@@ -166,9 +166,14 @@ class LegacyMigrationTests(unittest.TestCase):
         probe(current, "snapshot")
         before = database_snapshot(current.db_file)
         onboarded = probe(current, "onboard")
-        self.assertTrue(Path(str(current.db_file) + ".plain-backup").is_file())
-        restored = self.root / "rollback-restored.sqlite3"
-        restored.write_bytes(Path(str(current.db_file) + ".plain-backup").read_bytes())
+        # Roll back by intentionally decrypting a verified snapshot to an isolated
+        # legacy-readable location, not by retaining an unencrypted safety backup.
+        self.assertFalse(Path(str(current.db_file) + ".plain-backup").exists())
+        unlocked = probe(current, "unlock")
+        self.assertEqual(200, unlocked["unlock"]["http_status"])
+        restored = self.root / "rollback" / "library.sqlite3"
+        restored.parent.mkdir()
+        restored.write_bytes(current.db_file.read_bytes())
         after = database_snapshot(restored)
         self.assertEqual(core_sha256(before), core_sha256(after))
         self.assertTrue(onboarded["encrypted_file"] if "encrypted_file" in onboarded else current.encrypted_file.is_file())
@@ -193,6 +198,7 @@ class LegacyMigrationTests(unittest.TestCase):
         import subprocess
         env = dict(current.env)
         env["PYTHONPATH"] = str(old_store)
+        env["BILI_FAV_ORGANIZER_DATA_DIR"] = str(restored.parent)
         check = subprocess.run([__import__("sys").executable, str(reader)], cwd=old_store,
                                env=env, text=True, encoding="utf-8", errors="replace",
                                capture_output=True, check=True)
