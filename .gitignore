@@ -78,6 +78,15 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Node / Electron 壳
+node_modules/
+npm-debug.log*
+
+# 桌面壳视觉原型（视觉基准，见 docs/compose/spec/desktop-shell.md 2.4，不入库）
+/index.html
+/shell.css
+/shell.js
+
 # Windows release build output (portable package is uploaded as a Release asset)
 /build/
 /dist/

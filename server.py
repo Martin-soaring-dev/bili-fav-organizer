@@ -22,6 +22,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import sys
 import subprocess
@@ -42,6 +43,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+import vault as vault_mod
 
 import bili_api
 import llm_analyzer
@@ -97,6 +100,7 @@ _UPDATE_CANCEL = threading.Event()   # 用户点「停止下载」时置位，�
 _SHUTDOWN = threading.Event()        # 更新替换前置位，用来断开 SSE 长连接
 _UPDATE_STATUS_FILE: Path | None = None
 _UVICORN_SERVER = None
+_PROVIDER_BOOT_LOG = ""                  # import 期初始化日志，留到 main() 里 handler 装好后再打
 _APP_PORT = 8080
 
 
@@ -122,9 +126,16 @@ def _cleanup_stale_update_leftovers(app_parent: Path, system_temp: Path,
     只删超过 min_age_hours 的，避免误删正在进行中的更新；只匹配这三个模式：
     便携更新的工作目录、旧程序备份目录、安装版更新的工作目录。
     """
-    patterns = ((app_parent, ".bfo-update-*"),
-                (app_parent, f"{APP_DIR.name}.previous-*"),
-                (system_temp, ".bfo-setup-*"))
+    patterns = [(app_parent, ".bfo-update-*")]
+    if APP_DIR.exists():
+        # 只有安装目录仍然健在时才清理旧程序备份。目录不在，说明上次更新崩在
+        # 「旧目录改名为 .previous-*」与「新目录上位」之间 —— 那份备份是唯一的旧版本，
+        # 删掉就再也回滚不了（等下次启动过了 2 小时就会被当残留扫掉）。
+        patterns.append((app_parent, f"{APP_DIR.name}.previous-*"))
+    else:
+        log.warning("安装目录 %s 不存在（上次更新可能中断），保留 %s.previous-* 以便回滚",
+                    APP_DIR, APP_DIR.name)
+    patterns.append((system_temp, ".bfo-setup-*"))
     removed = 0
     for base, pattern in patterns:
         try:
@@ -273,6 +284,846 @@ ANALYZE_WAKE = threading.Event()
 _scan_start_lock = threading.Lock()
 _evt_lock = threading.Lock()
 _evt_seq = [0]
+_JOB_START_LOCK = threading.Lock()
+LONG_JOBS = ("scan_run", "analyze_run", "apply_run",
+             "folder_merge_run", "folder_merge_ai_run", "folder_profile_run")
+
+# 进程级本地 API token：内存持有；DPAPI blob 只作同 Windows 用户的恢复材料
+_LOCAL_API_TOKEN = secrets.token_urlsafe(32)
+_TOKEN_BLOB = USER_DATA_DIR / "token.blob"
+
+
+def _insecure_local() -> bool:
+    return os.environ.get("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", "").strip() == "1"
+
+
+def _is_test_client_host(host: str) -> bool:
+    return (host or "").split(":")[0].lower() == "testserver"
+
+
+def _host_allowed(host: str) -> bool:
+    hostname = (host or "").split(":")[0].strip().lower()
+    if hostname.startswith("["):  # [::1]:port
+        hostname = hostname.split("]")[0].lstrip("[")
+    allowed = {"127.0.0.1", "localhost", "::1", "0:0:0:0:0:0:0:1"}
+    # 仅测试钩子打开时才接受 TestClient 的 Host，生产绝不因 Host 值放行
+    if _insecure_local():
+        allowed.add("testserver")
+    return hostname in allowed
+
+
+def _origin_allowed(origin: str, port: int | None) -> bool:
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return False
+    if parts.scheme != "http":
+        return False
+    hostname = (parts.hostname or "").lower()
+    if hostname not in ("127.0.0.1", "localhost", "::1"):
+        return False
+    origin_port = parts.port or (443 if parts.scheme == "https" else 80)
+    expect = int(port or _APP_PORT)
+    return int(origin_port) == expect
+
+
+def _token_from_request(request) -> str:
+    raw = request.headers.get("x-bilifav-token", "")
+    if raw:
+        return raw.strip()
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _token_ok(request) -> bool:
+    provided = _token_from_request(request)
+    return bool(provided) and secrets.compare_digest(provided, _LOCAL_API_TOKEN)
+
+
+# ---- DPAPI（Windows 用户绑定）；非 Windows 回退为明文 blob 文件 ----
+def _dpapi_protect(data: bytes) -> bytes:
+    if sys.platform != "win32":
+        return b"PLAIN\x00" + data
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    in_buf = ctypes.create_string_buffer(data)
+    in_blob = DATA_BLOB(len(data), ctypes.cast(in_buf, ctypes.POINTER(ctypes.c_byte)))
+    out_blob = DATA_BLOB()
+    if not crypt32.CryptProtectData(
+            ctypes.byref(in_blob), "BiliFavOrganizer", None, None, None, 0,
+            ctypes.byref(out_blob)):
+        raise OSError("CryptProtectData failed")
+    try:
+        return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+    finally:
+        kernel32.LocalFree(out_blob.pbData)
+
+
+def _dpapi_unprotect(blob: bytes) -> bytes:
+    if blob.startswith(b"PLAIN\x00"):
+        return blob[6:]
+    if sys.platform != "win32":
+        raise OSError("DPAPI blob 只能在原 Windows 用户环境下解密")
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    in_buf = ctypes.create_string_buffer(blob)
+    in_blob = DATA_BLOB(len(blob), ctypes.cast(in_buf, ctypes.POINTER(ctypes.c_byte)))
+    out_blob = DATA_BLOB()
+    if not crypt32.CryptUnprotectData(
+            ctypes.byref(in_blob), None, None, None, None, 0,
+            ctypes.byref(out_blob)):
+        raise OSError("CryptUnprotectData failed")
+    try:
+        return ctypes.string_at(out_blob.pbData, out_blob.cbData)
+    finally:
+        kernel32.LocalFree(out_blob.pbData)
+
+
+def _persist_api_token() -> None:
+    """把当前 token 用 DPAPI 绑到 Windows 用户后落盘（供同用户恢复，非明文）。"""
+    try:
+        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _TOKEN_BLOB.write_bytes(_dpapi_protect(_LOCAL_API_TOKEN.encode("utf-8")))
+    except OSError as exc:
+        log.warning("无法写入 token.blob：%s", exc)
+
+
+def _load_persisted_token() -> str | None:
+    """读回 token.blob（DPAPI 解密）。失败返回 None，不覆盖进程内 token。"""
+    try:
+        return _dpapi_unprotect(_TOKEN_BLOB.read_bytes()).decode("utf-8")
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+
+
+# ---------- 应用密码（手动解锁；可选 DPAPI 本机自动解锁） ----------
+APP_UNLOCK_BLOB = USER_DATA_DIR / "app_unlock.blob"
+# 加密库的设备 secret 必须与应用密码的本机材料分开放：
+# 两者都会被写入/删除，混用同一个文件会互相覆盖，导致 Hello 验证通过却解不开 DEK。
+DEVICE_SECRET_BLOB = USER_DATA_DIR / "device_secret.blob"
+_APP_LOCK = {"enabled": False, "unlocked": True, "failed_attempts": 0}
+_PBKDF2_ITERS = 200_000
+_APP_LOCK_OPEN_PATHS = ("/api/app-lock/", "/static/", "/api/version", "/api/login/",
+                        "/api/cookie", "/api/prompts/defaults", "/api/data/paths",
+                        "/api/data/usage", "/api/vault/hello-verify",
+                        "/api/vault/unlock", "/api/vault/unlock-device",
+                        "/api/vault/status", "/api/vault/onboarding")
+
+
+def _app_lock_secrets() -> dict:
+    data, _ = _read_json_file(SECRETS_FILE)
+    return {
+        "salt": str(data.get("app_lock_salt") or ""),
+        "hash": str(data.get("app_lock_hash") or ""),
+    }
+
+
+def _save_app_lock_secrets(salt: str, hash_hex: str) -> None:
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    prev, _ = _read_json_file(SECRETS_FILE)
+    if hash_hex:
+        prev["app_lock_salt"] = salt
+        prev["app_lock_hash"] = hash_hex
+    else:
+        prev.pop("app_lock_salt", None)
+        prev.pop("app_lock_hash", None)
+    _atomic_write(SECRETS_FILE, prev)
+
+
+def _hash_password(password: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERS).hex()
+
+
+def _password_matches(password: str) -> bool:
+    sec = _app_lock_secrets()
+    if not sec["hash"] or not sec["salt"]:
+        return False
+    try:
+        salt = bytes.fromhex(sec["salt"])
+    except ValueError:
+        return False
+    expected = sec["hash"]
+    return secrets.compare_digest(_hash_password(password, salt), expected)
+
+
+def _set_auto_unlock(enabled: bool) -> None:
+    if enabled:
+        try:
+            USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+            APP_UNLOCK_BLOB.write_bytes(_dpapi_protect(b"app-unlock"))
+        except OSError as exc:
+            log.warning("无法写入本机自动解锁材料：%s", exc)
+    else:
+        try:
+            APP_UNLOCK_BLOB.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _try_auto_unlock() -> bool:
+    try:
+        raw = APP_UNLOCK_BLOB.read_bytes()
+    except OSError:
+        return False
+    try:
+        return _dpapi_unprotect(raw) == b"app-unlock"
+    except (OSError, ValueError):
+        return False
+
+
+def _app_lock_status() -> dict:
+    return {
+        "password_set": _APP_LOCK["enabled"],
+        "unlocked": _APP_LOCK["unlocked"],
+        "auto_unlock_available": APP_UNLOCK_BLOB.is_file(),
+        "failed_attempts": _APP_LOCK["failed_attempts"],
+    }
+
+
+def _app_lock_refresh() -> None:
+    """按 secrets.json 刷新进程内锁定状态（启动或修改密码后调用）。"""
+    sec = _app_lock_secrets()
+    _APP_LOCK["enabled"] = bool(sec["hash"] and sec["salt"])
+    if not _APP_LOCK["enabled"]:
+        _APP_LOCK["unlocked"] = True
+        _APP_LOCK["failed_attempts"] = 0
+        _set_auto_unlock(False)
+        return
+    if not _APP_LOCK["unlocked"]:
+        _APP_LOCK["unlocked"] = _try_auto_unlock()
+
+
+def _read_device_secret() -> str:
+    """读取加密库设备 secret。
+
+    兼容旧布局：早期把加密库 secret 与应用密码材料都写在 app_unlock.blob 里，
+    解出来不是字面量 b"app-unlock" 的就是加密库的随机 secret —— 迁到独立文件，
+    否则应用密码的自动解锁会把它覆盖掉。
+    """
+    if DEVICE_SECRET_BLOB.is_file():
+        return _dpapi_unprotect(DEVICE_SECRET_BLOB.read_bytes()).decode("utf-8")
+    raw = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes())
+    if raw == b"app-unlock":
+        raise OSError("app_unlock.blob 里是应用密码材料，不是加密库设备 secret")
+    DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
+    DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(raw))
+    return raw.decode("utf-8")
+
+
+def _write_device_secret(secret: str) -> None:
+    DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
+    DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
+
+
+SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+def _dek_selftest() -> dict:
+    """验证当前 DEK 真的能解开本地数据，而不只是 unwrap 成功。
+
+    直接取加密快照的头部解一段：GCM 密文是流式的，前缀可独立解开，而 SQLite 库头
+    是确定的 16 字节。不匹配就说明这把 DEK 与磁盘上的数据不是一对（例如加密库重建过），
+    此时继续放行只会把用户带进「已解锁但数据读不出来」的状态。
+    """
+    # 用 VAULT_DB_ENC 而不是再拼一遍 store.DATA_DIR：加密快照只有一个来源，
+    # 重新拼路径会让「落盘/回读」和「自检」读到不同文件（测试隔离也依赖这个变量）。
+    enc = VAULT_DB_ENC
+    if not enc.is_file():
+        return {"ok": True, "detail": "没有加密快照，跳过数据解密测试"}
+    try:
+        with enc.open("rb") as fh:
+            raw = fh.read(vault_mod.NONCE_LEN + 16 + 16)
+        head = VAULT.decrypt_head(raw, 16)
+        if head == SQLITE_MAGIC:
+            return {"ok": True, "detail": "加密快照可正确解密"}
+        return {"ok": False, "detail": "解密结果不是 SQLite 库头，DEK 与本地数据不匹配"}
+    except (OSError, ValueError, vault_mod.VaultError) as exc:
+        return {"ok": False, "detail": f"解密自检失败：{exc}"}
+
+
+class AppLockPasswordIn(BaseModel):
+    password: str = ""
+    current_password: str = ""
+    auto_unlock: bool = False
+
+
+@app.get("/api/app-lock/status")
+def app_lock_status():
+    return _app_lock_status()
+
+
+@app.post("/api/app-lock/set-password")
+def app_lock_set_password(body: AppLockPasswordIn):
+    password = body.password or ""
+    if len(password) < 6:
+        return JSONResponse({"ok": False, "error": "应用密码至少 6 位"}, status_code=400)
+    if _APP_LOCK["enabled"]:
+        if not _password_matches(body.current_password or ""):
+            return JSONResponse({"ok": False, "error": "当前应用密码不正确"}, status_code=403)
+    salt = secrets.token_bytes(16)
+    _save_app_lock_secrets(salt.hex(), _hash_password(password, salt))
+    _APP_LOCK["enabled"] = True
+    _APP_LOCK["unlocked"] = True
+    _APP_LOCK["failed_attempts"] = 0
+    _set_auto_unlock(bool(body.auto_unlock))
+    emit("ok", "已设置应用密码")
+    return {"ok": True, **_app_lock_status()}
+
+
+@app.post("/api/app-lock/unlock")
+def app_lock_unlock(body: AppLockPasswordIn):
+    if not _APP_LOCK["enabled"]:
+        _APP_LOCK["unlocked"] = True
+        return {"ok": True, **_app_lock_status()}
+    if not _password_matches(body.password or ""):
+        _APP_LOCK["failed_attempts"] += 1
+        return JSONResponse({"ok": False, "error": "应用密码不正确",
+                             "failed_attempts": _APP_LOCK["failed_attempts"]},
+                            status_code=403)
+    _APP_LOCK["unlocked"] = True
+    _APP_LOCK["failed_attempts"] = 0
+    if body.auto_unlock:
+        _set_auto_unlock(True)
+    return {"ok": True, **_app_lock_status()}
+
+
+@app.post("/api/app-lock/lock")
+def app_lock_lock():
+    if _APP_LOCK["enabled"]:
+        _APP_LOCK["unlocked"] = False
+        _set_auto_unlock(False)
+    return {"ok": True, **_app_lock_status()}
+
+
+@app.post("/api/app-lock/remove")
+def app_lock_remove(body: AppLockPasswordIn):
+    if not _APP_LOCK["enabled"]:
+        return {"ok": True, **_app_lock_status()}
+    if not _password_matches(body.current_password or ""):
+        return JSONResponse({"ok": False, "error": "当前应用密码不正确"}, status_code=403)
+    _save_app_lock_secrets("", "")
+    _set_auto_unlock(False)
+    _APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
+    emit("warn", "已移除应用密码")
+    return {"ok": True, **_app_lock_status()}
+
+
+# ---------- Secure Vault（DEK 多 KEK） ----------
+VAULT = vault_mod.Vault(USER_DATA_DIR / "vault.json")
+VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
+
+
+def _vault_status_payload() -> dict:
+    st = VAULT.state
+    return {
+        "configured": st.password_set,
+        # 未配置加密库 = 旧版开放模式，视为已解锁
+        "unlocked": st.unlocked or not st.password_set,
+        "onboarding_complete": st.onboarding_complete,
+        "bound_mid": st.bound_mid,
+        "has_recovery_wrap": st.has_recovery_wrap,
+        "has_device_wrap": st.has_device_wrap,
+        "has_account_wrap": st.has_account_wrap,
+    }
+
+
+def _vault_save_db_encrypted() -> None:
+    """把当前 SQLite 库整库 AEAD 落盘。"""
+    src = store.DB_FILE
+    if not src.is_file() or not VAULT.is_unlocked():
+        return
+    VAULT.encrypt_file(src, VAULT_DB_ENC)
+
+
+def _vault_migrate_plain_db_if_needed() -> str | None:
+    """老用户明文库迁移：mid 一致则继承并加密。返回说明或 None。"""
+    src = store.DB_FILE
+    enc = VAULT_DB_ENC
+    if not src.is_file() or enc.is_file() or not VAULT.is_unlocked():
+        return None
+    # 若加密库已绑定 mid，且 cookie 中 mid 不一致则拒绝导入
+    bound = str(VAULT.state.bound_mid or "")
+    if bound:
+        cfg = load_config()
+        ck = cfg.get("cookie_string", "") or ""
+        cookie_mid = ""
+        for part in ck.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "DedeUserID":
+                cookie_mid = v.strip()
+                break
+        if cookie_mid and cookie_mid != bound:
+            return "检测到其它账号的明文数据，未导入"
+    try:
+        VAULT.encrypt_file(src, enc)
+        backup = src.with_suffix(".sqlite3.plain-backup")
+        try:
+            if not backup.exists():
+                shutil.copy2(src, backup)
+        except OSError:
+            pass
+        return "已继承本地数据并完成加密"
+    except (OSError, vault_mod.VaultError) as exc:
+        log.warning("明文库迁移失败：%s", exc)
+        return None
+
+
+def _vault_restore_db_if_needed() -> bool:
+    """若只有密文库且加密库已解锁，则解出工作库。"""
+    if store.DB_FILE.is_file() or not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
+        return False
+    try:
+        VAULT.decrypt_file(VAULT_DB_ENC, store.DB_FILE)
+        return True
+    except vault_mod.VaultError as exc:
+        log.warning("无法解密数据库：%s", exc)
+        return False
+
+
+class VaultInitIn(BaseModel):
+    bound_mid: str = ""
+    password: str = ""
+    recovery_code: str = ""
+
+
+class VaultUnlockIn(BaseModel):
+    password: str = ""
+    recovery_code: str = ""
+    bound_mid: str = ""
+
+
+@app.get("/api/vault/status")
+def vault_status():
+    return _vault_status_payload()
+
+
+@app.post("/api/vault/onboarding")
+def vault_onboarding(body: VaultInitIn):
+    """新用户：绑定 mid + 设密码，返回一次性恢复码明文。"""
+    password = body.password or ""
+    if len(password) < 6:
+        return JSONResponse({"ok": False, "error": "应用密码至少 6 位"}, status_code=400)
+    if not body.bound_mid:
+        return JSONResponse({"ok": False, "error": "缺少绑定的 B 站用户 ID"}, status_code=400)
+    try:
+        code = VAULT.initialize(bound_mid=body.bound_mid, password=password)
+    except vault_mod.VaultError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    migrated = _vault_migrate_plain_db_if_needed()
+    _save_app_lock_secrets("", "")
+    _APP_LOCK.update(enabled=False, unlocked=True)
+    emit("ok", "本地加密已启用，请保存恢复码")
+    return {"ok": True, "recovery_code": code, "migrated": migrated,
+            **_vault_status_payload()}
+
+
+
+@app.post("/api/vault/unbind-device")
+def vault_unbind_device():
+    try:
+        VAULT._pop_wrap("device")
+        VAULT.save_meta()
+    except Exception:
+        pass
+    # 只清加密库自己的设备 secret；app_unlock.blob 是应用密码的材料，不要动
+    try:
+        DEVICE_SECRET_BLOB.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return {"ok": True, **_vault_status_payload()}
+
+
+class VaultUnlockDeviceIn(BaseModel):
+    skip_hello: bool = False
+
+
+@app.post("/api/vault/unlock-device")
+def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
+    """Hello 验证后解锁：无设备包装则现场绑定，再用设备材料解 DEK。"""
+    skip_hello = bool(body and body.skip_hello)
+    if not skip_hello:
+        hello = vault_hello_verify()
+        if not hello.get("ok"):
+            return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
+                                status_code=403)
+    try:
+        try:
+            secret = _read_device_secret()
+        except OSError:
+            secret = secrets.token_urlsafe(32)
+            _write_device_secret(secret)
+        if not VAULT.state.has_device_wrap:
+            # 新建包装要拿 DEK，而 DEK 此刻锁着 —— 拿不到就明确告诉用户该做什么
+            if not VAULT.is_unlocked():
+                return JSONResponse(
+                    {"ok": False,
+                     "error": "缺少 Hello 设备密钥：请先用应用密码解锁一次，"
+                              "再到「设置 → 安全」重新绑定 Windows Hello"},
+                    status_code=400)
+            VAULT.bind_device_blob(secret)
+        VAULT.unlock_with_secret("device", secret)
+    except (OSError, ValueError, vault_mod.VaultError) as exc:
+        return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"}, status_code=400)
+    # 与密码解锁保持一致：先把库恢复出来，再确认这把 DEK 真的能解开它
+    restored = _vault_restore_db_if_needed()
+    migrated = _vault_migrate_plain_db_if_needed()
+    test = _dek_selftest()
+    if not test.get("ok"):
+        VAULT.lock()
+        return JSONResponse({"ok": False,
+                             "error": f"解密自检未通过：{test.get('detail')}",
+                             "selftest": test}, status_code=500)
+    _APP_LOCK.update(unlocked=True)
+    return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
+            **_vault_status_payload()}
+
+
+@app.post("/api/vault/unlock")
+def vault_unlock(body: VaultUnlockIn):
+    try:
+        if body.recovery_code:
+            VAULT.unlock_with_recovery(body.recovery_code)
+            if body.password:
+                VAULT.set_password(body.password)
+        elif body.password:
+            VAULT.unlock_with_password(body.password)
+        else:
+            return JSONResponse({"ok": False, "error": "请输入应用密码或恢复码"}, status_code=400)
+    except vault_mod.VaultError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
+    restored = _vault_restore_db_if_needed()
+    migrated = _vault_migrate_plain_db_if_needed()
+    test = _dek_selftest()
+    if not test.get("ok"):
+        VAULT.lock()
+        return JSONResponse({"ok": False,
+                             "error": f"解密自检未通过：{test.get('detail')}",
+                             "selftest": test}, status_code=500)
+    _APP_LOCK.update(enabled=False, unlocked=True)
+    return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
+            **_vault_status_payload()}
+
+
+@app.post("/api/vault/lock")
+def vault_lock():
+    try:
+        _vault_save_db_encrypted()
+    except OSError as exc:
+        return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
+                            status_code=500)
+    VAULT.lock()
+    return {"ok": True, **_vault_status_payload()}
+
+
+@app.post("/api/vault/complete-onboarding")
+def vault_complete_onboarding():
+    if not VAULT.is_unlocked():
+        return JSONResponse({"ok": False, "error": "加密库未解锁"}, status_code=403)
+    VAULT.complete_onboarding()
+    # 初始化完成后立刻上锁并加密落盘：刷新/重启后必须解锁才能用
+    try:
+        _vault_save_db_encrypted()
+    except OSError as exc:
+        log.warning("初始化后加密数据库失败：%s", exc)
+    VAULT.lock()
+    return {"ok": True, "locked": True, **_vault_status_payload()}
+
+
+class VaultSetPasswordIn(BaseModel):
+    current_password: str = ""
+    password: str = ""
+
+
+@app.post("/api/vault/set-password")
+def vault_set_password(body: VaultSetPasswordIn):
+    password = body.password or ""
+    if len(password) < 6:
+        return JSONResponse({"ok": False, "error": "应用密码至少 6 位"}, status_code=400)
+    try:
+        if VAULT.is_unlocked():
+            VAULT.set_password(password)
+        else:
+            VAULT.set_password(password, current_password=body.current_password or None)
+    except vault_mod.VaultError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
+    return {"ok": True, **_vault_status_payload()}
+
+
+class VaultBindDeviceIn(BaseModel):
+    skip_hello: bool = False
+
+
+@app.post("/api/vault/bind-device")
+def vault_bind_device(body: VaultBindDeviceIn | None = None):
+    """绑定 Windows/DPAPI 设备包装（须先有应用密码并解锁）。
+
+    绑定会把「能解开 DEK 的设备密钥」写进本机，属于敏感操作，因此默认先做一次
+    Windows Hello 验证 —— 和解锁时一致；取消或验证失败则不写入任何东西。
+    """
+    if not VAULT.state.password_set:
+        return JSONResponse({"ok": False, "error": "请先设置应用密码"}, status_code=400)
+    if not VAULT.is_unlocked():
+        return JSONResponse({"ok": False, "error": "请先解锁加密库"}, status_code=403)
+    if not (body and body.skip_hello):
+        hello = vault_hello_verify()
+        if not hello.get("ok"):
+            return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
+                                status_code=403)
+    secret = secrets.token_urlsafe(32)
+    try:
+        VAULT.bind_device_blob(secret)
+        _write_device_secret(secret)
+    except (vault_mod.VaultError, OSError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return {"ok": True, **_vault_status_payload()}
+
+
+# Windows Hello 的验证框由系统的凭据 broker（CredentialUIBroker.exe）绘制，既不是我们的子窗口，
+# 系统也不会把它激活到前台 —— 实测它会一直躲在应用窗口后面，用户只能手动切过去。
+# 浏览器模式下只能自己找出来置顶（SetWindowPos 不需要前台权限）。
+# 但 Electron 壳里这条路走不通：那个窗口的完整性级别更高，实测 SetWindowPos 直接返回 ACCESS_DENIED
+# （UIPI 策略，不是参数问题），所以壳改成「最小化自己让开」（electron/main.js:168-185）。
+CREDENTIAL_DIALOG_CLASS = "Credential Dialog Xaml Host"
+
+
+_USER32_TYPED = False
+
+
+def _user32():
+    """带 argtypes 的 user32。
+
+    不声明 argtypes 时 ctypes 会把句柄按 32 位 int 传，而 `HWND_TOPMOST` 就是 `(HWND)-1`：
+    64 位下 -1 会被当成 0x00000000FFFFFFFF 传进去，SetWindowPos 直接失败 ——
+    实测表现就是「验证框永远置不了顶、也拿不到 WS_EX_TOPMOST」。
+    """
+    global _USER32_TYPED
+    import ctypes
+    from ctypes import wintypes
+
+    u = ctypes.windll.user32
+    if not _USER32_TYPED:
+        u.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        u.GetClassNameW.restype = ctypes.c_int
+        u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        u.GetWindowThreadProcessId.restype = wintypes.DWORD
+        u.GetForegroundWindow.restype = wintypes.HWND
+        u.IsWindowVisible.argtypes = [wintypes.HWND]
+        u.IsWindowVisible.restype = wintypes.BOOL
+        u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                   ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        u.SetWindowPos.restype = wintypes.BOOL
+        u.SetForegroundWindow.argtypes = [wintypes.HWND]
+        u.SetForegroundWindow.restype = wintypes.BOOL
+        u.BringWindowToTop.argtypes = [wintypes.HWND]
+        u.BringWindowToTop.restype = wintypes.BOOL
+        u.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+        u.AttachThreadInput.restype = wintypes.BOOL
+        u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        u.PostMessageW.restype = wintypes.BOOL
+        _USER32_TYPED = True
+    return u
+
+
+def _find_credential_dialog() -> int:
+    """找到 Hello 验证框的顶层窗口句柄；没有则返回 0。"""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = _user32()
+    hits: list[int] = []
+
+    def cb(hwnd, _):
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, buf, 256)
+        if buf.value == CREDENTIAL_DIALOG_CLASS:
+            hits.append(int(hwnd or 0))
+        return True
+
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    ctypes.windll.user32.EnumWindows(enum_proc(cb), 0)
+    return hits[0] if hits else 0
+
+
+def _force_foreground(hwnd: int) -> bool:
+    """把窗口顶到前台。
+
+    SetForegroundWindow 只对「当前前台进程」放行；后端不是前台进程（前台是 Electron
+    窗口），所以要先把自己挂到前台线程上（AttachThreadInput），调用完再摘掉。
+    """
+    import ctypes
+
+    user32 = _user32()
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
+    fg = user32.GetForegroundWindow()
+    tid_fg = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+    tid_me = kernel32.GetCurrentThreadId()
+    attached = False
+    ok = False
+    try:
+        if tid_fg and tid_fg != tid_me:
+            attached = bool(user32.AttachThreadInput(tid_me, tid_fg, True))
+        user32.BringWindowToTop(hwnd)
+        ok = bool(user32.SetForegroundWindow(hwnd))
+    except OSError:
+        ok = False
+    finally:
+        if attached:
+            try:
+                user32.AttachThreadInput(tid_me, tid_fg, False)
+            except OSError:
+                pass
+    return ok
+
+
+def _close_credential_dialog() -> None:
+    """收掉残留的验证框。
+
+    超时/取消后那个框可能还挂在屏幕上，用户对着它验证完了应用却毫无反应
+    （实测就发生过），所以请求结束后要主动关掉。
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    hwnd = _find_credential_dialog()
+    if hwnd:
+        try:
+            _user32().PostMessageW(hwnd, 0x0010, 0, 0)   # WM_CLOSE
+        except OSError:
+            pass
+
+
+def _raise_credential_dialog(stop: threading.Event) -> None:
+    """把 Hello 验证框顶到最前，直到 stop 被置位。"""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = _user32()
+    hwnd_topmost = wintypes.HWND(-1)      # 必须显式转成 HWND（见 _user32 的注释）
+    swp = 0x0001 | 0x0002 | 0x0040        # NOSIZE | NOMOVE | SHOWWINDOW
+    deadline = time.monotonic() + 50      # 与脚本内 Wait(45000) 同量级
+    announced = False
+    while not stop.is_set() and time.monotonic() < deadline:
+        hwnd = _find_credential_dialog()
+        if hwnd:
+            try:
+                user32.SetWindowPos(hwnd, hwnd_topmost, 0, 0, 0, 0, swp)
+                raised = _force_foreground(hwnd)
+                if not announced:
+                    announced = True
+                    log.info("Hello 验证框已置顶并置前（hwnd=%s，成为前台=%s）", hwnd, raised)
+            except OSError:
+                pass
+        stop.wait(0.3)
+
+
+@app.post("/api/vault/hello-verify")
+def vault_hello_verify():
+    """调用 Windows Hello / PIN（UserConsentVerifier）。取消或失败返回明确状态。"""
+    if sys.platform != "win32":
+        return {"ok": False, "status": "unsupported", "message": "当前系统不支持 Windows Hello"}
+    ps = r'''
+$ErrorActionPreference = 'Stop'
+function Write-Ascii([string]$s) {
+  Write-Output (($s -replace '[^\x20-\x7E]', '?') -replace '[\r\n]+', ' ')
+}
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime -ErrorAction Stop
+  $null = [Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+  $resultType = [Windows.Security.Credentials.UI.UserConsentVerificationResult,Windows.Security.Credentials.UI,ContentType=WindowsRuntime]
+
+  $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 -and
+    $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+  } | Select-Object -First 1
+  if (-not $asTask) { Write-Output 'unsupported:AsTask missing'; exit 0 }
+
+  # 本机 WinRT 投影：RequestVerificationAsync + UserConsentVerificationResult
+  $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync('Verify to unlock local data')
+  $task = $asTask.MakeGenericMethod($resultType).Invoke($null, @($op))
+  # 超时与「用户取消」必须分开：原来两者都报 cancel，用户明明取消了却很困惑
+  if (-not $task.Wait(45000)) { Write-Output 'timeout'; exit 0 }
+
+  $name = [string]$task.Result
+  if ($name -eq 'Verified' -or $name -eq 'Allow' -or $name -eq '0') { Write-Output 'ok'; exit 0 }
+  # 'Canceled' 是 UserConsentVerificationResult 实际返回的取消值（实测），别漏
+  if ($name -eq 'UserCancelled' -or $name -eq 'UserCanceled' -or $name -eq 'Canceled') {
+    Write-Output 'cancel'; exit 0
+  }
+  Write-Ascii ('deny:' + $name)
+} catch {
+  Write-Ascii ('unsupported:' + $_.Exception.Message)
+}
+'''
+    raiser = threading.Event()
+    raiser_thread = threading.Thread(
+        target=_raise_credential_dialog, args=(raiser,), daemon=True, name="hello-topmost")
+    raiser_thread.start()
+    try:
+        # 必须允许交互：Windows Hello 需要弹出系统对话框。
+        # CREATE_NO_WINDOW 只是不给自己开控制台（GUI 启动时那一下黑窗），不影响 Hello 对话框。
+        # 时限交给脚本自己的 Wait(45000)：原来 Python 侧 35s 会先杀掉脚本，
+        # 于是「用户还在看对话框」被误报成取消 —— 这里放宽到 50s 兜底。
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-STA", "-Command", ps],
+            capture_output=True, text=True, timeout=50, encoding="utf-8", errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+        text = (out.stdout or "").strip().splitlines()[-1] if out.stdout else ""
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "status": "error", "message": str(exc)}
+    finally:
+        raiser.set()
+        _close_credential_dialog()   # 流程结束了就别把验证框留在屏幕上
+    if text == "ok":
+        return {"ok": True, "status": "ok", "message": "验证通过"}
+    if text == "timeout":
+        return {"ok": False, "status": "timeout",
+                "message": "验证超时（45 秒未完成），请重试"}
+    if text == "cancel":
+        return {"ok": False, "status": "cancel", "message": "已取消，请改用应用密码"}
+    if text.startswith("unsupported"):
+        detail = text.split(":", 1)[1] if ":" in text else ""
+        msg = "无法使用 Windows Hello：未启用 PIN/人脸/指纹，或系统接口不可用"
+        if detail:
+            msg += f"（{detail}）"
+        return {"ok": False, "status": "unsupported", "message": msg}
+    return {"ok": False, "status": "unsupported",
+            "message": text or "Windows Hello 不可用，请改用应用密码解锁"}
+
+
+def _begin_job(key: str, state: dict, *, error: str = "") -> JSONResponse | None:
+    """在锁内占坑：长任务两两互斥，避免 check-then-act 双开。"""
+    with _JOB_START_LOCK:
+        for other in LONG_JOBS:
+            if other == key:
+                continue
+            if (APP.get(other) or {}).get("running"):
+                return JSONResponse(
+                    {"ok": False, "error": error or f"已有任务在运行（{other}），请先停止"},
+                    status_code=409)
+        if (APP.get(key) or {}).get("running"):
+            return JSONResponse({"ok": False, "error": error or "任务已在运行中"},
+                                status_code=409)
+        APP[key] = state
+        return None
 
 
 def emit(level: str, text: str, **extra):
@@ -607,7 +1458,11 @@ def _bootstrap_providers_from_legacy_config() -> None:
         if providers:
             return
         if active_model:
-            log.info("已初始化供应商与激活模型：model=%s", active_model["id"])
+            # 这行发生在 import 期（本函数在模块级被调用），那时日志 handler 还没装好，
+            # 冻结后端会把中文按 ANSI 代码页写出去 → 壳按 UTF-8 读就是乱码。
+            # 所以只记下来，等 main() 里 handler 装好（而且是 UTF-8 流）之后再补打。
+            global _PROVIDER_BOOT_LOG
+            _PROVIDER_BOOT_LOG = f"已初始化供应商与激活模型：model={active_model['id']}"
     except Exception as exc:
         log.warning("供应商/模型初始化失败：%s", exc)
 
@@ -626,10 +1481,17 @@ def get_session_cookie() -> bili_api.CookieInfo:
 
 @app.get("/api/cookie")
 def get_cookie():
-    """返回当前是否已配置 cookie（不回显原值，只给尾 4 位与长度）。"""
+    """返回当前是否已配置 cookie（不回显原值，只给尾 4 位、长度与 mid）。"""
     cfg = load_config()
     ck = cfg.get("cookie_string", "") or ""
-    return {"configured": bool(ck.strip()), "length": len(ck), "masked": _mask(ck)}
+    mid = ""
+    for part in ck.split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == "DedeUserID":
+            mid = v.strip()
+            break
+    return {"configured": bool(ck.strip()), "length": len(ck), "masked": _mask(ck),
+            "mid": mid}
 
 
 class CookieIn(BaseModel):
@@ -693,6 +1555,12 @@ class ConfigIn(BaseModel):
     write_interval: Optional[int] = None
     folder_merge_interval: Optional[int] = None
     apply_batch: Optional[int] = None
+    prompt_profile: Optional[str] = None
+    prompt_analyze: Optional[str] = None
+    prompt_merge: Optional[str] = None
+    confidence_profile_min: Optional[float] = None
+    confidence_analyze_min: Optional[float] = None
+    confidence_merge_min: Optional[float] = None
 
 
 @app.post("/api/config")
@@ -748,8 +1616,137 @@ def set_config(cfg: ConfigIn):
         cur["folder_merge_interval"] = max(1, min(60, int(cfg.folder_merge_interval)))
     if cfg.apply_batch is not None:
         cur["apply_batch"] = max(1, min(1000, int(cfg.apply_batch)))
+    if cfg.prompt_profile is not None:
+        cur["prompt_profile"] = cfg.prompt_profile
+    if cfg.prompt_analyze is not None:
+        cur["prompt_analyze"] = cfg.prompt_analyze
+    if cfg.prompt_merge is not None:
+        cur["prompt_merge"] = cfg.prompt_merge
+    if cfg.confidence_profile_min is not None:
+        cur["confidence_profile_min"] = max(0.0, min(1.0, float(cfg.confidence_profile_min)))
+    if cfg.confidence_analyze_min is not None:
+        cur["confidence_analyze_min"] = max(0.0, min(1.0, float(cfg.confidence_analyze_min)))
+    if cfg.confidence_merge_min is not None:
+        cur["confidence_merge_min"] = max(0.0, min(1.0, float(cfg.confidence_merge_min)))
     save_config(cur)
     return {"ok": True, "config": get_config()}
+
+
+DEFAULT_PROMPTS = {
+    # 与 llm_analyzer 生产提示词同源（规则段）；运行时仍会拼接目录/画像上下文
+    "prompt_profile": (
+        "你是收藏夹内容画像整理助手。请根据输入的全部条目归纳收藏夹画像，收藏夹名称只是弱提示。"
+        "输出 JSON：summary 简介、topics 主题列表、typical_content 典型内容、out_of_scope 范围外提示、"
+        "coherence 一致性说明、confidence 0~1。只返回 JSON。"
+    ),
+    "prompt_analyze": (
+        "你是 B 站收藏夹整理助手。任务是判断一批视频各自归属于哪个收藏夹。\n"
+        "规则：\n"
+        "1. 每个输入 id 必须有一条对应结果，id 原样返回。\n"
+        "2. 归类以画像的实际主题和收纳范围为主要依据，收藏夹名称只作弱提示。\n"
+        "3. action=move_to_existing 且 recommended 就是已所在夹时表示留下，不要用 skip 表示留下。\n"
+        "4. in_default_inbox=true 表示尚未分拣，必须在有画像的收藏夹中选最合适的一个；"
+        "所有画像都不符且新主题清楚时才 create_new；确实无处可去才 skip。\n"
+        "5. 略微偏离且证据不明确时保留原位。\n"
+        "6. 标题/简介/UP主全空或完全无法归类才 skip。\n"
+        "7. confidence 为 0~1。\n"
+        "8. reason 不超过 20 字。\n"
+        "9. 默认收藏夹只能移出，绝不能作为移入目标。\n"
+        "只返回纯 JSON。"
+    ),
+    "prompt_merge": (
+        "你是 B 站收藏夹信息架构整理助手。目标是在保留有用主题边界的前提下提出合并组。"
+        "输出 JSON groups：target_id、source_ids、final_name、reason、confidence。只返回 JSON。"
+    ),
+}
+DEFAULT_CONFIDENCE = {
+    "confidence_profile_min": 0.5,
+    "confidence_analyze_min": 0.5,
+    "confidence_merge_min": 0.5,
+}
+
+
+@app.get("/api/prompts/defaults")
+def prompts_defaults():
+    return {"ok": True, "defaults": {**DEFAULT_PROMPTS, **DEFAULT_CONFIDENCE}}
+
+
+@app.get("/api/data/paths")
+def data_paths():
+    return {
+        "ok": True,
+        "data_dir": str(USER_DATA_DIR),
+        "db_file": str(store.DB_FILE),
+    }
+
+
+@app.get("/api/data/usage")
+def data_usage():
+    def _dir_size(path: Path) -> int:
+        total = 0
+        if not path.exists():
+            return 0
+        if path.is_file():
+            return path.stat().st_size
+        for p in path.rglob("*"):
+            try:
+                if p.is_file():
+                    total += p.stat().st_size
+            except OSError:
+                pass
+        return total
+
+    proj = _dir_size(USER_DATA_DIR)
+    disk_total = disk_free = None
+    try:
+        if sys.platform == "win32":
+            import shutil as _sh
+            usage = _sh.disk_usage(str(USER_DATA_DIR if USER_DATA_DIR.exists() else Path.home()))
+            disk_total, disk_free = usage.total, usage.free
+        else:
+            import shutil as _sh
+            usage = _sh.disk_usage(str(USER_DATA_DIR if USER_DATA_DIR.exists() else Path.home()))
+            disk_total, disk_free = usage.total, usage.free
+    except OSError:
+        pass
+    disk_used = (disk_total - disk_free) if disk_total is not None else None
+    return {
+        "ok": True,
+        "project_bytes": proj,
+        "disk_total_bytes": disk_total,
+        "disk_used_bytes": disk_used,
+        "disk_free_bytes": disk_free,
+    }
+
+
+@app.post("/api/data/open-folder")
+def data_open_folder():
+    """打开数据目录并尽量置顶资源管理器窗口。"""
+    try:
+        USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "win32":
+            path = str(USER_DATA_DIR)
+            # 直接打开这个文件夹本身；/select 会开在上一级并选中它，不是用户要的
+            ps = (
+                "Start-Process explorer.exe -ArgumentList '\"" + path + "\"';\n"
+                "Start-Sleep -Milliseconds 600;\n"
+                "$name = Split-Path '" + path + "' -Leaf;\n"
+                "$wshell = New-Object -ComObject WScript.Shell;\n"
+                "$null = $wshell.AppActivate($name);\n"
+                "if (-not $?) { $null = $wshell.AppActivate('文件资源管理器'); }\n"
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps],
+                capture_output=True, timeout=15,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+            )
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", str(USER_DATA_DIR)])
+        else:
+            subprocess.Popen(["xdg-open", str(USER_DATA_DIR)])
+        return {"ok": True}
+    except OSError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 # ============ 供应商 / 模型管理 ============
@@ -1308,8 +2305,16 @@ INVALID_TITLE = "已失效视频"
 
 
 def _is_invalid(video: dict) -> bool:
-    """防火墙：只有标题**恰好**是「已失效视频」才算失效视频。"""
-    return (video.get("title") or "").strip() == INVALID_TITLE
+    """防火墙：标题**恰好**是「已失效视频」，或 B 站标了 attr=1（失效位），才算失效视频。
+
+    只认标题会漏掉「标题已从历史备份恢复原文」的失效条目，此时 attr 位是唯一可靠信号。
+    """
+    if (video.get("title") or "").strip() == INVALID_TITLE:
+        return True
+    try:
+        return int(video.get("attr") or 0) == 1
+    except (TypeError, ValueError):
+        return False
 
 
 def _autobackup_data(tag: str = "autobackup") -> str:
@@ -1352,6 +2357,158 @@ class DataIn(BaseModel):
     bundle: dict = {}
     scope: str = "all"
     scopes: list[str] = []
+
+
+class TermExecIn(BaseModel):
+    cmd: str = ""
+
+
+TERM_OUT: list[str] = []
+_TERM_LOCK = threading.Lock()
+
+
+@app.get("/api/terminal/output")
+def terminal_output(since: int = 0):
+    with _TERM_LOCK:
+        lines = TERM_OUT[since:]
+        return {"ok": True, "since": since, "next": since + len(lines), "lines": lines}
+
+
+@app.post("/api/terminal/exec")
+def terminal_exec(body: TermExecIn):
+    cmd = (body.cmd or "").strip()
+    if not cmd:
+        return JSONResponse({"ok": False, "error": "命令为空"}, status_code=400)
+    cwd = str(USER_DATA_DIR if USER_DATA_DIR.exists() else HERE)
+
+    def _run():
+        try:
+            p = subprocess.run(
+                cmd, shell=True, cwd=cwd,
+                capture_output=True, text=True, timeout=60,
+                encoding="utf-8", errors="replace",
+            )
+            out = (p.stdout or "")
+            err = (p.stderr or "")
+        except subprocess.TimeoutExpired:
+            out, err = "", "命令超时（60s）\n"
+        except OSError as exc:
+            out, err = "", f"执行失败：{exc}\n"
+        with _TERM_LOCK:
+            TERM_OUT.append(f"$ {cmd}\n")
+            if out:
+                TERM_OUT.append(out if out.endswith("\n") else out + "\n")
+            if err:
+                TERM_OUT.append(err if err.endswith("\n") else err + "\n")
+        emit("info", f"终端：{cmd}", phase="terminal")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/api/data/export-zip")
+def data_export_zip():
+    """导出整个数据目录为 zip（排除 runtime / backups / shell）。
+
+    shell 是 Electron 壳自己的 userData 目录（缓存、GPU 缓存，以及被它独占的
+    lockfile）：里面没有用户数据，而 read 那个被占用的 lockfile 会让整包直接 500。
+    """
+    import zipfile
+    import io
+    buf = io.BytesIO()
+    fn = "bili_fav_data_" + time.strftime("%Y%m%d_%H%M%S") + ".zip"
+    # 加密库与各种二进制 blob 本身已经不可压缩：实测 library.sqlite3.enc 53.7MB
+    # 压了 2.26 秒、一个字节都没省。按类型分流，别为这些白等。
+    stored_suffix = (".enc", ".blob", ".jpg", ".jpeg", ".png", ".webp", ".gif",
+                     ".zip", ".7z", ".gz", ".mp4")
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        base = USER_DATA_DIR
+        if not base.exists():
+            base = HERE
+        for p in base.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = p.relative_to(base)
+            if any(part in ("runtime", "backups", "shell") for part in rel.parts):
+                continue
+            try:
+                data = p.read_bytes()
+                if rel.suffix.lower() in stored_suffix:
+                    zf.writestr(str(rel).replace("\\", "/"), data, zipfile.ZIP_STORED)
+                else:
+                    zf.writestr(str(rel).replace("\\", "/"), data)
+            except OSError as exc:
+                # 单个文件读不到（被别的进程占着）不应该让整包导出失败
+                log.warning("导出跳过无法读取的文件 %s：%s", rel, exc)
+    size = buf.seek(0, io.SEEK_END)
+    buf.seek(0)
+
+    def blocks(fh, block=1 << 20):
+        """按固定块发。
+
+        别把 BytesIO 直接交给 StreamingResponse：它按「行」迭代，而 zip 是二进制，
+        实测一个 65MB 包被切成 26.4 万个 ~0.3KB 的碎片，每片都要过一次线程池与
+        ASGI，传输从 1 秒变成 127 秒。
+        """
+        while True:
+            chunk = fh.read(block)
+            if not chunk:
+                break
+            yield chunk
+
+    from fastapi.responses import StreamingResponse
+    # 带上 Content-Length，前端才能显示真实百分比（否则只能干报字节数）
+    return StreamingResponse(
+        blocks(buf), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"',
+                 "Content-Length": str(size)},
+    )
+
+
+class ZipImportIn(BaseModel):
+    zip_b64: str = ""
+
+
+@app.post("/api/data/import-zip")
+def data_import_zip(body: ZipImportIn):
+    """导入完整数据目录 zip；明文旧库自动迁移加密。"""
+    import base64
+    import zipfile
+    import io
+    if not body.zip_b64:
+        return JSONResponse({"ok": False, "error": "未收到 zip"}, status_code=400)
+    bk = _autobackup_data("before-import-zip")
+    try:
+        raw = base64.b64decode(body.zip_b64)
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"zip 无法读取：{e}"}, status_code=400)
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    extracted = 0
+    with zf:
+        for name in zf.namelist():
+            if name.endswith("/"):
+                continue
+            # 防 zip-slip
+            rel = Path(name)
+            if rel.is_absolute() or ".." in rel.parts:
+                continue
+            # shell/ 是 Electron 壳自己的 userData，别让旧包往里写
+            if any(part in ("runtime", "shell") for part in rel.parts):
+                continue
+            dest = USER_DATA_DIR / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(zf.read(name))
+            extracted += 1
+    # 旧明文库 → 加密
+    migrated = None
+    try:
+        if VAULT.is_unlocked():
+            migrated = _vault_migrate_plain_db_if_needed()
+    except Exception:
+        migrated = None
+    emit("warn", f"已导入数据目录 zip（{extracted} 个文件）；原数据已备份到 {bk}")
+    return {"ok": True, "files": extracted, "backup": bk, "migrated": migrated}
 
 
 @app.get("/api/data/export")
@@ -1476,6 +2633,61 @@ async def scan_issue_gate(request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def local_api_guard(request, call_next):
+    """Host / Origin / Sec-Fetch / Token —— 挡 CSRF 与 DNS rebinding。
+
+    注册在 scan_issue_gate 之后：Starlette 后注册的在外层，安全校验最先执行。
+    """
+    host = request.headers.get("host", "")
+    if not _host_allowed(host):
+        return JSONResponse({"ok": False, "error": "非法 Host"}, status_code=403)
+    path = request.url.path
+    method = request.method.upper()
+    # 应用密码锁定：只放行解锁/状态与静态资源
+    if (_APP_LOCK["enabled"] and not _APP_LOCK["unlocked"]
+            and path.startswith("/api/")
+            and not path.startswith(_APP_LOCK_OPEN_PATHS)):
+        return JSONResponse({"ok": False, "code": "app_locked",
+                             "error": "应用已锁定，请先解锁"}, status_code=403)
+    # 加密库强制门闩：未初始化 / 未完成引导 / 未解锁时，业务 API 一律拒绝
+    # 测试钩子 BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL=1 时跳过（与 token 同理）
+    if (path.startswith("/api/") and not _insecure_local()
+            and not path.startswith(_APP_LOCK_OPEN_PATHS + ("/api/vault/",))):
+        try:
+            vst = VAULT.state
+        except Exception:
+            vst = None
+        if vst is None or not vst.password_set:
+            return JSONResponse({"ok": False, "code": "app_onboarding",
+                                 "error": "首次使用请先设置应用密码并保存恢复码"},
+                                status_code=403)
+        if not vst.onboarding_complete:
+            return JSONResponse({"ok": False, "code": "app_onboarding",
+                                 "error": "请先完成加密库初始化（保存恢复码）"}, status_code=403)
+        if not vst.unlocked:
+            return JSONResponse({"ok": False, "code": "app_locked",
+                                 "error": "加密库已锁定，请先解锁"}, status_code=403)
+    need_token = (method not in ("GET", "HEAD", "OPTIONS") or
+                  path in ("/api/data/export", "/api/cookie"))
+    # 解锁引导路径：仍校验 Origin，但不强制页面 token（锁屏/Hello 在启动瞬间可能尚未同步）
+    token_exempt = path in (
+        "/api/vault/hello-verify", "/api/vault/unlock",
+        "/api/vault/unlock-device", "/api/app-lock/unlock",
+    ) or path.startswith("/api/app-lock/")
+    if need_token:
+        origin = request.headers.get("origin")
+        if origin and not _origin_allowed(origin, request.url.port or _APP_PORT):
+            return JSONResponse({"ok": False, "error": "跨源请求被拒绝"}, status_code=403)
+        sfs = request.headers.get("sec-fetch-site")
+        if sfs and sfs not in ("same-origin", "none"):
+            return JSONResponse({"ok": False, "error": "跨站请求被拒绝"}, status_code=403)
+        if not token_exempt and not _insecure_local() and not _token_ok(request):
+            return JSONResponse({"ok": False, "error": "缺少或无效的本地 API token"},
+                                status_code=403)
+    return await call_next(request)
+
+
 @app.get("/api/scan/issues")
 def scan_issues_get():
     issues = _pending_scan_issues()
@@ -1569,16 +2781,14 @@ def scan(body: Optional[ScanIn] = None):
 def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
     """按文件夹选择批量元数据或分页读取，校验后更新该夹快照。"""
     with _scan_start_lock:
-        if APP["scan_run"] and APP["scan_run"].get("running"):
-            return JSONResponse({"ok": False, "error": "扫描已在运行中"}, status_code=409)
-        if recovery and any((APP.get(key) or {}).get("running") for key in (
-                "analyze_run", "apply_run", "folder_merge_run", "folder_merge_ai_run", "folder_profile_run")):
-            return JSONResponse({"ok": False, "error": "请先停止正在运行的整理任务，再处理扫描异常"}, status_code=409)
         run_id = uuid.uuid4().hex
-        app_state = APP["scan_run"] = {"id": run_id, "running": True, "step": "init", "done": 0,
-                                       "total": 0, "error": None, "strategy": "", "stop": False,
-                                       "folder_done": 0, "folder_total": 0, "current": "",
-                                       "recovery_action": recovery}
+        app_state = {"id": run_id, "running": True, "step": "init", "done": 0,
+                     "total": 0, "error": None, "strategy": "", "stop": False,
+                     "folder_done": 0, "folder_total": 0, "current": "",
+                     "recovery_action": recovery}
+        conflict = _begin_job("scan_run", app_state, error="扫描已在运行中")
+        if conflict:
+            return conflict
 
     def run():
         try:
@@ -1976,7 +3186,10 @@ def folder_organize_suggest():
     llm_cfg = make_llm_config()
     if not llm_cfg.configured:
         return JSONResponse({"ok": False, "error": "LLM 未配置"}, status_code=400)
-    state = APP["folder_merge_ai_run"] = {"running": True, "error": None, "count": 0}
+    state = {"running": True, "error": None, "count": 0}
+    conflict = _begin_job("folder_merge_ai_run", state, error="AI 合并分析已在运行")
+    if conflict:
+        return conflict
 
     def run():
         try:
@@ -2194,8 +3407,11 @@ def folder_organize_start():
         owner_mid = session.get_mid()
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
-    state = APP["folder_merge_run"] = {"running": True, "stop": False, "done": 0,
-                                       "total": len(pending), "error": None, "status": "running"}
+    state = {"running": True, "stop": False, "done": 0,
+             "total": len(pending), "error": None, "status": "running"}
+    conflict = _begin_job("folder_merge_run", state, error="收藏夹合并已在运行")
+    if conflict:
+        return conflict
 
     def save():
         store.save_folder_merge_plan(plan)
@@ -2441,7 +3657,8 @@ def login_qr_poll():
                 cur["cookie_string"] = f"SESSDATA={sessdata}; bili_jct={jct}; DedeUserID={uid}"
                 save_config(cur)
                 LOGIN["session"] = None
-                return {"ok": True, "status": "ok", "message": "登录成功，Cookie 已保存"}
+                return {"ok": True, "status": "ok", "message": "登录成功，Cookie 已保存",
+                        "mid": str(uid)}
             return {"ok": False, "status": "error", "message": "登录成功但未解析到 cookie"}
         mapping = {86101: ("waiting", "未扫码"),
                    86090: ("scanned", "已扫码，请在手机上确认"),
@@ -2455,7 +3672,14 @@ def login_qr_poll():
 @app.get("/api/login/status")
 def login_status():
     cfg = load_config()
-    return {"configured": bool((cfg.get("cookie_string") or "").strip())}
+    ck = cfg.get("cookie_string", "") or ""
+    mid = ""
+    for part in ck.split(";"):
+        k, _, v = part.strip().partition("=")
+        if k == "DedeUserID":
+            mid = v.strip()
+            break
+    return {"configured": bool(ck.strip()), "mid": mid}
 
 
 # ============ 收藏夹画像 ============
@@ -2735,11 +3959,14 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
     if not llm_cfg.configured:
         return JSONResponse({"ok": False, "error": "LLM 未配置，请先选择供应商与模型"}, status_code=400)
 
-    state = APP["folder_profile_run"] = {
+    state = {
         "running": True, "stop": False, "rebuild": bool(body.rebuild),
         "total": len(requested), "done": 0, "generated": 0,
         "skipped": 0, "failed": 0, "current": "", "error": None,
     }
+    conflict = _begin_job("folder_profile_run", state, error="收藏夹画像任务已在运行")
+    if conflict:
+        return conflict
 
     def run():
         try:
@@ -3056,13 +4283,16 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
     done_ids0 = _pending_analysis_ids(rebuild_mode, store.analysis_status_map())
     pending0 = sum(1 for v in videos if v.get("bvid")
                    and v["bvid"] not in done_ids0 and not _is_invalid(v))
-    state = APP["analyze_run"] = {"running": True, "done": 0, "total": len(videos),
-                                  "pending": pending0,
-                                  "failed": 0, "stop": False, "error": None,
-                                  "concurrency": concurrency, "batch": batch_size,
-                                  "continuous": bool(body.continuous), "waiting": False,
-                                  "round": 0, "selected_ids": sorted(selected),
-                                  "rebuild": rebuild_mode, "inflight": 0}
+    state = {"running": True, "done": 0, "total": len(videos),
+             "pending": pending0,
+             "failed": 0, "stop": False, "error": None,
+             "concurrency": concurrency, "batch": batch_size,
+             "continuous": bool(body.continuous), "waiting": False,
+             "round": 0, "selected_ids": sorted(selected),
+             "rebuild": rebuild_mode, "inflight": 0}
+    conflict = _begin_job("analyze_run", state, error="分析已在运行中")
+    if conflict:
+        return conflict
 
     def run():
         from concurrent.futures import ThreadPoolExecutor
@@ -3515,10 +4745,13 @@ def apply_start():
     already_done = len([1 for it in plan.values() if it.get("status") == "done"])
     held_unknown = len([1 for it in plan.values() if it.get("status") == "unknown"])
 
-    state = APP["apply_run"] = {"running": True, "done": 0, "total": total,
-                                "ok": 0, "failed": 0, "skip": 0, "deleted": 0,
-                                "unknown": 0, "stop": False, "error": None, "log": [],
-                                "batch_size": batch_size, "batch_done": 0, "batch_total": 0}
+    state = {"running": True, "done": 0, "total": total,
+             "ok": 0, "failed": 0, "skip": 0, "deleted": 0,
+             "unknown": 0, "stop": False, "error": None, "log": [],
+             "batch_size": batch_size, "batch_done": 0, "batch_total": 0}
+    conflict = _begin_job("apply_run", state, error="执行已在运行中")
+    if conflict:
+        return conflict
 
     def _mark(item, status: str, result: str):
         """写入一条方案的执行结果。"""
@@ -3575,20 +4808,15 @@ def apply_start():
             label = "删除失效" if kind == "delete" else f"移入「{target_name}」"
             emit("info", f"批次 {bn}/{bt}：{label} {len(entries)} 条",
                  phase="apply", done=state["done"], total=total)
+            # try 只包远程调用：落库失败不得把已远端成功的批次标成 failed
             try:
                 if kind == "delete":
                     session.batch_delete(src, aids, should_stop=lambda: state["stop"])
-                    msg = f"批量删除失效视频成功（批次 {bn}）"
-                    finish_items(entries, "done", msg, source_id=src)
-                    state["deleted"] += len(entries)
+                    success_msg = f"批量删除失效视频成功（批次 {bn}）"
                 else:
                     session.move_batch(src, target_id, aids, mid=owner_mid,
                                        should_stop=lambda: state["stop"])
-                    msg = f"批量移入「{target_name}」成功（批次 {bn}）"
-                    finish_items(entries, "done", msg, target_id=target_id, source_id=src)
-                emit("ok", f"批次 {bn}/{bt} 完成：{len(entries)} 条",
-                     phase="apply", done=state["done"], total=total)
-                return True
+                    success_msg = f"批量移入「{target_name}」成功（批次 {bn}）"
             except bili_api.WriteUncertainError as e:
                 msg = f"批次 {bn} 结果不确定：{e}"
                 finish_items(entries, "unknown", msg)
@@ -3612,7 +4840,23 @@ def apply_start():
                 # 网络/IO：记账后继续，避免一次抖动卡死整次执行。
                 fail_entries(entries, f"批次 {bn} 网络/IO 异常：{e}")
                 return True
-            # 未预期异常不再吞掉继续写：交给外层停止整次执行，避免带病写库。
+            # 远端已成功 → 记账；落库失败保持 done 并停，绝不改写成 failed
+            try:
+                if kind == "delete":
+                    finish_items(entries, "done", success_msg, source_id=src)
+                    state["deleted"] += len(entries)
+                else:
+                    finish_items(entries, "done", success_msg,
+                                 target_id=target_id, source_id=src)
+                emit("ok", f"批次 {bn}/{bt} 完成：{len(entries)} 条",
+                     phase="apply", done=state["done"], total=total)
+                return True
+            except (requests.RequestException, OSError) as e:
+                state["error"] = f"批次 {bn} 远端已成功但本地落库失败：{e}"
+                state["stop"] = True
+                emit("err", state["error"], phase="apply", kind="apply_end",
+                     done=state["done"], total=total)
+                return False
 
         try:
             if migrated:
@@ -3808,11 +5052,14 @@ def apply_start():
             emit("err", state["error"], phase="apply", kind="apply_end",
                  done=state["done"], total=total)
         except Exception as e:
-            state["error"] = f"执行初始化失败：{e}"
+            state["error"] = f"执行失败：{e}"
             emit("err", state["error"], phase="apply", kind="apply_end",
                  done=state["done"], total=total)
         finally:
-            save_progress()
+            try:
+                save_progress()
+            except (requests.RequestException, OSError) as e:
+                emit("err", f"收尾落库失败：{e}", phase="apply")
             state["running"] = False
             # 内容整理结束后自动刷新一次收藏夹目录，避免 remote_count 与本地关系长期不一致
             if state.get("ok") or state.get("deleted"):
@@ -4202,6 +5449,7 @@ def _run_update_worker(release: dict):
 
 _INSTALLER_UPDATE_HELPER_SCRIPT = r'''param(
     [int]$ParentPid,
+    [string]$WorkDir,
     [string]$SetupPath,
     [string]$InstallDir,
     [int]$Port,
@@ -4302,6 +5550,7 @@ def _run_installer_update_worker(release: dict, info: dict):
             [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
              "-File", str(helper_path),
              "-ParentPid", str(os.getpid()),
+             "-WorkDir", str(work_dir),
              "-SetupPath", str(setup_path),
              "-InstallDir", install_dir,
              "-Port", str(_APP_PORT),
@@ -4500,17 +5749,74 @@ _ASSET_VERSION_RE = re.compile(r"\?v=[A-Za-z0-9._-]*")
 def index():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     html = _ASSET_VERSION_RE.sub("?v=" + _asset_version(), html)
+    token_script = f"<script>window.__BILI_FAV_TOKEN__={json.dumps(_LOCAL_API_TOKEN)};</script>"
+    if "<head>" in html:
+        html = html.replace("<head>", "<head>" + token_script, 1)
+    else:
+        html = token_script + html
     return HTMLResponse(html, headers={"Cache-Control": "no-cache, must-revalidate"})
+
+
+def _bind_ready_port(server, announce: bool) -> None:
+    """等 socket 真正开始监听，再确定并（可选）回传端口。
+
+    `--port 0` 时端口由系统分配，只有绑定后才知道，所以端口不能靠调用方猜；
+    托管方（Electron 壳）读回传的这一行拿真实端口，双方之间没有竞态。
+    这一行同时也是就绪信号：能打出来就说明已经在收连接，而 main() 里的初始化
+    （token、vault 元数据）都发生在 uvicorn 启动之前，必然是完成的。
+    """
+    global _APP_PORT
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if getattr(server, "started", False):
+            port = _APP_PORT
+            try:
+                port = int(server.servers[0].sockets[0].getsockname()[1])
+            except (AttributeError, IndexError, OSError):
+                pass
+            else:
+                # 更新脚本会把这个真实端口带回去重启进程，别让它拿到 0
+                _APP_PORT = port
+            if announce:
+                sys.stdout.write(
+                    f"BFO_READY {json.dumps({'port': port, 'pid': os.getpid()})}\n")
+                sys.stdout.flush()
+            return
+        time.sleep(0.05)
+    if announce:
+        sys.stdout.write("BFO_READY_FAILED 后端未在 30 秒内开始监听\n")
+        sys.stdout.flush()
+
+
+def _watch_parent_pipe() -> None:
+    """stdin 是托管方给的管道：它一死管道就 EOF，据此收掉自己。
+
+    缺了这层，壳被强杀后会留下孤儿后端占着端口与 vault，下次启动还得先去找它。
+    """
+    try:
+        while sys.stdin.buffer.read(1):
+            pass
+    except (OSError, ValueError):
+        pass
+    log.warning("托管方已退出，后端自行关闭")
+    # 次序与更新替换那条路一致：先断开 SSE 长连接（它会一直挂着，不主动断 uvicorn
+    # 只能等满优雅超时再强拆，既慢又会抛 CancelledError），再请 uvicorn 退出。
+    _SHUTDOWN.set()
+    if _UVICORN_SERVER is not None:
+        _UVICORN_SERVER.should_exit = True
 
 
 def main():
     global _UVICORN_SERVER, _APP_PORT
     parser = argparse.ArgumentParser(description="B站收藏夹整理")
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--port", type=int, default=8080,
+                        help="监听端口；0 表示由系统分配（托管模式）")
     parser.add_argument("--log-file", default="server.log",
                         help="服务日志文件（默认保存在用户数据目录，可指定其它名字）")
     parser.add_argument("--no-browser", action="store_true",
                         help="启动服务后不自动打开浏览器")
+    parser.add_argument("--handshake", action="store_true",
+                        help="就绪后在 stdout 打印一行 BFO_READY（供托管方读取端口）")
     args = parser.parse_args()
     _APP_PORT = args.port
 
@@ -4530,7 +5836,21 @@ def main():
     for h in root.handlers[:]:
         root.removeHandler(h)
     root.setLevel(logging.INFO)
-    console = logging.StreamHandler()
+    # 冻结（PyInstaller）后端在中文 Windows 上即使给了 PYTHONIOENCODING 也按 ANSI 代码页写
+    # stderr（实测 GBK），而托管它的壳按 UTF-8 读 → shell.log 里中文全是乱码。
+    # 只给这个 handler 换一个 UTF-8 流：输出被重定向（= 被壳托管）时用 UTF-8，
+    # 跑真实控制台时保持系统代码页（否则控制台窗口里的中文会花掉）。
+    # 刻意不动 sys.stderr 本身：被 import 时（测试、嵌入方）绝不该替换它，
+    # 否则会把 pytest 之类的捕获流包死，它一关闭就 ValueError: I/O operation on closed file。
+    console_stream = sys.stderr
+    try:
+        if not sys.stderr.isatty():
+            import io as _io
+            console_stream = _io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8",
+                                               errors="replace", line_buffering=True)
+    except (AttributeError, ValueError, OSError):
+        console_stream = sys.stderr
+    console = logging.StreamHandler(console_stream)
     console.setFormatter(logging.Formatter(LOG_FORMAT))
     root.addHandler(console)
 
@@ -4546,11 +5866,32 @@ def main():
     except Exception as e:
         log.warning("无法写入日志文件 %s：%s", log_path, e)
 
+    # import 期记下的初始化日志，现在 handler（含 UTF-8 控制台流与文件）都装好了，补打
+    if _PROVIDER_BOOT_LOG:
+        log.info("%s", _PROVIDER_BOOT_LOG)
+
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
     _log_attribution()
     _cleanup_stale_update_leftovers(APP_DIR.parent, Path(tempfile.gettempdir()))
+    _persist_api_token()
+    restored = _load_persisted_token()
+    if restored != _LOCAL_API_TOKEN:
+        log.warning("token.blob 解密结果与当前 token 不一致（跨用户或损坏）")
+    _app_lock_refresh()
+    if _APP_LOCK["enabled"]:
+        log.info("应用密码已启用，当前状态：%s",
+                 "已解锁（本机自动）" if _APP_LOCK["unlocked"] else "已锁定")
+    try:
+        VAULT.load_meta()
+    except vault_mod.VaultError as exc:
+        log.error("加密库元数据无法读取：%s", exc)
     _UVICORN_SERVER = uvicorn.Server(config)
+    if args.port == 0 or args.handshake:
+        threading.Thread(target=_bind_ready_port, args=(_UVICORN_SERVER, args.handshake),
+                         daemon=True, name="bind-port").start()
+    if os.environ.get("BFO_PARENT_PIPE") == "1":
+        threading.Thread(target=_watch_parent_pipe, daemon=True, name="parent-pipe").start()
     _UVICORN_SERVER.run()
 
 

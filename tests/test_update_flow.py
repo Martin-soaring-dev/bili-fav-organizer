@@ -16,6 +16,7 @@ from unittest.mock import patch
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+os.environ.setdefault("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", "1")
 
 # 只在自己最先导入 server 时隔离数据目录；若别的测试已导入则复用，不改变其行为。
 if "server" not in sys.modules:
@@ -188,6 +189,41 @@ class InstalledModeUpdateTests(unittest.TestCase):
         self.assertEqual("portable", response.json()["install_mode"])
         self.assertEqual([("zip", "v9.9.9")], calls)
 
+    def test_installer_helper_gets_every_parameter_it_uses(self):
+        """调用方必须把 helper 用到的参数都传过去。
+
+        曾经漏传 $WorkDir：脚本 param 里没声明、Popen 也没传，而脚本内部两处清理它 ——
+        对 $null 操作会抛错、被 catch {} 吞掉，于是每次安装版更新都在
+        %TEMP%\\.bfo-setup-* 留下一个约 25MB 的安装包（只能等下次启动的清道夫扫）。
+        """
+        self.assertIn("[string]$WorkDir", server._INSTALLER_UPDATE_HELPER_SCRIPT)
+        captured = []
+        with tempfile.TemporaryDirectory() as base:
+            install_dir = Path(base) / "installed"
+            install_dir.mkdir()
+            work_dir = Path(base) / ".bfo-setup-test"
+            work_dir.mkdir()
+            with patch.object(server, "_fetch_expected_sha256", return_value="a" * 64), \
+                    patch.object(server, "_download_release_asset", return_value=123), \
+                    patch.object(server.tempfile, "mkdtemp", return_value=str(work_dir)), \
+                    patch.object(server.shutil, "which", return_value=r"C:\fake\powershell.exe"), \
+                    patch.object(server.subprocess, "Popen",
+                                 side_effect=lambda args, **kw: captured.append(args)), \
+                    patch.object(server.sys, "frozen", True, create=True):
+                server._run_installer_update_worker(
+                    dict(FAKE_RELEASE),
+                    {"install_dir": str(install_dir), "scope": "current-user"})
+
+        self.assertTrue(captured, "worker 应当启动了更新助手")
+        opts = {}
+        for i, token in enumerate(captured[0]):
+            if isinstance(token, str) and token.startswith("-") and i + 1 < len(captured[0]):
+                opts[token] = captured[0][i + 1]
+        for name in ("-ParentPid", "-WorkDir", "-SetupPath", "-InstallDir",
+                     "-Port", "-Version", "-Scope"):
+            self.assertIn(name, opts, f"helper 需要 {name}，调用方必须传")
+        self.assertTrue(opts["-WorkDir"], "-WorkDir 不能是空值")
+
 
 class UpdateCleanupTests(unittest.TestCase):
     """更新收尾清理与失败可见性：不能留下上百 MB 临时目录，也不能把错误吞掉。"""
@@ -219,6 +255,29 @@ class UpdateCleanupTests(unittest.TestCase):
             self.assertFalse(stale_setup.exists(), "超时的安装版更新目录要删掉")
             self.assertTrue(fresh_update.exists(), "正在进行的更新目录不能误删")
             self.assertTrue(unrelated.exists(), "模式外的目录不能动")
+
+    def test_sweep_keeps_the_only_rollback_copy_when_install_dir_is_missing(self):
+        """安装目录不在 = 上次更新崩在「旧目录改名」与「新目录上位」之间。
+
+        此时那份 `{应用目录名}.previous-*` 是唯一的旧版本，清道夫若照旧删掉，
+        用户隔天再开应用就永远回滚不了了。
+        """
+        with tempfile.TemporaryDirectory() as base:
+            app_parent = Path(base)
+            temp_dir = app_parent / "sys-temp"
+            temp_dir.mkdir()
+            backup = app_parent / f"{server.APP_DIR.name}.previous-abc"
+            backup.mkdir()
+            old = time.time() - 3 * 3600
+            os.utime(backup, (old, old))
+
+            missing_install_dir = app_parent / server.APP_DIR.name   # 故意不存在
+            with patch.object(server, "APP_DIR", missing_install_dir):
+                removed = server._cleanup_stale_update_leftovers(app_parent, temp_dir,
+                                                                 min_age_hours=2.0)
+
+            self.assertEqual(0, removed)
+            self.assertTrue(backup.exists(), "唯一的旧版本副本必须保留，否则无法回滚")
 
     def test_failure_is_exposed_from_fixed_file_and_cleared_by_next_check(self):
         client = TestClient(server.app)

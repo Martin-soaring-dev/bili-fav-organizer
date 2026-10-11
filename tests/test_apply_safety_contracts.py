@@ -223,7 +223,109 @@ class ApplySafetyContractTests(unittest.TestCase):
         # 未预期异常：停止整次执行，不继续打第二枪
         self.assertEqual(len(fake.calls), 1)
         self.assertFalse(server.APP["apply_run"]["running"])
-        self.assertIn("执行初始化失败", server.APP["apply_run"]["error"] or "")
+        self.assertIn("执行失败", server.APP["apply_run"]["error"] or "")
+
+    def test_business_failure_continues_next_group(self):
+        class FailFirstTarget(FakeBiliSession):
+            def move_batch(self, src, target, aids, **kwargs):
+                self.calls.append(("move", str(src), str(target), list(aids)))
+                if str(target) == "20":
+                    raise server.bili_api.BiliApiError("业务失败")
+                return len(aids)
+
+        folders = [
+            {"title": "源夹", "media_id": "10", "count": 0},
+            {"title": "现有夹", "media_id": "20", "count": 0},
+            {"title": "备用夹", "media_id": "21", "count": 0},
+        ]
+        plan = {
+            "a": {"action": "move_to_existing", "target_folder": "现有夹",
+                  "status": "pending"},
+            "b": {"action": "move_to_existing", "target_folder": "备用夹",
+                  "status": "pending"},
+        }
+        videos = [_video("a", 1), _video("b", 2)]
+        fake = FailFirstTarget(folders=folders)
+        result = self._start(plan, videos, fake)
+        self.assertTrue(_payload(result).get("started"))
+        self.assertEqual(plan["a"]["status"], "failed")
+        self.assertEqual(plan["b"]["status"], "done")
+        self.assertEqual(len(fake.calls), 2)
+
+    def test_unexpected_exception_does_not_write_next_group(self):
+        class BoomFirstTarget(FakeBiliSession):
+            def move_batch(self, src, target, aids, **kwargs):
+                self.calls.append(("move", str(src), str(target), list(aids)))
+                if str(target) == "20":
+                    raise RuntimeError("未预期故障")
+                return len(aids)
+
+        folders = [
+            {"title": "源夹", "media_id": "10", "count": 0},
+            {"title": "现有夹", "media_id": "20", "count": 0},
+            {"title": "备用夹", "media_id": "21", "count": 0},
+        ]
+        plan = {
+            "a": {"action": "move_to_existing", "target_folder": "现有夹",
+                  "status": "pending"},
+            "b": {"action": "move_to_existing", "target_folder": "备用夹",
+                  "status": "pending"},
+        }
+        videos = [_video("a", 1), _video("b", 2)]
+        fake = BoomFirstTarget(folders=folders)
+        self._start(plan, videos, fake)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(plan["a"]["status"], "pending")
+        self.assertEqual(plan["b"]["status"], "pending")
+        self.assertFalse(server.APP["apply_run"]["running"])
+
+    def test_local_persist_failure_keeps_remote_success_as_done(self):
+        plan = {"m1": {"action": "move_to_existing", "target_folder": "现有夹",
+                       "status": "pending"}}
+        videos = [_video("m1", 1)]
+        fake = FakeBiliSession()
+        folders = fake.list_folders()
+        profile_contexts = [
+            {"id": str(f["media_id"]), "name": f["title"], "revision": "1"}
+            for f in folders
+        ]
+        server.APP["session"] = fake
+        server.APP["apply_run"] = None
+
+        save_calls = {"n": 0}
+
+        def boom_save_plan(*_a, **_k):
+            save_calls["n"] += 1
+            # 首次为分组阶段预存；之后（远端已成功后的记账）才失败
+            if save_calls["n"] > 1:
+                raise OSError("disk full")
+
+        with patch.object(server.store, "load_plan_raw", return_value=plan), \
+             patch.object(server.store, "load_videos", return_value=videos), \
+             patch.object(server.store, "load_apply_state", return_value={}), \
+             patch.object(server.store, "load_folders", return_value=folders), \
+             patch.object(server.store, "save_plan", side_effect=boom_save_plan), \
+             patch.object(server.store, "save_videos"), \
+             patch.object(server.store, "save_folders"), \
+             patch.object(server.store, "analysis_status_map",
+                          return_value={"m1": "current"}), \
+             patch.object(server, "refresh_analysis_statuses", return_value={}), \
+             patch.object(server, "_organization_profile_readiness",
+                          return_value={"ready": True, "message": "ok"}), \
+             patch.object(server, "_current_folder_profile_contexts",
+                          return_value=profile_contexts), \
+             patch.object(server, "_refresh_folder_directory", return_value=None), \
+             patch.object(server, "load_config",
+                          return_value={"write_interval": 0, "apply_batch": 1000}):
+            server.apply_start()
+            deadline = time.time() + 2
+            while (server.APP["apply_run"] and server.APP["apply_run"].get("running")
+                   and time.time() < deadline):
+                time.sleep(0.01)
+        self.assertEqual(fake.calls, [("move", "10", "20", [1])])
+        self.assertEqual(plan["m1"]["status"], "done")
+        err = server.APP["apply_run"]["error"] or ""
+        self.assertIn("落库失败", err)
 
     def test_move_updates_membership_before_reporting_done(self):
         plan = {"m1": {"action": "move_to_existing", "target_folder": "现有夹",

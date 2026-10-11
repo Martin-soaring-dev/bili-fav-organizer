@@ -14,6 +14,8 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# TestClient 无 token 写接口：走测试钩子跳过本地 token（Host 仍校验）
+os.environ.setdefault("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", "1")
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "static" / "index.html"

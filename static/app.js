@@ -7,14 +7,23 @@
 
   // ---------- 界面主题 ----------
   const savedTheme = localStorage.getItem("theme-mode") || "system";
-  $("theme-mode").value = savedTheme;
+  const themeModeEl = $("theme-mode");
+  if (themeModeEl) themeModeEl.value = savedTheme;
   function applyTheme(mode) {
     if (mode === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", mode);
     localStorage.setItem("theme-mode", mode);
+    // 标题栏是系统画的（titleBarOverlay）：符号色要跟着应用的明暗，底色也要一并给它，
+    // 否则透明底在深色下会让人以为最小化/最大化的悬停与按下没反应。
+    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg2").trim();
+    window.shell?.setTheme?.(mode);
   }
+  // 自动模式下系统换了明暗：页面自己重算一次并上报（applyTheme 会重新读 --bg2）
+  window.shell?.onSystemThemeChanged?.(() => applyTheme(localStorage.getItem("theme-mode") || "system"));
   applyTheme(savedTheme);
-  $("theme-mode").addEventListener("change", () => applyTheme($("theme-mode").value));
+  if (themeModeEl) {
+    themeModeEl.addEventListener("change", () => applyTheme(themeModeEl.value));
+  }
 
   const connectionToggle = $("connection-toggle");
   const connectionContent = $("connection-content");
@@ -48,13 +57,16 @@
   $("clear-log").addEventListener("click", () => { logBody.innerHTML = ""; });
 
   // ---------- HTTP ----------
+  const API_TOKEN = (typeof window !== "undefined" && window.__BILI_FAV_TOKEN__) || "";
   async function api(method, url, body, options = {}) {
     const opt = { method, headers: {} };
+    if (API_TOKEN) opt.headers["X-BiliFav-Token"] = API_TOKEN;
     let timeoutId = null;
-    if (options.timeoutMs) {
+    const timeoutMs = options.timeoutMs || 30000;
+    {
       const controller = new AbortController();
       opt.signal = controller.signal;
-      timeoutId = setTimeout(() => controller.abort(), options.timeoutMs);
+      timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     }
     if (body !== undefined) {
       opt.headers["Content-Type"] = "application/json";
@@ -70,13 +82,576 @@
         const err = new Error(message);
         err.error = message;
         if (data && data.code === "scan_issue_pending") refreshScanIssues(true);
+        if (data && data.code === "app_locked") {
+          const screen = document.getElementById("app-lock-screen");
+          if (screen) screen.hidden = false;
+        }
+        if (data && data.code === "app_onboarding") {
+          const modal = document.getElementById("vault-onboarding-modal");
+          if (modal) modal.style.display = "flex";
+        }
         throw err;
       }
       return data;
+    } catch (e) {
+      if (e && e.name === "AbortError") {
+        const err = new Error("请求超时（" + Math.round(timeoutMs / 1000) + "s）");
+        err.error = err.message;
+        throw err;
+      }
+      if (e && e.name === "TypeError") {
+        const err = new Error("网络连接失败，请确认本地服务仍在运行");
+        err.error = err.message;
+        throw err;
+      }
+      throw e;
     } finally {
       if (timeoutId !== null) clearTimeout(timeoutId);
     }
   }
+
+  // ---------- 应用密码 ----------
+  const lockScreen = $("app-lock-screen");
+  const lockModal = $("app-lock-modal");
+  let pendingHelloBind = false;
+  let suggestHelloBind = false;   // 刚走完初始化：解锁后引导一次 Windows Hello 绑定
+  // 本机是否已绑定 Windows Hello。没绑定时锁屏上那条路必须整体不可用：
+  // 按钮置灰、密码页里的「使用 Windows Hello」链接收起，也不能再发起验证
+  // （否则会弹出一次注定失败的 Hello，用户只能取消）。
+  let helloAvailable = false;
+
+  function setHelloAvailable(bound) {
+    helloAvailable = !!bound;
+    const btn = $("lock-hello-btn");
+    if (btn) {
+      btn.disabled = !helloAvailable;
+      btn.title = helloAvailable ? "" : "尚未绑定 Windows Hello，请用应用密码解锁";
+    }
+    const link = $("lock-back-hello");
+    if (link) {
+      link.hidden = !helloAvailable;
+      link.disabled = !helloAvailable;
+    }
+    const status = $("lock-hello-status");
+    if (status && !helloAvailable) status.textContent = "尚未绑定 Windows Hello，请用应用密码解锁";
+  }
+
+  async function refreshHelloAvailability() {
+    try {
+      const vs = await api("GET", "/api/vault/status");
+      setHelloAvailable(!!(vs && vs.has_device_wrap));
+    } catch (_) { /* 读不到就维持原状 */ }
+  }
+
+  function showLockScreen(show) {
+    if (!lockScreen) return;
+    lockScreen.hidden = !show;
+    if (show) {
+      // 锁定时回收终端 PTY，不留后台 shell —— 与 /api/* 门禁同一条边界
+      if (window.shell && window.shell.terminal) {
+        window.shell.terminal.lockdown().catch(() => {});
+      }
+      refreshHelloAvailability();
+      beginUnlockFlow();
+    }
+  }
+
+  function setLockMode(mode) {
+    // 没绑定 Hello 时不允许切到那一步：直接落到密码，并说清原因
+    if (mode === "hello" && !helloAvailable) {
+      log("尚未绑定 Windows Hello，请用应用密码解锁", "warn");
+      mode = "password";
+    }
+    const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
+    show("lock-mode-hello", mode === "hello");
+    show("lock-mode-password", mode === "password");
+    show("lock-mode-recovery", mode === "recovery");
+    const err = $("app-lock-error");
+    if (err) err.textContent = "";
+    if (mode === "password") {
+      const input = $("app-lock-password");
+      if (input) { input.value = ""; input.focus(); }
+    }
+    if (mode === "recovery") {
+      const r = $("app-lock-recovery");
+      if (r) r.focus();
+    }
+  }
+
+  let helloTried = false;
+  let helloAutoConsumed = false;   // 启动时的自动验证只发生一次
+
+  // Hello 验证期间把壳窗口让开：验证框是系统凭据 broker 的窗口，属于更高完整性级别，
+  // 我们无权把它置顶（实测 SetWindowPos 返回 ACCESS_DENIED，UIPI 策略），
+  // 既然抬不动它，就让自己退让，结束后再还原并抢回焦点。
+  async function helloAside(run) {
+    const shell = window.shell;
+    try { if (shell && shell.helloAside) await shell.helloAside(); } catch (_) {}
+    try {
+      return await run();
+    } finally {
+      try { if (shell && shell.helloRestore) await shell.helloRestore(); } catch (_) {}
+    }
+  }
+
+  async function tryWindowsHelloAuto() {
+    const status = $("lock-hello-status");
+    if (status) status.textContent = "正在请求 Windows Hello…";
+    try {
+      // 后端最坏要在对话框上等 45s，前端必须比它长，否则对话框还在就报超时
+      const r = await helloAside(
+        () => api("POST", "/api/vault/hello-verify", {}, { timeoutMs: 55000 }));
+      if (r && r.ok) {
+        await unlockWithVault({ useHello: true });
+        return true;
+      }
+      const msg = (r && r.message) || "无法使用 Windows Hello，请改用应用密码";
+      if (status) status.textContent = msg;
+      log(msg, "warn");
+      setLockMode("password");
+      return false;
+    } catch (e) {
+      if (status) status.textContent = e.error || e.message || "Hello 请求失败";
+      setLockMode("password");
+      return false;
+    }
+  }
+
+  async function unlockWithVault(opts) {
+    const password = ($("app-lock-password") || {}).value || "";
+    const recovery = ($("app-lock-recovery") || {}).value || "";
+    const errBox = $("app-lock-error");
+    const vs = await api("GET", "/api/vault/status");
+    if (opts && opts.useHello) {
+      // Hello 已在上一步验证过：只解 DEK，不再弹第二次
+      try {
+        const r = await api("POST", "/api/vault/unlock-device", { skip_hello: true });
+        if (r && r.selftest && r.selftest.detail) log("解密自检：" + r.selftest.detail, "info");
+        await finishUnlock();
+        return;
+      } catch (e) {
+        if (errBox) errBox.textContent = e.error || e.message || "解锁失败，请使用应用密码";
+        setLockMode("password");
+        return;
+      }
+    }
+    let r = null;
+    if (vs && vs.configured) {
+      r = await api("POST", "/api/vault/unlock", {
+        password: password || undefined,
+        recovery_code: recovery || undefined,
+      });
+    } else {
+      r = await api("POST", "/api/app-lock/unlock", { password });
+    }
+    if (r && r.selftest && r.selftest.detail) log("解密自检：" + r.selftest.detail, "info");
+    await finishUnlock();
+  }
+
+  async function finishUnlock() {
+    vaultUnlockedCached = true;
+    const errBox = $("app-lock-error");
+    if (errBox) errBox.textContent = "";
+    showLockScreen(false);
+    helloTried = false;
+    log("应用已解锁", "ok");
+    await syncAfterUnlock();
+    await refreshAppLock();
+    hideOnboardingModal();          // 初始化已完成：别让设置密码那个弹窗在解锁后还挂着
+    if (pendingHelloBind) {
+      pendingHelloBind = false;
+      suggestHelloBind = false;     // 反正马上要绑，不用再引导
+      log("解锁完成，正在完成 Windows Hello 绑定…", "info");
+      completeHelloBind();
+    } else if (suggestHelloBind) {
+      suggestHelloBind = false;
+      showHelloSuggest();
+    }
+  }
+
+  // 解锁后立刻把连接状态、统计与各面板刷到当前值 —— 否则界面还停在「未连接」
+  async function syncAfterUnlock() {
+    await checkConn();
+    await refreshStats();
+    try { await refreshOrganizationReadiness(); } catch (_) {}
+    try { await refreshTree(); } catch (_) {}
+    try { await loadFolderMerge(); } catch (_) {}
+    if (folderProfileListLoaded) {
+      try { await loadFolderProfiles(); } catch (_) {}
+    }
+  }
+
+  async function beginUnlockFlow() {
+    if (helloTried) return;
+    helloTried = true;
+    const auto = !helloAutoConsumed;
+    helloAutoConsumed = true;
+    let bound = false;
+    try {
+      const vs = await api("GET", "/api/vault/status");
+      bound = !!(vs && vs.has_device_wrap);
+    } catch (_) {}
+    setHelloAvailable(bound);
+    if (!bound) {
+      // 未绑定 Windows Hello：不自动认证，直接密码/恢复码
+      setLockMode("password");
+      return;
+    }
+    setLockMode("hello");
+    if (auto) {
+      await tryWindowsHelloAuto();
+    } else {
+      // 手动锁定后不再自动弹验证，等用户自己点按钮
+      const status = $("lock-hello-status");
+      if (status) status.textContent = "点击上方按钮进行 Windows Hello 验证";
+    }
+  }
+
+  async function submitUnlock() {
+    try {
+      await unlockWithVault({});
+    } catch (e) {
+      const errBox = $("app-lock-error");
+      if (errBox) errBox.textContent = e.error || e.message || "解锁失败";
+    }
+  }
+
+  async function refreshAppLock() {
+    try {
+      const st = await api("GET", "/api/app-lock/status");
+      const vs = await api("GET", "/api/vault/status");
+      const vaultLocked = !!(vs && vs.configured && vs.onboarding_complete && !vs.unlocked);
+      vaultUnlockedCached = !vaultLocked;
+      const appLocked = !!(st.password_set && !st.unlocked);
+      showLockScreen(vaultLocked || appLocked);
+      const statusText = $("app-lock-status-text");
+      if (statusText) {
+        if (vs && vs.configured) {
+          statusText.textContent = vs.unlocked
+            ? "已设置应用密码 · 当前已解锁。可修改密码。"
+            : "已设置应用密码 · 当前已锁定，请先解锁。";
+        } else if (st.password_set) {
+          statusText.textContent = st.unlocked
+            ? "已设置应用密码 · 当前已解锁" : "已设置应用密码 · 当前已锁定";
+        } else {
+          statusText.textContent = "尚未设置应用密码。请先完成首次初始化。";
+        }
+      }
+      const remember = $("app-lock-remember");
+      if (remember) remember.checked = !!st.auto_unlock_available;
+      return { ...st, vault: vs };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function openAppLockModal() {
+    if (!lockModal) return;
+    lockModal.style.display = "flex";
+    const cur = $("app-lock-current");
+    const neu = $("app-lock-new");
+    if (cur) cur.value = "";
+    if (neu) neu.value = "";
+    refreshAppLock();
+  }
+
+  function closeAppLockModal() {
+    if (lockModal) lockModal.style.display = "none";
+  }
+
+  async function saveAppLock() {
+    const current = ($("app-lock-current") || {}).value || "";
+    const next = ($("app-lock-new") || {}).value || "";
+    const autoUnlock = !!($("app-lock-remember") || {}).checked;
+    try {
+      const vs = await api("GET", "/api/vault/status");
+      if (vs && vs.configured) {
+        if (!next) {
+          log("请填写新密码（至少 6 位）", "warn");
+          return;
+        }
+        await api("POST", "/api/vault/set-password", {
+          password: next, current_password: "",
+        });
+        log("应用密码已更新", "ok");
+        closeAppLockModal();
+        refreshAppLock();
+        return;
+      }
+      const st = await api("GET", "/api/app-lock/status");
+      if (!next && st.password_set) {
+        log("未填写新密码，仅更新自动解锁选项", "info");
+        return;
+      }
+      if (!next && !st.password_set) {
+        log("请填写至少 6 位的应用密码", "warn");
+        return;
+      }
+      await api("POST", "/api/app-lock/set-password", {
+        password: next, current_password: current, auto_unlock: autoUnlock,
+      });
+      log("应用密码已保存", "ok");
+      closeAppLockModal();
+      refreshAppLock();
+    } catch (e) {
+      log(e.error || e.message || "保存应用密码失败", "err");
+    }
+  }
+
+  async function removeAppLock() {
+    const current = ($("app-lock-current") || {}).value || "";
+    try {
+      await api("POST", "/api/app-lock/remove", { current_password: current });
+      log("已移除应用密码", "warn");
+      closeAppLockModal();
+      refreshAppLock();
+    } catch (e) {
+      log(e.error || e.message || "移除失败", "err");
+    }
+  }
+
+  if ($("app-lock-btn")) $("app-lock-btn").addEventListener("click", () => openSettings("security"));
+  if ($("app-lock-close")) $("app-lock-close").addEventListener("click", closeAppLockModal);
+  if ($("app-lock-unlock-btn")) $("app-lock-unlock-btn").addEventListener("click", submitUnlock);
+  if ($("lock-hello-btn")) $("lock-hello-btn").addEventListener("click", () => {
+    if (!helloAvailable) {
+      log("尚未绑定 Windows Hello，请用应用密码解锁", "warn");
+      setLockMode("password");
+      return;
+    }
+    tryWindowsHelloAuto();
+  });
+  if ($("lock-other-ways")) $("lock-other-ways").addEventListener("click", () => setLockMode("password"));
+  if ($("lock-forgot")) $("lock-forgot").addEventListener("click", () => setLockMode("recovery"));
+  if ($("lock-forgot2")) $("lock-forgot2").addEventListener("click", () => setLockMode("recovery"));
+  if ($("lock-back-pw")) $("lock-back-pw").addEventListener("click", () => setLockMode("password"));
+  if ($("lock-back-hello")) $("lock-back-hello").addEventListener("click", () => setLockMode("hello"));
+  if ($("lock-recovery-submit")) {
+    $("lock-recovery-submit").addEventListener("click", async () => {
+      const recovery = ($("app-lock-recovery") || {}).value || "";
+      const p1 = ($("lock-new-password") || {}).value || "";
+      const p2 = ($("lock-new-password2") || {}).value || "";
+      const err = $("app-lock-error");
+      if (err) err.textContent = "";
+      if (p1.length < 6 || p1 !== p2) {
+        if (err) err.textContent = "新密码至少 6 位且两次一致";
+        return;
+      }
+      try {
+        await api("POST", "/api/vault/unlock", { recovery_code: recovery, password: p1 });
+        finishUnlock();
+        log("已通过恢复码重设密码并解锁", "ok");
+      } catch (e) {
+        if (err) err.textContent = e.error || e.message || "恢复失败";
+      }
+    });
+  }
+  if ($("app-lock-password")) {
+    $("app-lock-password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitUnlock();
+    });
+  }
+  if ($("app-lock-save")) $("app-lock-save").addEventListener("click", saveAppLock);
+  if ($("app-lock-remove")) $("app-lock-remove").addEventListener("click", removeAppLock);
+  refreshAppLock();
+
+  // ---------- 加密库 / 恢复码 ----------
+  function showVaultRecovery(code) {
+    const modal = $("vault-recovery-modal");
+    const codeEl = $("vault-recovery-code");
+    const saved = $("vault-recovery-saved");
+    const ok = $("vault-recovery-ok");
+    if (!modal) return;
+    if (codeEl) codeEl.textContent = code;
+    if (saved) saved.checked = false;
+    if (ok) ok.disabled = true;
+    modal.style.display = "flex";
+    if (saved && ok) saved.onchange = () => { ok.disabled = !saved.checked; };
+    const copy = $("vault-recovery-copy");
+    if (copy) copy.onclick = () => {
+      if (navigator.clipboard && code) navigator.clipboard.writeText(code).catch(() => {});
+    };
+    if (ok) ok.onclick = async () => {
+      try {
+        await api("POST", "/api/vault/complete-onboarding", {});
+        modal.style.display = "none";
+        // 初始化弹窗也要一起收掉：原来只关了恢复码弹窗，解锁后它还挂在屏幕上
+        hideOnboardingModal();
+        suggestHelloBind = true;   // 解锁后引导绑定 Windows Hello
+        log("恢复码已确认保存，加密库已上锁，请用密码解锁后使用", "ok");
+        await refreshAppLock();
+        showLockScreen(true);
+      } catch (e) {
+        log(e.error || e.message || "完成初始化失败", "err");
+      }
+    };
+  }
+
+  function hideOnboardingModal() {
+    const m = $("vault-onboarding-modal");
+    if (m) m.style.display = "none";
+  }
+
+  function showHelloSuggest() {
+    const m = $("hello-suggest-modal");
+    if (m) m.style.display = "flex";
+  }
+  // 事件只在这里绑一次（之前吃过「同一个按钮绑两份处理器」的亏）
+  if ($("hello-suggest-bind")) {
+    $("hello-suggest-bind").addEventListener("click", async () => {
+      const m = $("hello-suggest-modal");
+      if (m) m.style.display = "none";
+      await completeHelloBind();
+      updateHelloBtn();
+    });
+  }
+  if ($("hello-suggest-later")) {
+    $("hello-suggest-later").addEventListener("click", () => {
+      const m = $("hello-suggest-modal");
+      if (m) m.style.display = "none";
+      log("已跳过 Windows Hello 绑定，之后可在「设置 → 安全」里绑定", "info");
+    });
+  }
+
+  async function refreshVaultStatus() {
+    try { return await api("GET", "/api/vault/status"); } catch (e) { return null; }
+  }
+
+  window.__biliFavVault = { showRecovery: showVaultRecovery, refreshStatus: refreshVaultStatus };
+
+  async function maybeShowVaultOnboarding() {
+    const st = await refreshVaultStatus();
+    const modal = $("vault-onboarding-modal");
+    if (!modal) return;
+    if (st && st.configured) {
+      modal.style.display = "none";
+      return;
+    }
+    modal.style.display = "flex";
+    const err = $("vault-onboard-error");
+    const statusEl = $("vault-qr-status");
+    const midInput = $("vault-onboard-mid");
+    let qrTimer = null;
+
+    function setMid(mid) {
+      if (midInput) midInput.value = mid || "";
+      if (statusEl) {
+        statusEl.textContent = mid
+          ? `✅ 已登录，账号 mid=${mid}，请设置应用密码`
+          : "尚未登录，请扫码";
+      }
+    }
+
+    async function syncMidFromCookie() {
+      try {
+        const me = await api("GET", "/api/login/status");
+        let mid = me && me.mid;
+        if (!mid) {
+          const ck = await api("GET", "/api/cookie");
+          mid = ck && ck.mid;
+        }
+        if (mid) {
+          setMid(String(mid));
+          return String(mid);
+        }
+      } catch (_) { /* ignore */ }
+      return "";
+    }
+
+    async function generateVaultQr() {
+      const btn = $("vault-qr-btn");
+      const box = $("vault-qr-box");
+      const img = $("vault-qr-img");
+      if (statusEl) statusEl.textContent = "生成中 ...";
+      if (btn) btn.disabled = true;
+      try {
+        const r = await api("POST", "/api/login/qr/generate", undefined, { timeoutMs: 20000 });
+        if (!r || !r.ok) {
+          if (statusEl) statusEl.textContent = "失败：" + ((r && r.error) || "无法生成二维码");
+          return;
+        }
+        if (img) img.src = r.image;
+        if (box) box.style.display = "flex";
+        if (statusEl) statusEl.textContent = "请用手机 B 站 App 扫码登录";
+        if (qrTimer) clearInterval(qrTimer);
+        qrTimer = setInterval(async () => {
+          try {
+            const p = await api("GET", "/api/login/qr/poll", undefined, { timeoutMs: 15000 });
+            if (p && p.status === "ok") {
+              let mid = p.mid || "";
+              if (!mid) mid = await syncMidFromCookie();
+              if (mid) {
+                if (qrTimer) clearInterval(qrTimer);
+                if (box) box.style.display = "none";
+                setMid(mid);
+                return;
+              }
+              if (statusEl) statusEl.textContent = "登录成功，正在读取账号 ID…";
+              return;
+            }
+            if (p && statusEl) statusEl.textContent = p.message || "等待扫码 ...";
+            if (p && p.status === "expired") {
+              if (qrTimer) clearInterval(qrTimer);
+              if (btn) btn.disabled = false;
+            }
+          } catch (_) { /* 忽略单次轮询失败 */ }
+        }, 1500);
+      } catch (e) {
+        if (statusEl) statusEl.textContent = e.error || e.message || "生成二维码失败";
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    const qrBtn = $("vault-qr-btn");
+    if (qrBtn) qrBtn.onclick = generateVaultQr;
+
+    // 已有 Cookie / 别处扫码成功：立刻同步 mid，并持续探测直到拿到
+    await syncMidFromCookie();
+    const midTimer = setInterval(async () => {
+      if (midInput && midInput.value) {
+        clearInterval(midTimer);
+        return;
+      }
+      const mid = await syncMidFromCookie();
+      if (mid) clearInterval(midTimer);
+    }, 2000);
+
+    if (submitHandlerBound) return;
+    submitHandlerBound = true;
+    const submit = $("vault-onboard-submit");
+    if (submit) {
+      submit.onclick = async () => {
+        const mid = ($("vault-onboard-mid") || {}).value || "";
+        const p1 = ($("vault-onboard-password") || {}).value || "";
+        const p2 = ($("vault-onboard-password2") || {}).value || "";
+        if (err) err.textContent = "";
+        if (!mid) {
+          if (err) err.textContent = "请先扫码登录 B 站账号";
+          return;
+        }
+        if (p1.length < 6) {
+          if (err) err.textContent = "应用密码至少 6 位";
+          return;
+        }
+        if (p1 !== p2) {
+          if (err) err.textContent = "两次输入的密码不一致";
+          return;
+        }
+        try {
+          const res = await api("POST", "/api/vault/onboarding", {
+            bound_mid: String(mid).trim(), password: p1,
+          });
+          modal.style.display = "none";
+          showVaultRecovery(res.recovery_code);
+        } catch (e) {
+          if (err) err.textContent = e.error || e.message || "初始化失败";
+        }
+      };
+    }
+  }
+  let submitHandlerBound = false;
+  maybeShowVaultOnboarding();
 
   function setUpdateStatus(message, state = "") {
     const box = $("update-status");
@@ -180,6 +755,12 @@
     return false;
   }
 
+  // 「最新版本」这一行以前没人写，永远停在「尚未检查」
+  const setLatestLabel = (text) => {
+    const el = $("about-latest");
+    if (el) el.textContent = text;
+  };
+
   async function checkForUpdates() {
     const button = $("check-updates");
     button.disabled = true;
@@ -191,16 +772,19 @@
       const currentVersion = result.current_version || "dev";
       $("app-version").textContent = `版本 ${currentVersion}`;
       if (result.version_comparable === false) {
+        setLatestLabel("开发构建不做比较");
         setUpdateStatus(`当前是开发构建（${currentVersion}），不做版本比较`, "");
         log(`当前 ${currentVersion} 不是正式发布版本，跳过更新比较；如需正式版请手动下载 Release 包`, "info");
         return;
       }
       if (!result.update_available) {
+        setLatestLabel(`${result.latest_version || currentVersion}（已是最新）`);
         setUpdateStatus(`已是最新版本（${currentVersion}）`, "ok");
         log(`版本检查完成：当前 ${currentVersion}，已是最新版本`, "ok");
         return;
       }
 
+      setLatestLabel(result.latest_version || "未知");
       log(`发现新版本 ${result.latest_version}（当前 ${currentVersion}）`, "info");
       if (!result.supports_self_update) {
         const status = $("update-status");
@@ -414,6 +998,7 @@
         fillModelSelect();
       }
       renderActiveModelInfo();
+      try { refreshModelLamp(); } catch (_) { /* 启动早期还没这盏灯 */ }
       if (c.scan_interval) $("scan-interval").value = String(c.scan_interval);
       if (c.write_interval) $("write-interval").value = String(c.write_interval);
       if (c.folder_merge_interval) $("merge-interval").value = String(c.folder_merge_interval);
@@ -518,7 +1103,7 @@
     } catch (e) { log("保存配置失败: " + (e.error || e.message), "err"); }
   });
 
-  $("load-stats").addEventListener("click", () => refreshStats());
+  if ($("load-stats")) $("load-stats").addEventListener("click", () => refreshStats());
 
   // ---------- 进度条 ----------
   function setProgress(el, id, done, total) {
@@ -788,54 +1373,121 @@
   });
 
   // ---------- 项目数据：导出 / 读取 / 清除 ----------
-  $("data-export-btn").addEventListener("click", () => {
+  if ($("data-export-btn")) $("data-export-btn").addEventListener("click", () => {
     log("导出项目数据 ...（浏览器将下载 JSON 文件）");
     window.location.href = "/api/data/export";
   });
 
-  $("data-import-btn").addEventListener("click", () => $("data-file").click());
+  if ($("data-import-btn")) $("data-import-btn").addEventListener("click", () => { const f = $("data-file"); if (f) f.click(); });
 
-  $("data-file").addEventListener("change", async (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    try {
-      const bundle = JSON.parse(await f.text());
-      const n = (o) => (o && typeof o === "object") ? Object.keys(o).length : 0;
-      const msg = `确定用「${f.name}」覆盖当前项目数据吗？\n\n` +
-        `· 收藏夹 ${(bundle.folders || []).length}\n` +
-        `· 视频 ${n(bundle.videos)}\n` +
-        `· 分析 ${n(bundle.analysis)}\n` +
-        `· 方案 ${n(bundle.plan)}\n` +
-        `· 已扫完的收藏夹 ${(bundle.scan_done || []).length}`;
-      if (!confirm(msg)) return;
-      const r = await api("POST", "/api/data/import", { bundle });
-      log(`已导入项目数据：${JSON.stringify(r.stats)}`, "ok");
-      refreshStats();
-    } catch (err) {
-      log("导入失败: " + (err.error || err.message), "err");
-    } finally {
-      e.target.value = "";
+  // 旧的 JSON 单独导入监听器已移除：统一走 dataImportZip（按扩展名分流 zip/json）
+
+  // ---------- 数据任务弹窗（导出 / 导入 / 清除 共用：确认 → 进度 → 完成） ----------
+  const dataTask = (() => {
+    const modal = $("data-task-modal");
+    let resolveOk = null;
+    let abortFn = null;
+    function paint(o) {
+      $("data-task-title").textContent = o.title || "";
+      $("data-task-text").textContent = o.text || "";
+      $("data-task-detail").textContent = o.detail || "";
+      const bar = $("data-task-bar");
+      bar.style.display = o.bar ? "block" : "none";
+      bar.value = 0;
+      const ok = $("data-task-ok");
+      ok.textContent = o.okText || "确定";
+      ok.style.display = o.showOk === false ? "none" : "";
+      const cancel = $("data-task-cancel");
+      cancel.textContent = o.cancelText || "取消";
+      cancel.style.display = o.showCancel === false ? "none" : "";
+      modal.style.display = "flex";
     }
-  });
+    function settle(value) {
+      const r = resolveOk;
+      resolveOk = null;
+      abortFn = null;
+      modal.style.display = "none";
+      if (r) r(value);
+    }
+    $("data-task-ok").addEventListener("click", () => settle(true));
+    $("data-task-cancel").addEventListener("click", () => {
+      // 进度阶段点取消 = 中断任务（弹窗留给调用方收尾）；确认阶段 = 返回 false
+      if (abortFn) {
+        const f = abortFn;
+        abortFn = null;
+        f();
+        return;
+      }
+      settle(false);
+    });
+    $("data-task-x").addEventListener("click", () => $("data-task-cancel").click());
+    return {
+      confirm(o) {
+        return new Promise((resolve) => {
+          resolveOk = resolve;
+          paint(Object.assign({}, o, { showCancel: true }));
+        });
+      },
+      progress(o) {
+        abortFn = o.onCancel || null;
+        paint(Object.assign({}, o, { bar: true, showOk: false, showCancel: true }));
+        return {
+          set(pct, detail) {
+            const bar = $("data-task-bar");
+            if (typeof pct === "number") bar.value = Math.max(0, Math.min(100, pct));
+            if (detail !== undefined) $("data-task-detail").textContent = detail;
+          },
+        };
+      },
+      done(o) {
+        paint(Object.assign({}, o, { showCancel: false, okText: o.okText || "确定" }));
+      },
+    };
+  })();
+  const fmtBytes = (n) => {
+    const v = Number(n) || 0;
+    if (v < 1024) return `${v} B`;
+    if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+    if (v < 1024 * 1024 * 1024) return `${(v / 1048576).toFixed(1)} MB`;
+    return `${(v / 1073741824).toFixed(2)} GB`;
+  };
 
   const clearModal = $("clear-modal");
-  $("data-clear-btn").addEventListener("click", () => { clearModal.style.display = "flex"; });
+  if ($("data-clear-btn")) $("data-clear-btn").addEventListener("click", () => { clearModal.style.display = "flex"; });
   $("clear-close").addEventListener("click", () => { clearModal.style.display = "none"; });
   $("clear-all").addEventListener("click", () => document.querySelectorAll(".clear-options input").forEach(x => x.checked = true));
   $("clear-none").addEventListener("click", () => document.querySelectorAll(".clear-options input").forEach(x => x.checked = false));
   $("clear-confirm").addEventListener("click", async () => {
-    const scopes = [...document.querySelectorAll(".clear-options input:checked")].map(x => x.value);
-    if (!scopes.length) { log("请至少选择一类数据", "warn"); return; }
-    if (!confirm("确定清除已选数据？清除前会自动备份。")) return;
+    const picked = [...document.querySelectorAll(".clear-options input:checked")];
+    if (!picked.length) { log("请至少选择一类数据", "warn"); return; }
+    const scopes = picked.map(x => x.value);
+    const names = picked.map(x => (x.closest("label")?.textContent || x.value).trim());
+    const ok = await dataTask.confirm({
+      title: "清除当前数据",
+      text: `将清除：${names.join("、")}。清除前会自动备份，此操作不可撤销。`,
+      okText: "确认清除",
+    });
+    if (!ok) return;
+    const bar = dataTask.progress({ title: "正在清除", text: "正在清除已选数据…" });
     try {
       const r = await api("POST", "/api/data/clear", { scopes });
-      log(`已清除：${r.cleared.join("、")}`, "warn"); clearModal.style.display = "none";
+      bar.set(100);
+      log(`已清除：${r.cleared.join("、")}`, "warn");
+      clearModal.style.display = "none";
+      dataTask.done({
+        title: "清除完成",
+        text: `已清除：${(r.cleared || []).join("、")}`,
+        detail: r.backup ? `清除前已自动备份到 ${r.backup}` : "",
+      });
       refreshStats(); loadFolderMerge();
       if (scopes.includes("folder_profile")) {
         await loadFolderProfiles();
         await refreshOrganizationReadiness();
       }
-    } catch (e) { log("清除失败: " + (e.error || e.message), "err"); }
+    } catch (e) {
+      dataTask.done({ title: "清除失败", text: (e.error || e.message || String(e)) });
+      log("清除失败: " + (e.error || e.message), "err");
+    }
   });
 
   // ---------- 扫码登录 ----------
@@ -933,6 +1585,43 @@
     } catch (e) { log("保存 Cookie 失败: " + e.message, "err"); }
   });
 
+  // ---------- 状态指示灯（模型 / 登录，挂在设置页各自的「测试」按钮旁）----------
+  // 侧栏收起时日志看不见，测试结果就无处可查，所以把结论直接标在按钮边上
+  function setLamp(id, state, text, short) {
+    const lamp = $(id);
+    if (!lamp) return;
+    lamp.className = "lamp" + (state ? " " + state : "");
+    const wrap = lamp.closest(".lamp-tag");
+    if (wrap) wrap.title = text;
+    const note = $(id + "-text");
+    if (note && short !== undefined) note.textContent = short;
+  }
+  function refreshLoginLamp() {
+    return api("GET", "/api/login/status").then((s) => {
+      const ok = !!(s && s.configured);
+      setLamp("lamp-login", ok ? "ok" : "err",
+        ok ? `B 站登录：已登录${s.mid ? `（mid=${s.mid}）` : ""}` : "B 站登录：未登录，扫码或填 Cookie 后再测",
+        ok ? `已登录${s.mid ? ` · mid=${s.mid}` : ""}` : "未登录");
+    }).catch(() => setLamp("lamp-login", "err", "B 站登录：状态未知", "状态未知"));
+  }
+  async function refreshModelLamp() {
+    // 锁屏启动时配置拉不到（403），解锁后没人再拉一次，缓存一直是空的 —— 自己补一次
+    if (!modelsCache.length) {
+      try { await loadConfig(); } catch (_) { /* 仍锁着就算了，先显示未知 */ }
+    }
+    let m = null;
+    try { m = typeof modelById === "function" ? modelById(activeModelId) : null; } catch (_) { m = null; }
+    const st = m && m.test_status;
+    const label = { ok: "已通过", fail: "失败", testing: "测试中", untested: "未测试" }[st] || "未知";
+    const state = st === "ok" ? "ok" : st === "fail" ? "err" : st === "testing" ? "testing" : "warn";
+    setLamp("lamp-model", m ? state : "", m
+      ? `模型 ${m.name}：${label}${m.test_message ? `（${m.test_message}）` : ""}`
+      : "模型：未选择，先在下方添加并选择模型",
+    m ? `${label}` : "未选择模型");
+  }
+  refreshLoginLamp();
+  refreshModelLamp();
+
   // ---------- 连接测试 ----------
   async function testCookie() {
     log("测试 Cookie 读取 ...");
@@ -941,6 +1630,7 @@
       if (r.ok) log("✅ " + r.message, "ok");
       else log("❌ Cookie 测试失败: " + r.error, "err");
     } catch (e) { log("❌ 请求失败: " + e.message, "err"); }
+    refreshLoginLamp();
   }
   $("test-cookie-qr").addEventListener("click", testCookie);
   $("test-cookie-manual").addEventListener("click", testCookie);
@@ -952,6 +1642,7 @@
       if (r.ok) log("✅ " + r.message, "ok");
       else log("❌ 模型连接失败: " + r.error, "err");
     } catch (e) { log("❌ 请求失败: " + e.message, "err"); }
+    refreshModelLamp();
   });
 
   // ---------- 扫描状态弹窗 ----------
@@ -1019,8 +1710,21 @@
   librarySortMode.value = localStorage.getItem("library-sort-mode") || "bili";
   librarySortDirection.value = localStorage.getItem("library-sort-direction") || "asc";
 
+  // 浏览器本体可整体挪窝：弹窗里一份，设置 → 收藏 里一份（同一份 DOM，避免两套状态）
+  const libraryBrowserRoot = $("library-browser");
+  const libraryBrowserHome = libraryBrowserRoot.parentElement;
+
+  function mountLibraryBrowser(host) {
+    if (libraryBrowserRoot.parentElement !== host) host.appendChild(libraryBrowserRoot);
+  }
+
   $("library-view-btn").addEventListener("click", async () => {
     libraryModal.style.display = "flex";
+    mountLibraryBrowser(libraryBrowserHome);
+    await loadLibraryBrowser();
+  });
+
+  async function loadLibraryBrowser() {
     $("library-meta").textContent = "正在读取本地收藏夹和扫描状态…";
     try {
       const [tree, directory, profileData] = await Promise.all([
@@ -1054,7 +1758,7 @@
       $("library-folders").textContent = "";
       $("library-items").textContent = "";
     }
-  });
+  }
   $("library-close").addEventListener("click", () => { libraryModal.style.display = "none"; });
   libraryModal.addEventListener("click", e => { if (e.target === libraryModal) libraryModal.style.display = "none"; });
 
@@ -3720,6 +4424,7 @@
     setManageStatus(`测试完成：成功 ${ok} · 失败 ${fail}`);
     await loadConfig();
     renderManageLists();
+    refreshModelLamp();      // 顶栏指示灯跟着测试结果走
   });
 
   // ---------- 初始化 ----------
@@ -3742,5 +4447,896 @@
     setInterval(checkConn, 10000);   // 仅更新连接指示灯，不写日志
     log("系统就绪。请先扫码登录（或手动输入 Cookie）→ 扫描 → 分析 → 定案 → 执行。");
   }
+
+  // ---------- 设置中心 ----------
+  function openSettings(tab) {
+    const panel = $("settings-panel");
+    if (!panel) return;
+    panel.hidden = false;
+    if (tab) selectSettingsTab(tab);
+    refreshSettingsData();
+  }
+  function closeSettings() {
+    const panel = $("settings-panel");
+    if (panel) panel.hidden = true;
+  }
+  // 点面板以外的地方、或按 Esc 也能关掉设置
+  document.addEventListener("pointerdown", (e) => {
+    const panel = $("settings-panel");
+    if (!panel || panel.hidden) return;
+    const t = e.target;
+    // 例外只有两类：齿轮自己（它是开关，这里先关掉的话紧接着的 click 又会打开），
+    // 以及任何对话框 —— .modal 是 position:fixed; inset:0 的全屏遮罩，所以「点对话框内部」
+    // 与「点它的遮罩」都落在 .modal 里；不排除它们，从设置里打开的弹窗一被点击，
+    // 面板就会在背后消失（导出/导入、管理模型、清除数据这些都是从设置里开的）。
+    if (panel.contains(t)
+        || (t.closest && t.closest('.modal'))
+        || (t.closest && t.closest("#settings-btn, #rail-settings"))) return;
+    closeSettings();
+  });
+  document.addEventListener("keydown", (e) => {
+    const panel = $("settings-panel");
+    if (e.key === "Escape" && panel && !panel.hidden) closeSettings();
+  });
+  // 壳层托盘「设置」的语义是「打开」（不是开关），走专用事件而不是模拟点击
+  document.addEventListener("shell:open-settings", () => openSettings());
+  async function showFavoritesInSettings() {
+    const host = $("settings-favorites-host");
+    if (!host) return;
+    mountLibraryBrowser(host);
+    renderFavoritesOverview(host).catch(() => {});
+    await loadLibraryBrowser();
+  }
+
+  // 概览数字只是附带信息，失败也不影响下面的浏览器
+  async function renderFavoritesOverview(host) {
+    const status = await api("GET", "/api/status");
+    const st = (status || {}).stats || {};
+    const overview = document.createElement("div");
+    overview.className = "fav-overview";
+    [["收藏夹", st.folders], ["本地视频", st.videos],
+     ["已分析", st.analyzed], ["已定案", st.planned]].forEach(([label, value]) => {
+      const cell = document.createElement("div");
+      cell.className = "fav-stat";
+      const num = document.createElement("b");
+      num.textContent = value ?? "—";
+      const name = document.createElement("span");
+      name.textContent = label;
+      cell.append(num, name);
+      overview.appendChild(cell);
+    });
+    host.querySelector(":scope > .fav-overview")?.remove();
+    host.prepend(overview);
+  }
+  function selectSettingsTab(name) {
+    document.querySelectorAll(".settings-nav-item").forEach((el) => {
+      el.classList.toggle("active", el.getAttribute("data-tab") === name);
+    });
+    document.querySelectorAll(".settings-tab").forEach((el) => {
+      const on = el.getAttribute("data-tab-panel") === name;
+      el.hidden = !on;
+    });
+    if (name === "data") {
+      refreshDataPath();
+      refreshUsage();
+    }
+    if (name === "favorites") showFavoritesInSettings();
+    // 「当前版本」搬到了独立的「应用更新」页，进这两页时都同步一次
+    if (name === "update" || name === "about") {
+      const av = $("about-version"), pv = $("app-version");
+      if (av && pv) av.textContent = pv.textContent;
+    }
+    if (name === "advanced") loadPromptFields();
+    if (name === "model") {
+      // 进入「模型」页时刷新供应商/模型列表
+      (async () => {
+        try {
+          await loadConfig();
+          const activeModel = modelById(activeModelId);
+          manageSelectedProviderId = activeModel
+            ? activeModel.provider_id
+            : (providersCache[0] || {}).id || "";
+          if (activeModel) openModelForm(activeModel.id);
+          else closeModelForm();
+          renderManageLists({ resetModelScroll: true, scrollToActive: Boolean(activeModel) });
+        } catch (_) {}
+      })();
+    }
+  }
+
+  async function refreshSettingsData() {
+    // 账号
+    try {
+      const st = await api("GET", "/api/login/status");
+      const box = $("settings-account-info");
+      if (box) {
+        box.innerHTML = st && st.configured
+          ? `<div>已登录 · B 站 <b>mid=${st.mid || "未知"}</b></div>`
+          : "<div>尚未登录 B 站账号</div>";
+      }
+    } catch (e) {
+      const box = $("settings-account-info");
+      if (box) box.textContent = e.error || e.message || "读取账号失败";
+    }
+    // 模型概览
+    try {
+      const cfg = await api("GET", "/api/config");
+      const box = $("settings-model-overview");
+      if (box) {
+        box.innerHTML = `
+          <div>当前模型：<b>${cfg.model || "未配置"}</b></div>
+          <div class="muted">${cfg.base_url || ""}</div>
+          <div class="muted">输出上限 ${cfg.analyze_max_tokens || "-"} · 上下文 ${cfg.active_context_tokens || cfg.model_context_tokens || "-"}</div>`;
+      }
+    } catch (e) {
+      const box = $("settings-model-overview");
+      if (box) box.textContent = e.error || e.message || "读取模型配置失败";
+    }
+    // 安全
+    try {
+      const vs = await api("GET", "/api/vault/status");
+      const box = $("settings-security-status");
+      if (box) {
+        box.textContent = vs && vs.configured
+          ? (vs.unlocked ? "加密库：已设置应用密码 · 已解锁" : "加密库：已设置应用密码 · 未解锁")
+          : "加密库：尚未初始化";
+      }
+      const hello = $("settings-sec-hello-state");
+      if (hello && vs) {
+        if (vs.has_device_wrap) {
+          hello.textContent = "已绑定";
+          hello.classList.remove("muted");
+          hello.style.color = "var(--green)";
+        } else {
+          hello.textContent = vs.unlocked ? "未绑定" : "未绑定（需先解锁）";
+          hello.classList.add("muted");
+          hello.style.color = "";
+        }
+      }
+    } catch (_) {}
+    // 高级默认值
+    loadPromptFields();
+  }
+
+  async function loadPromptFields() {
+    const map = [
+      ["prompt-profile", "prompt_profile"],
+      ["prompt-analyze", "prompt_analyze"],
+      ["prompt-merge", "prompt_merge"],
+      ["conf-profile", "confidence_profile_min"],
+      ["conf-analyze", "confidence_analyze_min"],
+      ["conf-merge", "confidence_merge_min"],
+    ];
+    try {
+      const [cfg, defRes] = await Promise.all([
+        api("GET", "/api/config"),
+        api("GET", "/api/prompts/defaults"),
+      ]);
+      const defaults = (defRes && defRes.defaults) || {};
+      for (const [elId, key] of map) {
+        const el = $(elId);
+        if (!el) continue;
+        const hasUser = cfg[key] !== undefined && cfg[key] !== null && cfg[key] !== "";
+        el.value = hasUser ? cfg[key] : (defaults[key] ?? el.value);
+      }
+    } catch (_) {}
+  }
+
+  // 齿轮是开关：面板开着时再点一次就收起（左侧图标栏的其它按钮与空白处本来就会关掉面板）
+  if ($("settings-btn")) $("settings-btn").addEventListener("click", () => {
+    const panel = $("settings-panel");
+    if (panel && !panel.hidden) closeSettings();
+    else openSettings();
+  });
+  if ($("settings-close")) $("settings-close").addEventListener("click", closeSettings);
+  if ($("settings-nav")) {
+    $("settings-nav").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-tab]");
+      if (btn) selectSettingsTab(btn.getAttribute("data-tab"));
+    });
+  }
+  if ($("settings-manage-models")) {
+    $("settings-manage-models").addEventListener("click", () => {
+      selectSettingsTab("model");
+      migrateMainPanelsIntoSettings();
+    });
+  }
+  if ($("settings-open-library")) {
+    $("settings-open-library").addEventListener("click", () => {
+      const open = $("open-library") || $("library-open") || document.querySelector("[id*=library]");
+      // 优先走既有查看本地内容按钮
+      const btn = document.querySelector('button[id*="library"], button[title*="本地"]');
+      if (btn && btn.id !== "settings-open-library") btn.click();
+      else log("请使用主界面「查看本地内容」按钮", "info");
+    });
+  }
+  if ($("settings-sec-reset")) {
+    $("settings-sec-reset").addEventListener("click", async () => {
+      const cur = ($("settings-sec-current") || {}).value || "";
+      const p1 = ($("settings-sec-new") || {}).value || "";
+      const p2 = ($("settings-sec-new2") || {}).value || "";
+      if (p1.length < 6 || p1 !== p2) {
+        log("新密码至少 6 位且两次一致", "warn");
+        return;
+      }
+      try {
+        await api("POST", "/api/vault/set-password", {
+          password: p1, current_password: cur,
+        });
+        log("应用密码已重置", "ok");
+        if ($("settings-sec-current")) $("settings-sec-current").value = "";
+        if ($("settings-sec-new")) $("settings-sec-new").value = "";
+        if ($("settings-sec-new2")) $("settings-sec-new2").value = "";
+        refreshSettingsData();
+      } catch (e) {
+        log(e.error || e.message || "重置密码失败", "err");
+      }
+    });
+  }
+  async function completeHelloBind() {
+    const st = $("settings-sec-hello-state");
+    const setState = (text, tone) => {
+      if (!st) return;
+      st.textContent = text;
+      st.classList.remove("muted");
+      st.style.color = tone === "ok" ? "var(--green)" : tone === "err" ? "var(--danger)" : "";
+      if (!tone) st.classList.add("muted");
+    };
+    setState("正在请求 Windows Hello…", "");
+    try {
+      await helloAside(() => api("POST", "/api/vault/bind-device", {}));
+      const vs = await api("GET", "/api/vault/status");
+      if (vs && vs.has_device_wrap) setState("已绑定", "ok");
+      setHelloAvailable(!!(vs && vs.has_device_wrap));
+      log("Windows Hello 绑定成功", "ok");
+      updateHelloBtn();
+      refreshSettingsData();
+      return true;
+    } catch (e) {
+      const msg = e.error || e.message || "绑定失败";
+      setState(msg, "err");
+      log(msg, "err");
+      return false;
+    }
+  }
+  if ($("settings-sec-hello")) {
+    // 曾经这里还挂过第二个 click 处理函数，一次点击会跑两遍、弹两次 Windows Hello —— 已合并到下面唯一那个
+    $("settings-sec-hello").addEventListener("click", async () => {
+      try {
+        const vs = await api("GET", "/api/vault/status");
+        if (!vs || !vs.configured) {
+          log("请先设置应用密码", "warn");
+          return;
+        }
+        if (vs.has_device_wrap) {
+          if (!vs.unlocked) {
+            log("请先解锁加密库后再解绑 Windows Hello", "warn");
+            showLockScreen(true);
+            return;
+          }
+          await api("POST", "/api/vault/unbind-device", {});
+          log("已解绑 Windows Hello", "ok");
+          setHelloAvailable(false);
+          updateHelloBtn();
+          return;
+        }
+        if (!vs.unlocked) {
+          // 绑定需要先解锁一次，解锁成功后自动继续
+          pendingHelloBind = true;
+          const st = $("settings-sec-hello-state");
+          if (st) {
+            st.textContent = "请先解锁一次，解锁后自动完成绑定";
+            st.classList.remove("muted");
+            st.style.color = "";
+          }
+          log("请先解锁加密库（一次即可），解锁后将自动完成 Windows Hello 绑定", "warn");
+          showLockScreen(true);
+          return;
+        }
+        await completeHelloBind();
+        updateHelloBtn();
+      } catch (e) {
+        log(e.error || e.message || "操作失败", "err");
+      }
+    });
+    updateHelloBtn();
+  }
+  if ($("settings-save-advanced")) {
+    $("settings-save-advanced").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/config", {
+          prompt_profile: ($("prompt-profile") || {}).value || "",
+          prompt_analyze: ($("prompt-analyze") || {}).value || "",
+          prompt_merge: ($("prompt-merge") || {}).value || "",
+          confidence_profile_min: Number(($("conf-profile") || {}).value || 0),
+          confidence_analyze_min: Number(($("conf-analyze") || {}).value || 0),
+          confidence_merge_min: Number(($("conf-merge") || {}).value || 0),
+        });
+        if ($("settings-advanced-state")) $("settings-advanced-state").textContent = "已保存";
+        log("高级设置已保存", "ok");
+      } catch (e) {
+        log(e.error || e.message || "保存失败", "err");
+      }
+    });
+  }
+  async function saveOnePrompt(kind) {
+    const pKey = kind === "profile" ? "prompt_profile" : kind === "analyze" ? "prompt_analyze" : "prompt_merge";
+    const cKey = kind === "profile" ? "confidence_profile_min" : kind === "analyze" ? "confidence_analyze_min" : "confidence_merge_min";
+    const pEl = $(kind === "profile" ? "prompt-profile" : kind === "analyze" ? "prompt-analyze" : "prompt-merge");
+    const cEl = $(kind === "profile" ? "conf-profile" : kind === "analyze" ? "conf-analyze" : "conf-merge");
+    try {
+      await api("POST", "/api/config", {
+        [pKey]: (pEl && pEl.value) || "",
+        [cKey]: Number((cEl && cEl.value) || 0),
+      });
+      if ($("settings-advanced-state")) $("settings-advanced-state").textContent = "本项已保存";
+    } catch (e) {
+      log(e.error || e.message || "保存失败", "err");
+    }
+  }
+  async function resetOnePrompt(kind) {
+    try {
+      const defRes = await api("GET", "/api/prompts/defaults");
+      const d = (defRes && defRes.defaults) || {};
+      const pEl = $(kind === "profile" ? "prompt-profile" : kind === "analyze" ? "prompt-analyze" : "prompt-merge");
+      const cEl = $(kind === "profile" ? "conf-profile" : kind === "analyze" ? "conf-analyze" : "conf-merge");
+      const pKey = kind === "profile" ? "prompt_profile" : kind === "analyze" ? "prompt_analyze" : "prompt_merge";
+      const cKey = kind === "profile" ? "confidence_profile_min" : kind === "analyze" ? "confidence_analyze_min" : "confidence_merge_min";
+      if (pEl) pEl.value = d[pKey] || "";
+      if (cEl) cEl.value = d[cKey] ?? 0.5;
+      await api("POST", "/api/config", { [pKey]: "", [cKey]: d[cKey] ?? 0.5 });
+      log("本项已恢复默认", "ok");
+    } catch (e) {
+      log(e.error || e.message || "恢复默认失败", "err");
+    }
+  }
+  if ($("save-prompt-profile")) $("save-prompt-profile").onclick = () => saveOnePrompt("profile");
+  if ($("save-prompt-analyze")) $("save-prompt-analyze").onclick = () => saveOnePrompt("analyze");
+  if ($("save-prompt-merge")) $("save-prompt-merge").onclick = () => saveOnePrompt("merge");
+  if ($("reset-prompt-profile")) $("reset-prompt-profile").onclick = () => resetOnePrompt("profile");
+  if ($("reset-prompt-analyze")) $("reset-prompt-analyze").onclick = () => resetOnePrompt("analyze");
+  if ($("reset-prompt-merge")) $("reset-prompt-merge").onclick = () => resetOnePrompt("merge");
+  if ($("settings-reset-all-prompts")) {
+    $("settings-reset-all-prompts").onclick = async () => {
+      await resetOnePrompt("profile");
+      await resetOnePrompt("analyze");
+      await resetOnePrompt("merge");
+      if ($("settings-advanced-state")) $("settings-advanced-state").textContent = "已全部恢复默认";
+    };
+  }
+  // 数据目录
+  if ($("settings-data-open")) {
+    $("settings-data-open").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/data/open-folder");
+      } catch (e) {
+        log(e.error || e.message || "无法打开目录", "err");
+      }
+    });
+  }
+  async function refreshDataPath() {
+    try {
+      const p = await api("GET", "/api/data/paths");
+      const el = $("settings-data-path");
+      if (el) el.value = p.data_dir || "";
+    } catch (_) {}
+  }
+  if ($("settings-data-import")) $("settings-data-import").addEventListener("click", () => {
+    const input = $("data-file");
+    if (input) {
+      input.accept = ".zip,.json,application/zip,application/json";
+      input.click();
+    }
+  });
+  if ($("settings-data-clear")) $("settings-data-clear").addEventListener("click", () => {
+    const b = $("data-clear-btn"); if (b) b.click();
+  });
+  if ($("settings-theme-mode")) {
+    $("settings-theme-mode").addEventListener("change", () => {
+      const v = $("settings-theme-mode").value;
+      const top = $("theme-mode");
+      if (top) top.value = v;
+      top && top.dispatchEvent(new Event("change"));
+    });
+  }
+  const _openSettings = openSettings;
+  openSettings = function (tab) {
+    _openSettings(tab);
+    refreshDataPath();
+  };
+  if ($("settings-cookie-method")) {
+    $("settings-cookie-method").addEventListener("change", () => {
+      const qr = $("settings-cookie-method").value === "qr";
+      const a = $("settings-qr-panel");
+      const b = $("settings-manual-panel");
+      if (a) a.hidden = !qr;
+      if (b) b.hidden = qr;
+    });
+  }
+  if ($("lock-now-btn")) {
+    $("lock-now-btn").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/vault/lock", {});
+        vaultUnlockedCached = false;
+        await refreshAppLock();
+        showLockScreen(true);
+        log("已锁定", "warn");
+      } catch (e) {
+        log(e.error || e.message || "锁定失败", "err");
+      }
+    });
+  }
+
+  // 设置-账号：独立二维码/手动 Cookie（复用登录 API）
+  if ($("settings-qr-btn")) {
+    $("settings-qr-btn").addEventListener("click", async () => {
+      const status = $("settings-qr-status");
+      const box = $("settings-qr-box");
+      const img = $("settings-qr-img");
+      if (status) status.textContent = "生成中…";
+      try {
+        const r = await api("POST", "/api/login/qr/generate", undefined, { timeoutMs: 20000 });
+        if (!r || !r.ok) throw new Error((r && r.error) || "生成失败");
+        if (img) img.src = r.image;
+        if (box) box.style.display = "flex";
+        if (status) status.textContent = "请用手机 B 站 App 扫码";
+      } catch (e) {
+        if (status) status.textContent = e.error || e.message || "生成失败";
+      }
+    });
+  }
+  if ($("settings-save-cookie")) {
+    $("settings-save-cookie").addEventListener("click", async () => {
+      try {
+        await api("POST", "/api/cookie", { cookie_string: ($("settings-cookie") || {}).value || "" });
+        if ($("settings-cookie-state")) $("settings-cookie-state").textContent = "已保存";
+        refreshSettingsData();
+      } catch (e) {
+        if ($("settings-cookie-state")) $("settings-cookie-state").textContent = e.error || e.message || "保存失败";
+      }
+    });
+  }
+  if ($("settings-test-cookie")) {
+    $("settings-test-cookie").addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "/api/test/cookie");
+        log((r && r.ok) ? "Cookie 可用" : (r && r.error) || "Cookie 测试失败", (r && r.ok) ? "ok" : "err");
+        refreshSettingsData();
+      } catch (e) {
+        log(e.error || e.message || "Cookie 测试失败", "err");
+      }
+    });
+  }
+  if ($("settings-save-account")) {
+    $("settings-save-account").addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "/api/folders/refresh");
+        log("已刷新收藏夹目录：" + ((r && r.total != null) ? r.total : ""), "ok");
+        refreshSettingsData();
+        if (typeof refreshStats === "function") refreshStats();
+      } catch (e) {
+        log("刷新目录失败: " + (e.error || e.message), "err");
+      }
+    });
+  }
+
+  function migrateMainPanelsIntoSettings() {
+    const loginHost = $("settings-login-host");
+    const modelHost = $("settings-model-host");
+    const conn = $("connection-content");
+    if (conn && loginHost && !loginHost.dataset.filled) {
+      const sections = conn.querySelectorAll(":scope > .conn-section");
+      if (sections[0]) loginHost.appendChild(sections[0]);
+      if (sections[1] && modelHost) modelHost.appendChild(sections[1]);
+      loginHost.dataset.filled = "1";
+    }
+    // 管理模型：整块内容作为「模型」页与配置平级的一栏，去掉遮罩与关闭钮
+    const manageHost = $("settings-manage-host");
+    const manageModal = $("manage-modal");
+    if (manageHost && manageModal && !manageHost.dataset.filled) {
+      const box = manageModal.querySelector(".manage-modal-box, .modal-box");
+      if (box) {
+        manageHost.appendChild(box);
+        box.style.display = "block";
+        box.style.position = "static";
+        box.classList.add("manage-inline");
+        manageModal.style.display = "none";
+        manageHost.dataset.filled = "1";
+        // 关闭/完成按钮在内嵌后无意义
+        if ($("manage-close")) $("manage-close").hidden = true;
+        if ($("manage-done")) $("manage-done").hidden = true;
+        const closeBtn = box.querySelector("#manage-close, .modal-head .mini");
+        if (closeBtn) closeBtn.hidden = true;
+      }
+    }
+  }
+
+  const THEME_CYCLE = ["system", "light", "dark"];
+  const THEME_TITLE = { system: "主题：自动（半日/半夜间）", light: "主题：浅色", dark: "主题：深色" };
+  function setTheme(v) {
+    if (typeof applyTheme === "function") applyTheme(v);
+    const top = $("theme-mode");
+    if (top) top.value = v;
+    const btn = $("theme-cycle-btn");
+    if (btn) {
+      btn.title = THEME_TITLE[v] || THEME_TITLE.system;
+      document.querySelectorAll(".theme-ico").forEach((svg) => {
+        const kind = svg.classList.contains("theme-ico-auto") ? "system"
+          : svg.classList.contains("theme-ico-light") ? "light"
+          : "dark";
+        const show = kind === v;
+        svg.hidden = !show;
+        svg.style.display = show ? "" : "none";
+        if (show) svg.removeAttribute("hidden");
+        else svg.setAttribute("hidden", "");
+      });
+    }
+    document.querySelectorAll(".theme-pick").forEach((el) => {
+      el.classList.toggle("active", el.getAttribute("data-theme") === v);
+    });
+  }
+  if ($("theme-cycle-btn")) {
+    const cur = localStorage.getItem("theme-mode") || "system";
+    setTheme(cur);
+    $("theme-cycle-btn").addEventListener("click", () => {
+      const idx = THEME_CYCLE.indexOf(localStorage.getItem("theme-mode") || "system");
+      setTheme(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
+    });
+  }
+  document.querySelectorAll(".theme-pick").forEach((el) => {
+    el.addEventListener("click", () => setTheme(el.getAttribute("data-theme")));
+  });
+
+  if ($("settings-opacity")) {
+    // 毛玻璃模糊半径（px），替代整块 opacity 透明
+    const applyBlur = (px) => {
+      document.documentElement.style.setProperty("--panel-blur", px + "px");
+      const val = $("settings-opacity-val");
+      if (val) val.textContent = String(px);
+      try { localStorage.setItem("settings-blur", String(px)); } catch (_) {}
+    };
+    const savedBlur = (() => { try { return localStorage.getItem("settings-blur"); } catch (_) { return null; } })();
+    $("settings-opacity").value = savedBlur || "24";
+    applyBlur(Number($("settings-opacity").value));
+    $("settings-opacity").addEventListener("input", (e) => applyBlur(Number(e.target.value)));
+  }
+
+  async function refreshUsage() {
+    try {
+      const u = await api("GET", "/api/data/usage");
+      const fmt = (n) => {
+        if (n == null) return "—";
+        const gb = n / 1024 / 1024 / 1024;
+        return gb >= 1 ? gb.toFixed(1) + " GB" : Math.max(1, Math.round(n / 1024 / 1024)) + " MB";
+      };
+      // 单条进度：整条 = 磁盘总空间；蓝 = 已用；绿 = 本项目（叠在已用之上）
+      const diskBar = $("disk-used-bar");
+      const projBar = $("proj-used-bar");
+      const total = u.disk_total_bytes || 0;
+      if (diskBar && total) {
+        const pct = Math.min(100, (u.disk_used_bytes / total) * 100);
+        diskBar.style.width = pct.toFixed(2) + "%";
+        const meta = $("disk-used-meta");
+        if (meta) meta.textContent = fmt(u.disk_used_bytes) + " / " + fmt(total);
+      }
+      if (projBar && total) {
+        const pct = Math.max(0.4, Math.min(100, (u.project_bytes / total) * 100));
+        projBar.style.width = pct.toFixed(3) + "%";
+        const meta = $("proj-used-meta");
+        if (meta) meta.textContent = fmt(u.project_bytes);
+      } else if (projBar) {
+        projBar.style.width = "0%";
+      }
+    } catch (_) {}
+  }
+
+  setInterval(() => {
+    try { if (typeof refreshStats === "function") refreshStats(); } catch (_) {}
+    refreshUsage();
+    // 顶栏两盏灯也跟着刷（登录可能过期、模型可能换了）
+    try { refreshLoginLamp(); } catch (_) {}
+    try { refreshModelLamp(); } catch (_) {}
+  }, 60000);
+
+
+  // 数据：整目录 zip 导出（桌面壳走原生保存对话框 + 主进程落盘，带进度可取消）
+  let vaultUnlockedCached = true;
+  async function downloadExportZip() {
+    if (!vaultUnlockedCached) {
+      log("导出失败：加密库已锁定，请先解锁", "err");
+      const screen = document.getElementById("app-lock-screen");
+      if (screen) screen.hidden = false;
+      return;
+    }
+    const shell = window.shell;
+    if (!shell || !shell.data) {
+      // 浏览器模式：在用户点击手势内同步发起下载（await 会丢失手势，浏览器会静默拦截）
+      log("正在导出数据目录 zip…", "info");
+      const f = document.createElement("iframe");
+      f.hidden = true;
+      f.src = "/api/data/export-zip?t=" + Date.now();
+      document.body.appendChild(f);
+      setTimeout(() => { f.remove(); }, 30000);
+      log("已请求下载 zip（若未出现下载条，请看浏览器下载列表）", "ok");
+      return;
+    }
+    const picked = await shell.data.chooseSavePath();
+    if (!picked || !picked.ok) return;   // 用户在保存对话框里取消
+    const bar = dataTask.progress({
+      title: "导出项目数据",
+      text: "正在打包并保存…",
+      // 打包在后端先完成才开始传输，这段没有任何字节可报，先把话说清楚
+      detail: `正在打包数据（${picked.filePath}）…此包为明文备份，含 Cookie 与 API Key，请勿上传网盘`,
+      onCancel: () => shell.data.cancelDownload(),
+    });
+    shell.data.onProgress(({ received, total }) => {
+      const pct = total ? Math.round((received / total) * 100) : 0;
+      bar.set(pct, total
+        ? `${fmtBytes(received)} / ${fmtBytes(total)}（${pct}%）`
+        : fmtBytes(received));
+    });
+    let r;
+    try {
+      r = await shell.data.download({
+        url: `${location.origin}/api/data/export-zip?t=${Date.now()}`,
+        filePath: picked.filePath,
+        headers: API_TOKEN ? { "X-BiliFav-Token": API_TOKEN } : {},
+      });
+    } finally {
+      shell.data.offProgress();
+    }
+    if (r && r.ok) {
+      log(`已导出项目数据：${r.filePath}`, "ok");
+      dataTask.done({
+        title: "导出完成",
+        text: `已完成，保存到 ${r.filePath}`,
+        detail: fmtBytes(r.bytes),
+      });
+    } else if (r && r.canceled) {
+      dataTask.done({ title: "已取消", text: "导出已取消，未写入文件。" });
+    } else {
+      log("导出失败：" + ((r && r.error) || "未知错误"), "err");
+      dataTask.done({ title: "导出失败", text: (r && r.error) || "未知错误" });
+    }
+  }
+  if ($("settings-data-export")) {
+    $("settings-data-export").onclick = downloadExportZip;
+  }
+
+
+  // 数据导入：优先 zip（完整目录），JSON 兼容
+  (function dataImportZip() {
+    const input = $("data-file");
+    if (!input || input.dataset.zipHook) return;
+    input.dataset.zipHook = "1";
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      input.value = "";
+      if (!file) return;
+      const isZip = /\.zip$/i.test(file.name) || file.type === "application/zip";
+      const isJson = /\.json$/i.test(file.name) || file.type === "application/json";
+      if (!isZip && !isJson) {
+        log("请选择 .zip 或 .json 文件", "warn");
+        return;
+      }
+      const ok = await dataTask.confirm({
+        title: "读取项目数据",
+        text: isZip
+          ? "将用该 zip 覆盖本机数据目录，导入前会自动备份。"
+          : "将导入 JSON 项目数据（覆盖），导入前会自动备份。",
+        detail: file.name,
+        okText: "开始导入",
+      });
+      if (!ok) return;
+      const bar = dataTask.progress({ title: "正在导入", text: `正在读取 ${file.name}…` });
+      try {
+        if (isZip) {
+          const b64 = await new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(String(fr.result).split(",")[1] || "");
+            fr.onerror = reject;
+            fr.readAsDataURL(file);
+          });
+          bar.set(35, "正在解压并写入数据目录…");
+          const r = await api("POST", "/api/data/import-zip", { zip_b64: b64 });
+          bar.set(100);
+          const files = (r && r.files) || 0;
+          log(`已导入 zip：${files} 个文件` + (r && r.migrated ? `；${r.migrated}` : ""), "ok");
+          dataTask.done({
+            title: "导入完成",
+            text: `已从 ${file.name} 导入 ${files} 个文件`,
+            detail: (r && r.migrated) || "",
+          });
+        } else {
+          const text = await file.text();
+          const bundle = JSON.parse(text);
+          bar.set(60, "正在写入数据…");
+          await api("POST", "/api/data/import", { bundle, scope: "all" });
+          bar.set(100);
+          log("已导入 JSON 项目数据", "ok");
+          dataTask.done({ title: "导入完成", text: `已从 ${file.name} 导入 JSON 项目数据` });
+        }
+        refreshDataPath();
+        refreshUsage();
+      } catch (e) {
+        const msg = e.error || e.message || String(e);
+        log("导入失败：" + msg, "err");
+        dataTask.done({ title: "导入失败", text: msg });
+      }
+    });
+  })();
+
+
+  function updateHelloBtn() {
+    const btn = $("settings-sec-hello");
+    const st = $("settings-sec-hello-state");
+    if (!btn) return;
+    api("GET", "/api/vault/status").then((vs) => {
+      const on = !!(vs && vs.has_device_wrap);
+      btn.textContent = on ? "解绑 Windows Hello" : "绑定 Windows Hello";
+      if (st) {
+        st.textContent = on ? "已绑定" : "";
+        st.style.color = on ? "var(--green)" : "";
+      }
+    }).catch(() => {});
+  }
+  if ($("settings-sec-hello")) {
+    // 唯一的绑定/解绑入口（原来这里还挂着一份旧实现，一次点击会弹两次 Windows Hello）
+    updateHelloBtn();
+  }
+
+
+  // ===================== 侧栏（唯一实现） =====================
+  (function sidebar() {
+    const shell = $("sidebar-shell");
+    const title = $("sidebar-title");
+    const clearBtn = $("clear-log");
+    const logBody = $("log-body");
+    const termBody = $("terminal-body");
+    const pinBtn = $("pin-log");
+    const termStatus = $("term-status");
+
+    let pinned = true; // 默认钉住
+    let panel = "log";
+
+    function applyPin() {
+      if (shell) shell.classList.toggle("pinned", pinned);
+      if (pinBtn) {
+        pinBtn.classList.toggle("is-on", pinned);
+        pinBtn.title = pinned ? "已钉住（点击取消，悬停显示）" : "未钉住（悬停标签区展开）";
+      }
+      // 让设置面板等浮层跟随侧栏实际宽度，收起时不留白
+      document.documentElement.style.setProperty(
+        "--sidebar-shell-w", pinned ? "350px" : "30px");
+    }
+
+    function setPanel(name) {
+      panel = name;
+      if (title) title.textContent = name === "term" ? "终端" : "运行日志";
+      if (logBody) logBody.hidden = name !== "log";
+      if (termBody) termBody.hidden = name !== "term";
+      if (clearBtn) {
+        clearBtn.hidden = name === "term";
+        clearBtn.disabled = name === "term";
+      }
+      document.querySelectorAll(".sidebar-tab[data-panel]").forEach((el) => {
+        el.classList.toggle("active", el.getAttribute("data-panel") === name);
+      });
+      if (name === "term") {
+        startTerminal().catch(() => {});
+      }
+    }
+
+    document.querySelectorAll(".sidebar-tab[data-panel]").forEach((el) => {
+      el.addEventListener("click", () => setPanel(el.getAttribute("data-panel") || "log"));
+    });
+    if (pinBtn) {
+      pinBtn.addEventListener("click", () => {
+        pinned = !pinned;
+        applyPin();
+        log(pinned ? "侧栏已钉住" : "侧栏未钉住（悬停展开）", "info");
+      });
+    }
+    applyPin();
+    setPanel("log");
+
+    // ---- 嵌入式终端：xterm.js 渲染 + 主进程 node-pty ----
+    const termHost = $("term-host");
+    let xterm = null;
+    let fitAddon = null;
+    let termId = "main";
+    let termSpawned = false;
+    let termResizeTimer = null;
+
+    function termTheme() {
+      const light = document.documentElement.getAttribute("data-theme") === "light";
+      return light
+        ? { background: "#eef1f4", foreground: "#24303b", cursor: "#087f6b",
+            selectionBackground: "rgba(8,127,107,.28)" }
+        : { background: "#1a1a1a", foreground: "#f2f2f2", cursor: "#00c9a7",
+            selectionBackground: "rgba(0,201,167,.30)" };
+    }
+
+    function ensureTerminal() {
+      if (xterm || !termHost || typeof Terminal === "undefined") return;
+      xterm = new Terminal({
+        fontFamily: "Cascadia Code, Consolas, 'Courier New', monospace",
+        fontSize: 12,
+        cursorBlink: true,
+        scrollback: 5000,
+        theme: termTheme(),
+      });
+      fitAddon = new FitAddon.FitAddon();
+      xterm.loadAddon(fitAddon);
+      xterm.open(termHost);
+      xterm.onData(data => {
+        if (window.shell && window.shell.terminal) window.shell.terminal.write(termId, data);
+      });
+      xterm.onResize(({ cols, rows }) => {
+        if (window.shell && window.shell.terminal) window.shell.terminal.resize(termId, cols, rows);
+      });
+      if (window.shell && window.shell.terminal) {
+        window.shell.terminal.onData(m => {
+          if (m.id === termId && xterm) xterm.write(m.data);
+        });
+        window.shell.terminal.onExit(m => {
+          if (m.id !== termId) return;
+          termSpawned = false;
+          if (xterm) xterm.writeln("\r\n[进程已退出 code=" + m.code + "]");
+          if (termStatus) termStatus.textContent = "终端已退出，重新点开本面板可再启动";
+        });
+      }
+    }
+
+    function fitTerminal() {
+      if (!fitAddon || !xterm) return;
+      try { fitAddon.fit(); } catch (_) {}
+    }
+
+    async function startTerminal() {
+      if (!window.shell || !window.shell.terminal) {
+        if (termStatus) termStatus.textContent = "嵌入式终端需要桌面壳（浏览器模式下不可用）";
+        return;
+      }
+      ensureTerminal();
+      if (!xterm) return;
+      fitTerminal();
+      if (termSpawned) { xterm.focus(); return; }
+      if (termStatus) termStatus.textContent = "正在启动终端…";
+      const r = await window.shell.terminal.spawn({ id: termId, cols: xterm.cols, rows: xterm.rows });
+      if (!r || !r.ok) {
+        const msg = (r && (r.message || r.error)) || "终端启动失败";
+        if (termStatus) termStatus.textContent = msg;
+        xterm.writeln("\r\n[" + msg + "]");
+        return;
+      }
+      termSpawned = true;
+      if (termStatus) termStatus.textContent = (r.shell || "PowerShell") + " · 工作目录：数据目录";
+      xterm.focus();
+    }
+
+    // 明暗切换即时换配色；窗口缩放同步行列数
+    new MutationObserver(() => {
+      if (xterm) xterm.options.theme = termTheme();
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    window.addEventListener("resize", () => {
+      clearTimeout(termResizeTimer);
+      termResizeTimer = setTimeout(fitTerminal, 120);
+    });
+  })();
+
+
+  // 左侧图标栏：代理到既有按钮，原有绑定不动
+  $("rail-display")?.addEventListener("click", () => $("theme-cycle-btn")?.click());
+  $("rail-settings")?.addEventListener("click", () => $("settings-btn")?.click());
+  $("rail-lock")?.addEventListener("click", () => $("lock-now-btn")?.click());
+
+  // 设置子菜单「检查更新」→ 切到关于并触发检查
+  $("settings-nav-update")?.addEventListener("click", () => {
+    selectSettingsTab("about");
+    checkForUpdates();
+  });
+
   init();
+  migrateMainPanelsIntoSettings();
 })();

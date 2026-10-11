@@ -1,0 +1,32 @@
+name: CI
+
+# 代码质量门禁：主分支与每个 PR 都跑一遍测试。
+# 发布链路（release-windows.yml）是 tag 触发的，那边另有一道同样的门禁，
+# 保证「测试红也发得出包」这种情况不会再发生。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    # 必须跑在 Windows 上：测试覆盖 DPAPI/设备密钥、注册表安装标记、
+    # 路径与 PowerShell 相关行为，这些只在 Windows 下成立。
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-test.txt
+
+      # 与 requirements.txt 注释里给贡献者的命令保持一致
+      - name: Run tests
+        run: python -m unittest discover -s tests -v

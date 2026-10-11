@@ -1,0 +1,58 @@
+# Electron 壳（neo 线）的打包配置。
+#
+# 产物：`BiliFavOrganizer-neo-Setup-<版本>.exe`（NSIS 安装包）。
+# 便携版仍走 PyInstaller + Inno 那条老链路（控制台 + 浏览器），两条线并存：
+#   老线：BiliFavOrganizer-Setup-<版本>.exe / BiliFavOrganizer-Windows-x64-<版本>.zip
+#   neo：BiliFavOrganizer-neo-Setup-<版本>.exe
+#
+# 后端随包走：把 PyInstaller 冻结出的后端整目录塞进 resources/backend，
+# 壳启动时优先拉起它（见 electron/main.js 的 resolveFrozenBackend），
+# 所以装出来的 App 不再需要仓库源码树与系统 Python。
+# 注意：本阶段只解决「打出能跑的 App」；T9 验收里那条「更新器要重启壳自身、
+# 端口只能走壳的分配+握手」的重构不在这里。
+
+appId: com.martinsoaring.bilifavorganizer
+productName: BiliFav Organizer
+copyright: © 2026 Martin-soaring-dev
+
+directories:
+  output: dist/electron
+  buildResources: packaging
+
+# 只把壳自己和它真正需要的运行时依赖打进包
+files:
+  - electron/**/*
+  - package.json
+  - packaging/BiliFavOrganizer.ico    # 托盘/窗口图标，dev 与打包后同一条路径
+  - node_modules/node-pty/**/*
+  - node_modules/node-addon-api/**/*
+
+# 冻结的 Python 后端（先跑 pyinstaller 产出 dist/BiliFavOrganizer）
+extraResources:
+  - from: dist/BiliFavOrganizer
+    to: backend
+
+# node-pty 是原生模块：.node 从 asar 里加载不了，显式解包
+asarUnpack:
+  - node_modules/node-pty/prebuilds/**
+
+win:
+  icon: packaging/BiliFavOrganizer.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+# node-pty 是原生模块：electron-builder 默认会重建它（要 VS 工具链 + node-gyp），
+# 而 node-pty 1.1.0 自带与 Electron 44（ABI 149）匹配的预编译产物、实测可直接加载，
+# 所以关掉重建。注意它是根级选项，不属于 win。
+npmRebuild: false
+
+nsis:
+  # 与老安装包同样的策略：非一键、默认免管理员、可改目录、建桌面快捷方式
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: B站收藏夹智能整理
+  artifactName: BiliFavOrganizer-neo-Setup-${version}.${ext}
