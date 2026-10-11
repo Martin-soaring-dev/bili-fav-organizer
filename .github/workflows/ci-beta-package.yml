@@ -40,14 +40,14 @@ jobs:
       - name: Build Electron neo NSIS installer (not published)
         shell: pwsh
         run: |
-          npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never "-c.extraMetadata.version=0.209.0-beta.1"
+          npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never "-c.extraMetadata.version=0.209.0-beta.2"
           if ($LASTEXITCODE -ne 0) { throw "Electron builder failed" }
-          if (-not (Test-Path "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.1.exe")) {
+          if (-not (Test-Path "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.2.exe")) {
             throw "Expected beta installer missing"
           }
       - name: Inspect installer artifact
         shell: pwsh
         run: |
-          $path = "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.1.exe"
+          $path = "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.2.exe"
           Get-Item $path | Select-Object FullName, Length
           Get-FileHash $path -Algorithm SHA256
