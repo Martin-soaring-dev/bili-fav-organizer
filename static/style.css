@@ -1411,3 +1411,33 @@ svg.theme-ico[hidden] { display: none !important; }
 }
 #data-task-bar::-webkit-progress-bar { background: color-mix(in srgb, var(--border) 55%, transparent); }
 #data-task-bar::-webkit-progress-value { background: var(--accent); transition: width .2s linear; }
+
+/* Electron neo: native titlebar overlay + continuous Mica surface. Browser stays
+   unchanged. Chromium owns the caption controls; all interactive children opt out. */
+html.desktop-shell body {
+  background: rgba(31, 31, 31, .72);
+  padding-top: 0;
+}
+html.desktop-shell #app {
+  height: 100vh;
+  min-height: 100vh;
+}
+html.desktop-shell .topbar {
+  -webkit-app-region: drag;
+  padding-right: 154px;
+}
+html.desktop-shell .topbar button,
+html.desktop-shell .topbar a,
+html.desktop-shell .topbar input,
+html.desktop-shell .topbar select,
+html.desktop-shell .topbar [role="button"] {
+  -webkit-app-region: no-drag;
+}
+html.desktop-shell[data-theme="light"] body {
+  background: rgba(243, 245, 247, .72);
+}
+@media (prefers-color-scheme: light) {
+  html.desktop-shell:not([data-theme]) body {
+    background: rgba(243, 245, 247, .72);
+  }
+}
