@@ -238,7 +238,7 @@ bili-fav-organizer/
 
 ## 更新日志
 
-### v0.209-beta.1（2026-10-11 · 预发布）
+### [v0.209-beta.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.209-beta.1)（2026-10-11 · 预发布）
 
 **安全与桌面壳集成预览：应用锁、加密仓库、Windows Hello、设置中心、Electron 桌面壳。当前为测试版，不建议覆盖唯一的正式环境。**
 
