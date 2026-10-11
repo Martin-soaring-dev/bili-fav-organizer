@@ -100,6 +100,7 @@ _UPDATE_CANCEL = threading.Event()   # 用户点「停止下载」时置位，�
 _SHUTDOWN = threading.Event()        # 更新替换前置位，用来断开 SSE 长连接
 _UPDATE_STATUS_FILE: Path | None = None
 _UVICORN_SERVER = None
+_PROVIDER_BOOT_LOG = ""                  # import 期初始化日志，留到 main() 里 handler 装好后再打
 _APP_PORT = 8080
 
 
@@ -125,9 +126,16 @@ def _cleanup_stale_update_leftovers(app_parent: Path, system_temp: Path,
     只删超过 min_age_hours 的，避免误删正在进行中的更新；只匹配这三个模式：
     便携更新的工作目录、旧程序备份目录、安装版更新的工作目录。
     """
-    patterns = ((app_parent, ".bfo-update-*"),
-                (app_parent, f"{APP_DIR.name}.previous-*"),
-                (system_temp, ".bfo-setup-*"))
+    patterns = [(app_parent, ".bfo-update-*")]
+    if APP_DIR.exists():
+        # 只有安装目录仍然健在时才清理旧程序备份。目录不在，说明上次更新崩在
+        # 「旧目录改名为 .previous-*」与「新目录上位」之间 —— 那份备份是唯一的旧版本，
+        # 删掉就再也回滚不了（等下次启动过了 2 小时就会被当残留扫掉）。
+        patterns.append((app_parent, f"{APP_DIR.name}.previous-*"))
+    else:
+        log.warning("安装目录 %s 不存在（上次更新可能中断），保留 %s.previous-* 以便回滚",
+                    APP_DIR, APP_DIR.name)
+    patterns.append((system_temp, ".bfo-setup-*"))
     removed = 0
     for base, pattern in patterns:
         try:
@@ -531,7 +539,9 @@ def _dek_selftest() -> dict:
     是确定的 16 字节。不匹配就说明这把 DEK 与磁盘上的数据不是一对（例如加密库重建过），
     此时继续放行只会把用户带进「已解锁但数据读不出来」的状态。
     """
-    enc = store.DATA_DIR / "library.sqlite3.enc"
+    # 用 VAULT_DB_ENC 而不是再拼一遍 store.DATA_DIR：加密快照只有一个来源，
+    # 重新拼路径会让「落盘/回读」和「自检」读到不同文件（测试隔离也依赖这个变量）。
+    enc = VAULT_DB_ENC
     if not enc.is_file():
         return {"ok": True, "detail": "没有加密快照，跳过数据解密测试"}
     try:
@@ -882,6 +892,147 @@ def vault_bind_device(body: VaultBindDeviceIn | None = None):
     return {"ok": True, **_vault_status_payload()}
 
 
+# Windows Hello 的验证框由系统的凭据 broker（CredentialUIBroker.exe）绘制，
+# 既不是我们的子窗口，系统也不会把它激活到前台 —— 实测它会一直躲在应用窗口后面，
+# 用户只能手动切过去。我们没有任何合法上下文能让它一出现就是前台，
+# 所以只能自己找出来置顶（SetWindowPos 不需要前台权限，是这里唯一可靠的手段）。
+CREDENTIAL_DIALOG_CLASS = "Credential Dialog Xaml Host"
+
+
+_USER32_TYPED = False
+
+
+def _user32():
+    """带 argtypes 的 user32。
+
+    不声明 argtypes 时 ctypes 会把句柄按 32 位 int 传，而 `HWND_TOPMOST` 就是 `(HWND)-1`：
+    64 位下 -1 会被当成 0x00000000FFFFFFFF 传进去，SetWindowPos 直接失败 ——
+    实测表现就是「验证框永远置不了顶、也拿不到 WS_EX_TOPMOST」。
+    """
+    global _USER32_TYPED
+    import ctypes
+    from ctypes import wintypes
+
+    u = ctypes.windll.user32
+    if not _USER32_TYPED:
+        u.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        u.GetClassNameW.restype = ctypes.c_int
+        u.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        u.GetWindowThreadProcessId.restype = wintypes.DWORD
+        u.GetForegroundWindow.restype = wintypes.HWND
+        u.IsWindowVisible.argtypes = [wintypes.HWND]
+        u.IsWindowVisible.restype = wintypes.BOOL
+        u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                   ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        u.SetWindowPos.restype = wintypes.BOOL
+        u.SetForegroundWindow.argtypes = [wintypes.HWND]
+        u.SetForegroundWindow.restype = wintypes.BOOL
+        u.BringWindowToTop.argtypes = [wintypes.HWND]
+        u.BringWindowToTop.restype = wintypes.BOOL
+        u.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
+        u.AttachThreadInput.restype = wintypes.BOOL
+        u.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+        u.PostMessageW.restype = wintypes.BOOL
+        _USER32_TYPED = True
+    return u
+
+
+def _find_credential_dialog() -> int:
+    """找到 Hello 验证框的顶层窗口句柄；没有则返回 0。"""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = _user32()
+    hits: list[int] = []
+
+    def cb(hwnd, _):
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, buf, 256)
+        if buf.value == CREDENTIAL_DIALOG_CLASS:
+            hits.append(int(hwnd or 0))
+        return True
+
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    ctypes.windll.user32.EnumWindows(enum_proc(cb), 0)
+    return hits[0] if hits else 0
+
+
+def _force_foreground(hwnd: int) -> bool:
+    """把窗口顶到前台。
+
+    SetForegroundWindow 只对「当前前台进程」放行；后端不是前台进程（前台是 Electron
+    窗口），所以要先把自己挂到前台线程上（AttachThreadInput），调用完再摘掉。
+    """
+    import ctypes
+
+    user32 = _user32()
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
+    fg = user32.GetForegroundWindow()
+    tid_fg = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+    tid_me = kernel32.GetCurrentThreadId()
+    attached = False
+    ok = False
+    try:
+        if tid_fg and tid_fg != tid_me:
+            attached = bool(user32.AttachThreadInput(tid_me, tid_fg, True))
+        user32.BringWindowToTop(hwnd)
+        ok = bool(user32.SetForegroundWindow(hwnd))
+    except OSError:
+        ok = False
+    finally:
+        if attached:
+            try:
+                user32.AttachThreadInput(tid_me, tid_fg, False)
+            except OSError:
+                pass
+    return ok
+
+
+def _close_credential_dialog() -> None:
+    """收掉残留的验证框。
+
+    超时/取消后那个框可能还挂在屏幕上，用户对着它验证完了应用却毫无反应
+    （实测就发生过），所以请求结束后要主动关掉。
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    hwnd = _find_credential_dialog()
+    if hwnd:
+        try:
+            _user32().PostMessageW(hwnd, 0x0010, 0, 0)   # WM_CLOSE
+        except OSError:
+            pass
+
+
+def _raise_credential_dialog(stop: threading.Event) -> None:
+    """把 Hello 验证框顶到最前，直到 stop 被置位。"""
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = _user32()
+    hwnd_topmost = wintypes.HWND(-1)      # 必须显式转成 HWND（见 _user32 的注释）
+    swp = 0x0001 | 0x0002 | 0x0040        # NOSIZE | NOMOVE | SHOWWINDOW
+    deadline = time.monotonic() + 50      # 与脚本内 Wait(45000) 同量级
+    announced = False
+    while not stop.is_set() and time.monotonic() < deadline:
+        hwnd = _find_credential_dialog()
+        if hwnd:
+            try:
+                user32.SetWindowPos(hwnd, hwnd_topmost, 0, 0, 0, 0, swp)
+                raised = _force_foreground(hwnd)
+                if not announced:
+                    announced = True
+                    log.info("Hello 验证框已置顶并置前（hwnd=%s，成为前台=%s）", hwnd, raised)
+            except OSError:
+                pass
+        stop.wait(0.3)
+
+
 @app.post("/api/vault/hello-verify")
 def vault_hello_verify():
     """调用 Windows Hello / PIN（UserConsentVerifier）。取消或失败返回明确状态。"""
@@ -906,16 +1057,24 @@ try {
   # 本机 WinRT 投影：RequestVerificationAsync + UserConsentVerificationResult
   $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync('Verify to unlock local data')
   $task = $asTask.MakeGenericMethod($resultType).Invoke($null, @($op))
-  if (-not $task.Wait(45000)) { Write-Output 'cancel'; exit 0 }
+  # 超时与「用户取消」必须分开：原来两者都报 cancel，用户明明取消了却很困惑
+  if (-not $task.Wait(45000)) { Write-Output 'timeout'; exit 0 }
 
   $name = [string]$task.Result
   if ($name -eq 'Verified' -or $name -eq 'Allow' -or $name -eq '0') { Write-Output 'ok'; exit 0 }
-  if ($name -eq 'UserCancelled' -or $name -eq 'UserCanceled') { Write-Output 'cancel'; exit 0 }
+  # 'Canceled' 是 UserConsentVerificationResult 实际返回的取消值（实测），别漏
+  if ($name -eq 'UserCancelled' -or $name -eq 'UserCanceled' -or $name -eq 'Canceled') {
+    Write-Output 'cancel'; exit 0
+  }
   Write-Ascii ('deny:' + $name)
 } catch {
   Write-Ascii ('unsupported:' + $_.Exception.Message)
 }
 '''
+    raiser = threading.Event()
+    raiser_thread = threading.Thread(
+        target=_raise_credential_dialog, args=(raiser,), daemon=True, name="hello-topmost")
+    raiser_thread.start()
     try:
         # 必须允许交互：Windows Hello 需要弹出系统对话框。
         # CREATE_NO_WINDOW 只是不给自己开控制台（GUI 启动时那一下黑窗），不影响 Hello 对话框。
@@ -929,8 +1088,14 @@ try {
         text = (out.stdout or "").strip().splitlines()[-1] if out.stdout else ""
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"ok": False, "status": "error", "message": str(exc)}
+    finally:
+        raiser.set()
+        _close_credential_dialog()   # 流程结束了就别把验证框留在屏幕上
     if text == "ok":
         return {"ok": True, "status": "ok", "message": "验证通过"}
+    if text == "timeout":
+        return {"ok": False, "status": "timeout",
+                "message": "验证超时（45 秒未完成），请重试"}
     if text == "cancel":
         return {"ok": False, "status": "cancel", "message": "已取消，请改用应用密码"}
     if text.startswith("unsupported"):
@@ -1292,7 +1457,11 @@ def _bootstrap_providers_from_legacy_config() -> None:
         if providers:
             return
         if active_model:
-            log.info("已初始化供应商与激活模型：model=%s", active_model["id"])
+            # 这行发生在 import 期（本函数在模块级被调用），那时日志 handler 还没装好，
+            # 冻结后端会把中文按 ANSI 代码页写出去 → 壳按 UTF-8 读就是乱码。
+            # 所以只记下来，等 main() 里 handler 装好（而且是 UTF-8 流）之后再补打。
+            global _PROVIDER_BOOT_LOG
+            _PROVIDER_BOOT_LOG = f"已初始化供应商与激活模型：model={active_model['id']}"
     except Exception as exc:
         log.warning("供应商/模型初始化失败：%s", exc)
 
@@ -2238,11 +2407,19 @@ def terminal_exec(body: TermExecIn):
 
 @app.get("/api/data/export-zip")
 def data_export_zip():
-    """导出整个数据目录为 zip（排除 runtime 与备份超大目录可选保留）。"""
+    """导出整个数据目录为 zip（排除 runtime / backups / shell）。
+
+    shell 是 Electron 壳自己的 userData 目录（缓存、GPU 缓存，以及被它独占的
+    lockfile）：里面没有用户数据，而 read 那个被占用的 lockfile 会让整包直接 500。
+    """
     import zipfile
     import io
     buf = io.BytesIO()
     fn = "bili_fav_data_" + time.strftime("%Y%m%d_%H%M%S") + ".zip"
+    # 加密库与各种二进制 blob 本身已经不可压缩：实测 library.sqlite3.enc 53.7MB
+    # 压了 2.26 秒、一个字节都没省。按类型分流，别为这些白等。
+    stored_suffix = (".enc", ".blob", ".jpg", ".jpeg", ".png", ".webp", ".gif",
+                     ".zip", ".7z", ".gz", ".mp4")
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         base = USER_DATA_DIR
         if not base.exists():
@@ -2251,14 +2428,39 @@ def data_export_zip():
             if not p.is_file():
                 continue
             rel = p.relative_to(base)
-            if any(part in ("runtime", "backups") for part in rel.parts):
+            if any(part in ("runtime", "backups", "shell") for part in rel.parts):
                 continue
-            zf.writestr(str(rel).replace("\\", "/"), p.read_bytes())
+            try:
+                data = p.read_bytes()
+                if rel.suffix.lower() in stored_suffix:
+                    zf.writestr(str(rel).replace("\\", "/"), data, zipfile.ZIP_STORED)
+                else:
+                    zf.writestr(str(rel).replace("\\", "/"), data)
+            except OSError as exc:
+                # 单个文件读不到（被别的进程占着）不应该让整包导出失败
+                log.warning("导出跳过无法读取的文件 %s：%s", rel, exc)
+    size = buf.seek(0, io.SEEK_END)
     buf.seek(0)
+
+    def blocks(fh, block=1 << 20):
+        """按固定块发。
+
+        别把 BytesIO 直接交给 StreamingResponse：它按「行」迭代，而 zip 是二进制，
+        实测一个 65MB 包被切成 26.4 万个 ~0.3KB 的碎片，每片都要过一次线程池与
+        ASGI，传输从 1 秒变成 127 秒。
+        """
+        while True:
+            chunk = fh.read(block)
+            if not chunk:
+                break
+            yield chunk
+
     from fastapi.responses import StreamingResponse
+    # 带上 Content-Length，前端才能显示真实百分比（否则只能干报字节数）
     return StreamingResponse(
-        buf, media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+        blocks(buf), media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"',
+                 "Content-Length": str(size)},
     )
 
 
@@ -2289,6 +2491,9 @@ def data_import_zip(body: ZipImportIn):
             # 防 zip-slip
             rel = Path(name)
             if rel.is_absolute() or ".." in rel.parts:
+                continue
+            # shell/ 是 Electron 壳自己的 userData，别让旧包往里写
+            if any(part in ("runtime", "shell") for part in rel.parts):
                 continue
             dest = USER_DATA_DIR / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -5243,6 +5448,7 @@ def _run_update_worker(release: dict):
 
 _INSTALLER_UPDATE_HELPER_SCRIPT = r'''param(
     [int]$ParentPid,
+    [string]$WorkDir,
     [string]$SetupPath,
     [string]$InstallDir,
     [int]$Port,
@@ -5343,6 +5549,7 @@ def _run_installer_update_worker(release: dict, info: dict):
             [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
              "-File", str(helper_path),
              "-ParentPid", str(os.getpid()),
+             "-WorkDir", str(work_dir),
              "-SetupPath", str(setup_path),
              "-InstallDir", install_dir,
              "-Port", str(_APP_PORT),
@@ -5628,7 +5835,21 @@ def main():
     for h in root.handlers[:]:
         root.removeHandler(h)
     root.setLevel(logging.INFO)
-    console = logging.StreamHandler()
+    # 冻结（PyInstaller）后端在中文 Windows 上即使给了 PYTHONIOENCODING 也按 ANSI 代码页写
+    # stderr（实测 GBK），而托管它的壳按 UTF-8 读 → shell.log 里中文全是乱码。
+    # 只给这个 handler 换一个 UTF-8 流：输出被重定向（= 被壳托管）时用 UTF-8，
+    # 跑真实控制台时保持系统代码页（否则控制台窗口里的中文会花掉）。
+    # 刻意不动 sys.stderr 本身：被 import 时（测试、嵌入方）绝不该替换它，
+    # 否则会把 pytest 之类的捕获流包死，它一关闭就 ValueError: I/O operation on closed file。
+    console_stream = sys.stderr
+    try:
+        if not sys.stderr.isatty():
+            import io as _io
+            console_stream = _io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8",
+                                               errors="replace", line_buffering=True)
+    except (AttributeError, ValueError, OSError):
+        console_stream = sys.stderr
+    console = logging.StreamHandler(console_stream)
     console.setFormatter(logging.Formatter(LOG_FORMAT))
     root.addHandler(console)
 
@@ -5643,6 +5864,10 @@ def main():
         log.info("日志文件：%s", log_path)
     except Exception as e:
         log.warning("无法写入日志文件 %s：%s", log_path, e)
+
+    # import 期记下的初始化日志，现在 handler（含 UTF-8 控制台流与文件）都装好了，补打
+    if _PROVIDER_BOOT_LOG:
+        log.info("%s", _PROVIDER_BOOT_LOG)
 
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}")).start()
