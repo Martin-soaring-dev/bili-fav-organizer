@@ -76,11 +76,14 @@ def _config_summary() -> dict:
         secrets_json = json.loads(server.SECRETS_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         secrets_json = {}
-    try:
-        providers = store.list_providers()
-        models = store.list_models()
-    except sqlite3.OperationalError:
-        # Deferred SQLite initialization is expected until the vault is unlocked.
+    if store.DB_FILE.is_file():
+        try:
+            providers = store.list_providers()
+            models = store.list_models()
+        except sqlite3.OperationalError:
+            providers, models = [], []
+    else:
+        # A SELECT must not implicitly create a blank working DB while locked.
         providers, models = [], []
     try:
         source_config = json.loads((Path(server.APP_DIR) / "config.json").read_text(encoding="utf-8"))
