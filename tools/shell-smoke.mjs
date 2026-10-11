@@ -84,7 +84,8 @@ let results;
 const renderDeadline = Date.now() + 20000;
 do {
   results = await evaluate(pageProbe);
-  if (results?.appBooted && results.url === page.url) break;
+  if (results?.appBooted && results.url === page.url
+      && results.appVersion && !results.appVersion.includes('—')) break;
   await new Promise(resolve => setTimeout(resolve, 150));
 } while (Date.now() < renderDeadline);
 
