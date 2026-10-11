@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import gc
 import json
 import logging
 import os
@@ -672,7 +673,17 @@ def _vault_remove_plaintext() -> None:
         Path(str(store.DB_FILE) + "-shm"),
         Path(str(store.DB_FILE) + "-journal"),
     ):
-        path.unlink(missing_ok=True)
+        for attempt in range(10):
+            try:
+                path.unlink(missing_ok=True)
+                break
+            except PermissionError:
+                # Windows holds SQLite handles until they are finalized; do not
+                # lie about a successful lock if the file remains open.
+                if attempt == 9:
+                    raise
+                gc.collect()
+                time.sleep(0.10)
 
 
 def _vault_save_db_encrypted() -> None:
