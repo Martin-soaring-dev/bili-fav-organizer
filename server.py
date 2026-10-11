@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import secrets
+import sqlite3
 import shutil
 import sys
 import subprocess
@@ -540,6 +541,8 @@ def _dek_selftest() -> dict:
     """
     enc = VAULT_DB_ENC
     if not enc.is_file():
+        if not VAULT.state.onboarding_complete:
+            return {"ok": True, "detail": "尚未完成首次引导，跳过快照自检"}
         return {"ok": False, "detail": "encrypted snapshot missing"}
     try:
         raw = VAULT.decrypt(enc.read_bytes())
@@ -1446,6 +1449,10 @@ def make_llm_config(cfg: dict | None = None) -> llm_analyzer.LLMConfig:
 
 def _bootstrap_providers_from_legacy_config() -> None:
     """首次启动：把 config.json 里的 base_url/api_key/model 迁入 SQLite 供应商与模型。"""
+    # Defer all SQLite connections until the encrypted snapshot is restored.
+    # Even a SELECT through sqlite3.connect() would create a blank working DB.
+    if not store.DB_FILE.is_file() and VAULT_DB_ENC.is_file():
+        return
     try:
         cfg = load_config()
         providers = store.list_providers()
