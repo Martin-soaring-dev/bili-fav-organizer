@@ -25,6 +25,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
 
+      # 发布门禁：测试不过就不打包（此前 CI 一步都不跑测试，测试红也能发版）
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
       - name: Embed release version
         shell: pwsh
         env:

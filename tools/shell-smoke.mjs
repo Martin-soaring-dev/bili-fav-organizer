@@ -116,12 +116,40 @@ try {
   bounds = { error: e.message };
 }
 
+// 设置浮层与对话框的交互（回归：从设置里打开的弹窗被点一下，面板曾在背后消失）
+const panelFlow = await evaluate(`(async () => {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const panel = document.getElementById('settings-panel');
+  panel.hidden = true;                                        // 先归零
+  document.getElementById('settings-btn').click();             // 打开设置
+  await sleep(300);
+  document.querySelector('[data-tab="data"]').click();
+  await sleep(200);
+  const opened = !panel.hidden;
+
+  document.getElementById('settings-data-clear').click();      // 打开「清除当前数据」范围弹窗（不确认）
+  await sleep(300);
+  const modal = document.getElementById('clear-modal');
+  const modalOpen = getComputedStyle(modal).display !== 'none';
+  modal.querySelector('.modal-body').dispatchEvent(
+    new PointerEvent('pointerdown', { bubbles: true }));        // 在弹窗内部点一下
+  await sleep(200);
+  const keptAfterModalClick = !panel.hidden;
+  modal.style.display = 'none';
+
+  document.querySelector('.rail').dispatchEvent(
+    new PointerEvent('pointerdown', { bubbles: true }));        // 点左侧图标栏 = 面板外
+  await sleep(200);
+  const closedByRail = panel.hidden;
+  return { opened, modalOpen, keptAfterModalClick, closedByRail };
+})()`);
+
 const checks = [
   ['preload 桥已注入', results.preloadBridge === true],
   // 顶栏本身就是标题栏：不再另垫一条 32px 空拖动带
   ['没有空拖动带', results.emptyStrip === false],
   ['顶栏是 drag 区域', results.topbarDrag === 'drag'],
-  ['顶栏给系统按钮让位 138px', results.topbarPadRight === '138px'],
+  ['顶栏给系统按钮让位 154px', results.topbarPadRight === '154px'],
   ['页面底色半透明（Mica 能透，但仍由主题底色主导）',
     results.bodyAlpha > 0.5 && results.bodyAlpha < 1],
   ['页面不再额外让高', results.bodyPaddingTop === '0px'],
@@ -132,6 +160,11 @@ const checks = [
     !!results.appVersion && !results.appVersion.includes('—')],
   // T2：页面必须来自后端回传的动态端口，而不是写死的 8080
   ['页面来自动态端口', /^http:\/\/127\.0\.0\.1:(?!8080)\d+\/$/.test(results.url)],
+  // 设置浮层与对话框的交互契约
+  ['设置面板能打开', panelFlow.opened === true],
+  ['从设置里打开的弹窗可见', panelFlow.modalOpen === true],
+  ['点弹窗内部不关设置面板', panelFlow.keptAfterModalClick === true],
+  ['点左侧图标栏会收起设置面板', panelFlow.closedByRail === true],
   ['窗口尺寸改到目标值',
     bounds && bounds.width === TARGET_BOUNDS.width && bounds.height === TARGET_BOUNDS.height],
   ['窗口尺寸已写入 config.json', !!persisted && persisted.width === TARGET_BOUNDS.width],
@@ -142,6 +175,7 @@ const checks = [
 
 console.log(JSON.stringify({
   page: results,
+  settingsPanel: panelFlow,
   windowBounds: bounds,
   persistedShellWindow: persisted,
   restoredWindow: restored,

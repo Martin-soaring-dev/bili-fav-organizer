@@ -21,9 +21,13 @@ class DekSelftestTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self._tmp.name)
-        self._old = (store.DATA_DIR, server.VAULT, server.DEVICE_SECRET_BLOB)
+        self._old = (store.DATA_DIR, server.VAULT, server.DEVICE_SECRET_BLOB,
+                     server.VAULT_DB_ENC)
         store.DATA_DIR = root / "data"
         store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        # 加密快照的唯一来源是 server.VAULT_DB_ENC（写入/回读/自检都看它），
+        # 所以这里必须连着它一起换，光换 store.DATA_DIR 已经不成立了。
+        server.VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
         server.DEVICE_SECRET_BLOB = root / "device_secret.blob"
         vault = vault_mod.Vault(root / "vault.json")
         vault.initialize(bound_mid="1", password="secret12",
@@ -31,11 +35,11 @@ class DekSelftestTests(unittest.TestCase):
         server.VAULT = vault
 
     def tearDown(self):
-        store.DATA_DIR, server.VAULT, server.DEVICE_SECRET_BLOB = self._old
+        store.DATA_DIR, server.VAULT, server.DEVICE_SECRET_BLOB, server.VAULT_DB_ENC = self._old
         self._tmp.cleanup()
 
     def _write_enc(self, encryptor):
-        path = store.DATA_DIR / "library.sqlite3.enc"
+        path = server.VAULT_DB_ENC
         path.write_bytes(encryptor.encrypt(SQLITE_MAGIC + b"\x00" * 64))
         return path
 

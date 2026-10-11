@@ -38,13 +38,17 @@ class VaultDeviceSecretTests(unittest.TestCase):
             server.DEVICE_SECRET_BLOB,
             server.VAULT,
             store.DATA_DIR,
+            server.VAULT_DB_ENC,
         )
         server.USER_DATA_DIR = root
         server.APP_UNLOCK_BLOB = root / "app_unlock.blob"
         server.DEVICE_SECRET_BLOB = root / "device_secret.blob"
-        # 解锁会做解密自检，自检读的是 store.DATA_DIR 下的加密快照 —— 不隔离会去碰真实库
+        # 解锁会做解密自检，自检读的是加密快照 —— 不隔离会去碰真实库。
+        # 快照的唯一来源是 server.VAULT_DB_ENC（写入/回读/自检都看它），
+        # 所以它必须跟着 store.DATA_DIR 一起换。
         store.DATA_DIR = root / "data"
         store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        server.VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
 
         vault = vault_mod.Vault(root / "vault.json")
         vault.initialize(bound_mid="1", password="secret12",
@@ -55,7 +59,8 @@ class VaultDeviceSecretTests(unittest.TestCase):
 
     def tearDown(self):
         (server.USER_DATA_DIR, server.APP_UNLOCK_BLOB,
-         server.DEVICE_SECRET_BLOB, server.VAULT, store.DATA_DIR) = self._old
+         server.DEVICE_SECRET_BLOB, server.VAULT, store.DATA_DIR,
+         server.VAULT_DB_ENC) = self._old
         server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
         self._tmp.cleanup()
 
