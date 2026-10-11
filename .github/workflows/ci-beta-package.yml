@@ -51,3 +51,18 @@ jobs:
           $path = "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.2.exe"
           Get-Item $path | Select-Object FullName, Length
           Get-FileHash $path -Algorithm SHA256
+      - name: Smoke test unpacked Electron renderer and backend
+        shell: pwsh
+        run: |
+          $workspace = ".bfo-package-smoke-ci"
+          $target = Join-Path $workspace "checkout/dist/electron/win-unpacked"
+          New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
+          Copy-Item -Path "dist/electron/win-unpacked" -Destination (Split-Path $target) -Recurse -Force
+          python tools/run_isolated_packaged_smoke.py $workspace --profile-name launch-profile-ci
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Electron smoke failed" }
+      - name: Remove isolated Electron smoke workspace
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item ".bfo-package-smoke-ci" -Recurse -Force -ErrorAction SilentlyContinue
+
