@@ -24,7 +24,10 @@ CORE_TABLES = TABLES[1:9]
 
 def database_snapshot(path: Path) -> dict:
     if not path.is_file():
-        return {"exists": False}
+        # The secure locked state deliberately has no plaintext working DB.
+        return {"exists": False, "counts": {name: 0 for name in TABLES},
+                "logical_rows": {}, "sha256": None,
+                "integrity_check": [], "foreign_key_violations": []}
     connection = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
@@ -73,8 +76,12 @@ def _config_summary() -> dict:
         secrets_json = json.loads(server.SECRETS_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         secrets_json = {}
-    providers = store.list_providers()
-    models = store.list_models()
+    try:
+        providers = store.list_providers()
+        models = store.list_models()
+    except sqlite3.OperationalError:
+        # Deferred SQLite initialization is expected until the vault is unlocked.
+        providers, models = [], []
     try:
         source_config = json.loads((Path(server.APP_DIR) / "config.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
