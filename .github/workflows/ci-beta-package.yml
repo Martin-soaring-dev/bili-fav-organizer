@@ -19,6 +19,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -26,7 +28,7 @@ jobs:
         run: |
           python -m pip install -r requirements-test.txt pyinstaller
       - name: Run Python regression suite
-        run: python -m unittest discover -s tests -v
+        run: python tools/run_isolated_tests.py
       - name: Build frozen backend
         run: pyinstaller --noconfirm --clean BiliFavOrganizer.spec
       - uses: actions/setup-node@v4
