@@ -1,7 +1,8 @@
 'use strict';
 // 壳层注入：只补「窗口需要、而页面本来不需要」的两样东西——
 // 顶部的系统标题栏占位带，以及让 Mica 能透上来的透明底。
-// 刻意不改 static/ 下的任何文件：视觉整合是 T8 的范围。
+// static/ 的视觉本批已跟着壳一起调（标题栏高度、半透与 blur 由页面自己的变量主导），
+// 这里只做兜底，不再假设页面没被动过。
 const { contextBridge, ipcRenderer } = require('electron');
 
 const CAPTION_H = 32;

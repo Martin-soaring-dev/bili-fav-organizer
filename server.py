@@ -892,10 +892,11 @@ def vault_bind_device(body: VaultBindDeviceIn | None = None):
     return {"ok": True, **_vault_status_payload()}
 
 
-# Windows Hello 的验证框由系统的凭据 broker（CredentialUIBroker.exe）绘制，
-# 既不是我们的子窗口，系统也不会把它激活到前台 —— 实测它会一直躲在应用窗口后面，
-# 用户只能手动切过去。我们没有任何合法上下文能让它一出现就是前台，
-# 所以只能自己找出来置顶（SetWindowPos 不需要前台权限，是这里唯一可靠的手段）。
+# Windows Hello 的验证框由系统的凭据 broker（CredentialUIBroker.exe）绘制，既不是我们的子窗口，
+# 系统也不会把它激活到前台 —— 实测它会一直躲在应用窗口后面，用户只能手动切过去。
+# 浏览器模式下只能自己找出来置顶（SetWindowPos 不需要前台权限）。
+# 但 Electron 壳里这条路走不通：那个窗口的完整性级别更高，实测 SetWindowPos 直接返回 ACCESS_DENIED
+# （UIPI 策略，不是参数问题），所以壳改成「最小化自己让开」（electron/main.js:168-185）。
 CREDENTIAL_DIALOG_CLASS = "Credential Dialog Xaml Host"
 
 

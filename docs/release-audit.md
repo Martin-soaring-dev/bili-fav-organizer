@@ -138,7 +138,7 @@ dev 构建三重闸封死。问题集中在三处：
 
 - **CI 不跑测试** ✅ 已修：新增 `.github/workflows/ci.yml`（主分支 push + 每个 PR 跑
   `python -m unittest discover -s tests`），并在 `release-windows.yml` 的打包之前插入同一道门禁。
-  仓库 105+ 用例（含专门校验发布产物的 `tests/test_attribution.py`）现在拦得住回归。
+  仓库 179 个用例（含专门校验发布产物的 `tests/test_attribution.py`）现在拦得住回归。
   顺带修掉当时阻碍加门禁的 4 个红灯：根因是 `_dek_selftest()` 重新拼了一遍
   `store.DATA_DIR/"library.sqlite3.enc"`，而写入/回读都用模块变量 `VAULT_DB_ENC` ——
   自检会去读**真实数据目录**里那份属于别的 DEK 的旧快照。现在统一用 `VAULT_DB_ENC`
@@ -156,7 +156,9 @@ dev 构建三重闸封死。问题集中在三处：
   `powershell.exe` 不在 PATH 时更新直接不可用，没有「直接 Python 覆盖」的兜底路径。
 - **文档滞后**：`docs/快速上手.md` 与随包 `packaging/使用说明.txt` 仍以 **v0.206** 为例
   （README 更新日志已到 v0.208）；`README.md` / `docs/project-overview.md` 的产物清单**漏了安装包**；
-  `package.json` 的 `"version": "0.0.0"` 没有任何注入路径（Electron 时代它就是壳的版本号）。
+  `package.json` 的版本号本批已从 `"0.0.0"` 提到 `"0.209.0"`（Electron 时代它就是壳的版本号），
+  但注入路径仍然只覆盖 `server.py` 的 `BUILD_VERSION`（`release-windows.yml:36-40`），
+  两个版本号还是得手工对齐。
 - 文档里「浏览器自动打开 `http://127.0.0.1:8080`」「请保留控制台窗口」两处在 Electron 上线后即失效
   （改为应用窗口 + 动态端口 + 无控制台），T9/T10 必须同步改。
 
@@ -172,8 +174,43 @@ dev 构建三重闸封死。问题集中在三处：
 3. ~~给 workflow 加一步跑测试、并考虑加 `pull_request` 触发~~ ✅ 2026-10-11 完成
    （新增独立 CI workflow；发布流程内也加了同一道门禁）。
 4. 签名（Authenticode）与独立校验（如 minisign）属发布信任链，建议在 T9 一并决策。
-5. 待办：文档滞后（`docs/快速上手.md`、`packaging/使用说明.txt` 仍以 v0.206 为例；
-   README/overview 的产物清单漏了安装包；`package.json` 版本无注入路径）。
+5. 待办：`docs/快速上手.md` 仍以 v0.206 为例（README 更新日志已到 v0.208）；`package.json` 的版本号
+   仍靠手改（注入路径只覆盖 `server.py` 的 `BUILD_VERSION`）。README / overview 的产物清单与随包
+   `packaging/使用说明.txt` 本批已同步。
+
+## 四、已知问题清单（本批评审结论，未修）
+
+`9789144..299c71e` 这一批过了一轮独立评审（只读，未改文件）。除第 1 条是真 bug，其余都是
+「本环境无法验证」或「行为可接受但与预期有出入」。一并记在这里，另起一批处理。
+
+1. **`_close_credential_dialog()` 可能关掉别人的 Hello 验证框**（`server.py:992-1007`，真 bug）。
+   它按窗口类名 `Credential Dialog Xaml Host` 取**第一个**顶层窗口，并无条件 `PostMessage(WM_CLOSE)`。
+   该类名是系统凭据 broker 的通用对话框、不是我们的子窗口：另一个 BFO 实例（浏览器模式、第二份副本）
+   正在验证，或系统/别的应用正在弹 Hello，都会被我们某次请求的收尾顺手关掉。
+   修法方向（已与用户确认，本批不实施）：流程开始前先快照已存在的句柄，raiser 线程只认「新出现的」，
+   收尾只关它自己记录的那一个 hwnd，并复核 `IsWindow` + 类名。
+   实际风险边界：壳内这条基本是死代码（`electron/main.js:168-185` 已改为「最小化壳窗口让开」），
+   浏览器模式下才真正暴露。
+2. **导入 / 清除没有真实百分比、不可取消**（`static/app.js:5131,1471`）。导出本批已改成真百分比 +
+   可取消，这两项仍是步骤式进度 → 任务书里「数据导入导出」那条按严格解读只算**部分达成**。
+3. **顶栏在最小宽度下会裁掉右侧按钮**：`static/style.css:79-80` 的 `white-space: nowrap` +
+   `overflow: hidden` 对 `minWidth: 940`（`electron/main.js:572`），内容约 900px 且右侧另留 154px
+   系统按钮位 —— 窄窗口不折行，直接裁掉。
+4. **设置里点 Hello 立即解绑、无二次确认**（`static/app.js:4717`）。base 的行为是「只提示」，
+   本批改成直接解绑 —— 误点一次就掉了设备绑定。
+5. **Esc 在弹窗打开时也会收起背后的设置面板**（`static/app.js:4477`）：只该关最上层那一个。
+6. **`streamToFile` 没监听写流 `'error'`**（`electron/main.js:279`）：磁盘满 / 目录不可写会变成主进程
+   未捕获异常。
+7. **壳层冒烟新增的 `panelFlow` 没有 try/catch**（`tools/shell-smoke.mjs:120`）：元素缺失时脚本会崩，
+   而不是判 FAIL。不会误报 PASS，只是失败信息不干净。
+8. **neo 线还没有自动化入口**：只能手敲 `npx electron-builder`（无 npm script）、CI 无 neo 线、
+   版本号靠手改 —— 当前那个安装包是手搓出来的。
+9. **三条结论还缺证据**（不算缺陷，只是没有可复现的证据）：
+   - 壳层 CDP 冒烟 17/17 跑在 `electron/main.js` 后端解析改动**之前**，HEAD 未复跑；
+   - 暗色下标题栏按钮的悬停/按下反馈需人眼确认 —— 它依赖 Chromium 在 `color:'#00000000'` 的 overlay
+     上自绘高亮（`electron/main.js:543-548`）；
+   - CI 门禁从未在干净机器或真实 PR 上跑过。179 绿取自开发机，而本机存在真实数据目录与 DPAPI 材料，
+     `tests/test_vault_api.py` 历史上正因读真实快照而红 —— 门禁在 CI 上是否真绿尚未被证明。
 
 ## 附：关键位置速查
 
