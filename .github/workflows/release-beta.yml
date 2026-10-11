@@ -177,5 +177,14 @@ jobs:
           $neo = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
           $assets = @($env:ASSET_NAME, $env:CHECKSUM_NAME, $env:SETUP_NAME, $env:SETUP_CHECKSUM, $neo, "$neo.sha256")
           foreach ($asset in $assets) { if (-not (Test-Path $asset)) { throw "Missing release asset: $asset" } }
-          gh release create $tag @assets --prerelease --title $env:RELEASE_TITLE --notes $notes
+          gh release create $tag @assets --prerelease --target $env:GITHUB_SHA --title $env:RELEASE_TITLE --notes $notes
           if ($LASTEXITCODE -ne 0) { throw "Could not publish prerelease." }
+
+      - name: Remove one-time publish trigger branch
+        if: ${{ success() && github.ref == 'refs/heads/publish/v0.209-beta.1' }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/publish/v0.209-beta.1"
+          if ($LASTEXITCODE -ne 0) { Write-Warning "Release published, but trigger branch cleanup needs manual follow-up." }
