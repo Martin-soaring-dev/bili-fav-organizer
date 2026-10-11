@@ -2,6 +2,12 @@
 (() => {
   "use strict";
 
+  // Chromium's custom titlebar overlay needs the renderer to opt in to drag
+  // regions and reserve space for native Windows caption controls.
+  if (window.shell?.isDesktopShell) {
+    document.documentElement.classList.add("desktop-shell");
+  }
+
   const $ = (id) => document.getElementById(id);
   const logBody = $("log-body");
 

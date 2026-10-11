@@ -18,11 +18,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import gc
 import json
 import logging
 import os
 import re
 import secrets
+import sqlite3
 import shutil
 import sys
 import subprocess
@@ -533,26 +535,24 @@ SQLITE_MAGIC = b"SQLite format 3\x00"
 
 
 def _dek_selftest() -> dict:
-    """验证当前 DEK 真的能解开本地数据，而不只是 unwrap 成功。
+    """Authenticate the entire encrypted SQLite snapshot (including AES-GCM tag).
 
-    直接取加密快照的头部解一段：GCM 密文是流式的，前缀可独立解开，而 SQLite 库头
-    是确定的 16 字节。不匹配就说明这把 DEK 与磁盘上的数据不是一对（例如加密库重建过），
-    此时继续放行只会把用户带进「已解锁但数据读不出来」的状态。
+    Checking only the SQLite header allows tampered ciphertext to pass. A complete
+    authenticated decrypt is essential before reporting an unlocked vault.
     """
-    # 用 VAULT_DB_ENC 而不是再拼一遍 store.DATA_DIR：加密快照只有一个来源，
-    # 重新拼路径会让「落盘/回读」和「自检」读到不同文件（测试隔离也依赖这个变量）。
     enc = VAULT_DB_ENC
     if not enc.is_file():
-        return {"ok": True, "detail": "没有加密快照，跳过数据解密测试"}
+        if not VAULT.state.onboarding_complete:
+            return {"ok": True, "detail": "尚未完成首次引导，跳过快照自检"}
+        return {"ok": False, "detail": "encrypted snapshot missing"}
     try:
-        with enc.open("rb") as fh:
-            raw = fh.read(vault_mod.NONCE_LEN + 16 + 16)
-        head = VAULT.decrypt_head(raw, 16)
-        if head == SQLITE_MAGIC:
-            return {"ok": True, "detail": "加密快照可正确解密"}
-        return {"ok": False, "detail": "解密结果不是 SQLite 库头，DEK 与本地数据不匹配"}
+        raw = VAULT.decrypt(enc.read_bytes())
+        if not raw.startswith(SQLITE_MAGIC):
+            return {"ok": False, "detail": "encrypted snapshot corruption"}
+        return {"ok": True, "detail": "已完整验证加密快照"}
     except (OSError, ValueError, vault_mod.VaultError) as exc:
-        return {"ok": False, "detail": f"解密自检失败：{exc}"}
+        log.warning("加密快照认证失败：%s", exc)
+        return {"ok": False, "detail": "encrypted snapshot corruption"}
 
 
 class AppLockPasswordIn(BaseModel):
@@ -641,21 +641,68 @@ def _vault_status_payload() -> dict:
     }
 
 
+def _vault_encrypt_consistent_db() -> None:
+    """Encrypt a consistent SQLite backup rather than copying a live WAL database.
+
+    Serialize with store transactions, then atomically replace the ciphertext.
+    On any failure the plaintext working database remains untouched.
+    """
+    if not store.DB_FILE.is_file() or not VAULT.is_unlocked():
+        raise vault_mod.VaultError("明文数据库不存在或加密库未解锁")
+    with store._lock:
+        store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(prefix=".vault-snapshot-", suffix=".sqlite3",
+                                               dir=store.DATA_DIR)
+        os.close(fd)
+        temporary = Path(temporary_name)
+        try:
+            store.backup_database(temporary)
+            VAULT.encrypt_file(temporary, VAULT_DB_ENC)
+            if not _dek_selftest().get("ok"):
+                raise vault_mod.VaultError("加密快照完整性验证失败")
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def _vault_remove_plaintext() -> None:
+    """Remove plaintext only AFTER a durable and verified encrypted snapshot exists."""
+    for path in (
+        store.DB_FILE,
+        Path(str(store.DB_FILE) + ".plain-backup"),
+        Path(str(store.DB_FILE) + "-wal"),
+        Path(str(store.DB_FILE) + "-shm"),
+        Path(str(store.DB_FILE) + "-journal"),
+    ):
+        for attempt in range(10):
+            try:
+                path.unlink(missing_ok=True)
+                break
+            except PermissionError:
+                # Windows holds SQLite handles until they are finalized; do not
+                # lie about a successful lock if the file remains open.
+                if attempt == 9:
+                    raise
+                gc.collect()
+                time.sleep(0.10)
+
+
 def _vault_save_db_encrypted() -> None:
-    """把当前 SQLite 库整库 AEAD 落盘。"""
-    src = store.DB_FILE
-    if not src.is_file() or not VAULT.is_unlocked():
-        return
-    VAULT.encrypt_file(src, VAULT_DB_ENC)
+    """Make a verified encrypted snapshot before locking; do not leave a plain DB."""
+    with store._lock:
+        _vault_encrypt_consistent_db()
+        _vault_remove_plaintext()
 
 
 def _vault_migrate_plain_db_if_needed() -> str | None:
-    """老用户明文库迁移：mid 一致则继承并加密。返回说明或 None。"""
+    """Convert a legacy plaintext database to a verified encrypted snapshot."""
     src = store.DB_FILE
     enc = VAULT_DB_ENC
-    if not src.is_file() or enc.is_file() or not VAULT.is_unlocked():
+    if not src.is_file() or not VAULT.is_unlocked():
         return None
-    # 若加密库已绑定 mid，且 cookie 中 mid 不一致则拒绝导入
+    # A valid encrypted copy takes precedence. A leftover interrupted or corrupt
+    # encrypted file may be replaced only when the original plaintext still exists.
+    if enc.is_file() and _dek_selftest().get("ok"):
+        return None
     bound = str(VAULT.state.bound_mid or "")
     if bound:
         cfg = load_config()
@@ -669,28 +716,37 @@ def _vault_migrate_plain_db_if_needed() -> str | None:
         if cookie_mid and cookie_mid != bound:
             return "检测到其它账号的明文数据，未导入"
     try:
-        VAULT.encrypt_file(src, enc)
-        backup = src.with_suffix(".sqlite3.plain-backup")
-        try:
-            if not backup.exists():
-                shutil.copy2(src, backup)
-        except OSError:
-            pass
+        _vault_encrypt_consistent_db()
         return "已继承本地数据并完成加密"
-    except (OSError, vault_mod.VaultError) as exc:
+    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
         log.warning("明文库迁移失败：%s", exc)
         return None
 
 
 def _vault_restore_db_if_needed() -> bool:
-    """若只有密文库且加密库已解锁，则解出工作库。"""
-    if store.DB_FILE.is_file() or not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
+    """Decrypt only authenticated ciphertext; never create a new empty database."""
+    if not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
+        return False
+    # A legacy beta might still have a live plaintext DB. Do not overwrite it:
+    # verify the ciphertext separately, preserving the original as recovery data.
+    if store.DB_FILE.is_file():
+        return False
+    if not _dek_selftest().get("ok"):
         return False
     try:
-        VAULT.decrypt_file(VAULT_DB_ENC, store.DB_FILE)
+        with store._lock:
+            VAULT.decrypt_file(VAULT_DB_ENC, store.DB_FILE)
+            import sqlite3
+            with sqlite3.connect(f"file:{store.DB_FILE.as_posix()}?mode=ro",
+                                 uri=True) as connection:
+                check = connection.execute("PRAGMA quick_check").fetchone()
+            if not check or check[0] != "ok":
+                raise vault_mod.VaultError("恢复的数据库完整性检查失败")
+            store._initialize()
         return True
-    except vault_mod.VaultError as exc:
+    except (OSError, ValueError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
         log.warning("无法解密数据库：%s", exc)
+        _vault_remove_plaintext()
         return False
 
 
@@ -719,6 +775,9 @@ def vault_onboarding(body: VaultInitIn):
         return JSONResponse({"ok": False, "error": "应用密码至少 6 位"}, status_code=400)
     if not body.bound_mid:
         return JSONResponse({"ok": False, "error": "缺少绑定的 B 站用户 ID"}, status_code=400)
+    if VAULT_DB_ENC.exists():
+        return JSONResponse({"ok": False, "error": "已有加密快照，禁止重新初始化保险库"},
+                            status_code=409)
     try:
         code = VAULT.initialize(bound_mid=body.bound_mid, password=password)
     except vault_mod.VaultError as exc:
@@ -778,15 +837,18 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
         VAULT.unlock_with_secret("device", secret)
     except (OSError, ValueError, vault_mod.VaultError) as exc:
         return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"}, status_code=400)
-    # 与密码解锁保持一致：先把库恢复出来，再确认这把 DEK 真的能解开它
-    restored = _vault_restore_db_if_needed()
-    migrated = _vault_migrate_plain_db_if_needed()
+    # Verify the authenticated snapshot BEFORE recovering or migrating any data.
+    migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
     test = _dek_selftest()
     if not test.get("ok"):
         VAULT.lock()
         return JSONResponse({"ok": False,
                              "error": f"解密自检未通过：{test.get('detail')}",
-                             "selftest": test}, status_code=500)
+                             "selftest": test}, status_code=403)
+    restored = _vault_restore_db_if_needed()
+    if not store.DB_FILE.is_file():
+        VAULT.lock()
+        return JSONResponse({"ok": False, "error": "加密数据库恢复失败"}, status_code=500)
     _APP_LOCK.update(unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
@@ -805,14 +867,17 @@ def vault_unlock(body: VaultUnlockIn):
             return JSONResponse({"ok": False, "error": "请输入应用密码或恢复码"}, status_code=400)
     except vault_mod.VaultError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
-    restored = _vault_restore_db_if_needed()
-    migrated = _vault_migrate_plain_db_if_needed()
+    migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
     test = _dek_selftest()
     if not test.get("ok"):
         VAULT.lock()
         return JSONResponse({"ok": False,
                              "error": f"解密自检未通过：{test.get('detail')}",
-                             "selftest": test}, status_code=500)
+                             "selftest": test}, status_code=403)
+    restored = _vault_restore_db_if_needed()
+    if not store.DB_FILE.is_file():
+        VAULT.lock()
+        return JSONResponse({"ok": False, "error": "加密数据库恢复失败"}, status_code=500)
     _APP_LOCK.update(enabled=False, unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
@@ -822,7 +887,7 @@ def vault_unlock(body: VaultUnlockIn):
 def vault_lock():
     try:
         _vault_save_db_encrypted()
-    except OSError as exc:
+    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
         return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
                             status_code=500)
     VAULT.lock()
@@ -833,12 +898,14 @@ def vault_lock():
 def vault_complete_onboarding():
     if not VAULT.is_unlocked():
         return JSONResponse({"ok": False, "error": "加密库未解锁"}, status_code=403)
-    VAULT.complete_onboarding()
-    # 初始化完成后立刻上锁并加密落盘：刷新/重启后必须解锁才能用
+    # Do not finalize onboarding or claim success unless a verified snapshot is saved.
     try:
         _vault_save_db_encrypted()
-    except OSError as exc:
-        log.warning("初始化后加密数据库失败：%s", exc)
+        VAULT.complete_onboarding()
+    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
+        log.error("初始化后加密数据库失败：%s", exc)
+        return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
+                            status_code=500)
     VAULT.lock()
     return {"ok": True, "locked": True, **_vault_status_payload()}
 
@@ -1393,6 +1460,10 @@ def make_llm_config(cfg: dict | None = None) -> llm_analyzer.LLMConfig:
 
 def _bootstrap_providers_from_legacy_config() -> None:
     """首次启动：把 config.json 里的 base_url/api_key/model 迁入 SQLite 供应商与模型。"""
+    # Defer all SQLite connections until the encrypted snapshot is restored.
+    # Even a SELECT through sqlite3.connect() would create a blank working DB.
+    if not store.DB_FILE.is_file() and VAULT_DB_ENC.is_file():
+        return
     try:
         cfg = load_config()
         providers = store.list_providers()

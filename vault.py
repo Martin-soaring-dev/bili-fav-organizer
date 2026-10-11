@@ -11,6 +11,8 @@ import hashlib
 import json
 import re
 import secrets
+import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -191,9 +193,12 @@ class Vault:
     # ---------- 生成 / 包装 ----------
     def initialize(self, *, bound_mid: str, password: str, recovery_code: str | None = None) -> str:
         """首次启用：生成 DEK 与 password/recovery 包装。返回规范化恢复码明文（仅此一次）。"""
+        # Never replace an existing DEK: doing so irreversibly orphans ciphertext.
+        if self.meta_path.exists() or (self._meta.get("wraps") or {}):
+            raise VaultError("加密库已经初始化，请解锁已有保险库，禁止重复初始化")
         dek = generate_dek()
-        self._dek = dek
         code = normalize_recovery_code(recovery_code or generate_recovery_code())
+        self._dek = dek
         self._meta = {
             "version": 1,
             "bound_mid": str(bound_mid or ""),
@@ -290,15 +295,28 @@ class Vault:
     def decrypt(self, blob: bytes) -> bytes:
         return decrypt_blob(self._require_dek(), blob)
 
+    @staticmethod
+    def _atomic_bytes(dest: Path, data: bytes) -> None:
+        """Commit a complete ciphertext/plaintext file, never a partial destination."""
+        dest = Path(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        temporary = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.tmp")
+        try:
+            with temporary.open("xb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, dest)
+        finally:
+            temporary.unlink(missing_ok=True)
+
     def encrypt_file(self, src: Path, dest: Path) -> None:
         raw = Path(src).read_bytes()
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(self.encrypt(raw))
+        self._atomic_bytes(Path(dest), self.encrypt(raw))
 
     def decrypt_file(self, src: Path, dest: Path) -> None:
         raw = Path(src).read_bytes()
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(self.decrypt(raw))
+        self._atomic_bytes(Path(dest), self.decrypt(raw))
 
     def decrypt_head(self, blob: bytes, length: int) -> bytes:
         """只解出 blob 的前 length 字节明文，**不做完整性校验**。

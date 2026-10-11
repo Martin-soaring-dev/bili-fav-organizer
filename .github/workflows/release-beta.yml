@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - "publish/v0.209-beta.1"
+      - "publish/v0.209-beta.2"
     tags:
       - "v*-beta.*"
 
@@ -13,13 +13,15 @@ permissions:
 
 jobs:
   build:
-    if: ${{ github.ref == 'refs/heads/publish/v0.209-beta.1' || contains(github.ref_name, '-beta.') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.ref == 'refs/heads/publish/v0.209-beta.2' || contains(github.ref_name, '-beta.') || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     env:
-      BETA_RELEASE_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.1') && 'v0.209-beta.1' || github.ref_name }}
+      BETA_RELEASE_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.2') && 'v0.209-beta.2' || github.ref_name }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,12 +35,12 @@ jobs:
 
       # 发布门禁：测试不过就不打包（此前 CI 一步都不跑测试，测试红也能发版）
       - name: Run tests
-        run: python -m unittest discover -s tests -v
+        run: python tools/run_isolated_tests.py
 
       - name: Embed release version
         shell: pwsh
         env:
-          RELEASE_VERSION: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.1') && 'v0.209-beta.1' || github.ref_name }}
+          RELEASE_VERSION: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.2') && 'v0.209-beta.2' || github.ref_name }}
         run: |
           $version = $env:RELEASE_VERSION
           if ($version -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Unsupported release version: $version" }
@@ -169,7 +171,7 @@ jobs:
           SETUP_CHECKSUM: ${{ steps.installer.outputs.setup_checksum }}
           RELEASE_TITLE: ${{ steps.notes.outputs.title }}
           RELEASE_NOTES_B64: ${{ steps.notes.outputs.notes_b64 }}
-          BETA_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.1') && 'v0.209-beta.1' || github.ref_name }}
+          BETA_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209-beta.2') && 'v0.209-beta.2' || github.ref_name }}
         run: |
           $tag = $env:BETA_RELEASE_TAG
           $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
@@ -181,10 +183,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not publish prerelease." }
 
       - name: Remove one-time publish trigger branch
-        if: ${{ success() && github.ref == 'refs/heads/publish/v0.209-beta.1' }}
+        if: ${{ success() && github.ref == 'refs/heads/publish/v0.209-beta.2' }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/publish/v0.209-beta.1"
+          gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/publish/v0.209-beta.2"
           if ($LASTEXITCODE -ne 0) { Write-Warning "Release published, but trigger branch cleanup needs manual follow-up." }

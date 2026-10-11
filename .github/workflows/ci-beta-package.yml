@@ -19,6 +19,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -26,7 +28,7 @@ jobs:
         run: |
           python -m pip install -r requirements-test.txt pyinstaller
       - name: Run Python regression suite
-        run: python -m unittest discover -s tests -v
+        run: python tools/run_isolated_tests.py
       - name: Build frozen backend
         run: pyinstaller --noconfirm --clean BiliFavOrganizer.spec
       - uses: actions/setup-node@v4
@@ -38,14 +40,29 @@ jobs:
       - name: Build Electron neo NSIS installer (not published)
         shell: pwsh
         run: |
-          npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never "-c.extraMetadata.version=0.209.0-beta.1"
+          npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never "-c.extraMetadata.version=0.209.0-beta.2"
           if ($LASTEXITCODE -ne 0) { throw "Electron builder failed" }
-          if (-not (Test-Path "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.1.exe")) {
+          if (-not (Test-Path "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.2.exe")) {
             throw "Expected beta installer missing"
           }
       - name: Inspect installer artifact
         shell: pwsh
         run: |
-          $path = "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.1.exe"
+          $path = "dist/electron/BiliFavOrganizer-neo-Setup-0.209.0-beta.2.exe"
           Get-Item $path | Select-Object FullName, Length
           Get-FileHash $path -Algorithm SHA256
+      - name: Smoke test unpacked Electron renderer and backend
+        shell: pwsh
+        run: |
+          $workspace = ".bfo-package-smoke-ci"
+          $target = Join-Path $workspace "checkout/dist/electron/win-unpacked"
+          New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
+          Copy-Item -Path "dist/electron/win-unpacked" -Destination (Split-Path $target) -Recurse -Force
+          python tools/run_isolated_packaged_smoke.py $workspace --profile-name launch-profile-ci
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Electron smoke failed" }
+      - name: Remove isolated Electron smoke workspace
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item ".bfo-package-smoke-ci" -Recurse -Force -ErrorAction SilentlyContinue
+

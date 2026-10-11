@@ -238,6 +238,17 @@ bili-fav-organizer/
 
 ## 更新日志
 
+### [v0.209-beta.2](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.209-beta.2)（2026-10-11 · 预发布）
+
+**修复 Beta.1 加密仓库迁移和解锁安全缺陷，改善 Electron neo 标题栏布局。仍为预发布版，请先备份重要数据。**
+
+- 使用 v0.208 历史源码构建的隔离迁移夹具复核数据库兼容性；所有兼容性测试仍禁止真实 Cookie、API Key 和在线服务访问。
+- 加密快照改为先生成一致性 SQLite 备份、AES-GCM 完整认证后原子替换，避免文件截断或密文篡改后误报解锁成功。
+- 密文存在且明文不存在时延迟 SQLite 初始化，防止启动时创建空数据库掩盖旧数据；解锁后才允许恢复真实业务库。
+- 保险库初始化禁止覆盖既有 DEK；锁定前保存并校验密文，成功后清理明文活动数据库及旧 plain-backup，失败则显式拒绝宣称锁定成功。
+- Electron neo 适配系统标题栏拖动区、控制按钮留白和 Mica 半透明页面底色，并加强冒烟检查的页面加载等待。
+- **已知限制**：Windows Hello 交互与传统/Neo 安装形态的同数据端到端兼容性仍需真实 Windows 机器进一步验收；非正常断电、正在运行的后台任务及其他进程同时访问同一数据目录仍可能产生残留明文或竞态。请勿把应用锁当作完整磁盘加密替代品。
+
 ### [v0.209-beta.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.209-beta.1)（2026-10-11 · 预发布）
 
 **安全与桌面壳集成预览：应用锁、加密仓库、Windows Hello、设置中心、Electron 桌面壳。当前为测试版，不建议覆盖唯一的正式环境。**

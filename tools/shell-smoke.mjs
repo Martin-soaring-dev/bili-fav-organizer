@@ -34,17 +34,21 @@ async function cdp(endpoint) {
 }
 
 const targets = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json();
-const page = targets.find(t => t.type === 'page');
+// Electron may expose an about:blank helper page before the BrowserWindow's
+// backend URL. Select the actual app document instead of whichever page comes first.
+const page = targets.find(t => t.type === 'page'
+  && /^http:\/\/127\.0\.0\.1:\d+\/$/.test(t.url));
 if (!page) {
-  console.error('找不到页面目标：', JSON.stringify(targets));
+  console.error('找不到应用页面目标：', JSON.stringify(targets));
   process.exit(1);
 }
 
 const renderer = await cdp(page.webSocketDebuggerUrl);
+console.log(`CDP_APP_TARGET=${JSON.stringify({ id: page.id, title: page.title, url: page.url })}`);
 const evaluate = async expression =>
   (await renderer.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })).result.value;
 
-const results = await evaluate(`(() => {
+const pageProbe = `(() => {
   const strip = document.getElementById('shell-caption');
   const topbar = document.querySelector('.topbar');
   const bodyStyle = getComputedStyle(document.body);
@@ -54,6 +58,9 @@ const results = await evaluate(`(() => {
   const alpha = bg.match(/\\/\\s*([\\d.]+)\\s*\\)/) || bg.match(/rgba?\\([^)]*,\\s*([\\d.]+)\\s*\\)$/);
   return {
     url: location.href,
+    documentUrl: document.URL,
+    readyState: document.readyState,
+    title: document.title,
     emptyStrip: !!strip,
     topbarDrag: topbar ? getComputedStyle(topbar).webkitAppRegion : null,
     topbarPadRight: topbar ? getComputedStyle(topbar).paddingRight : null,
@@ -70,7 +77,17 @@ const results = await evaluate(`(() => {
     statVideos: (document.getElementById('st-videos') || {}).textContent || null,
     statFolders: (document.getElementById('st-folders') || {}).textContent || null,
   };
-})()`);
+})()`;
+// /json/list can report the pending navigation URL before Chromium commits it.
+// Wait for the real document and its application shell before measuring layout.
+let results;
+const renderDeadline = Date.now() + 20000;
+do {
+  results = await evaluate(pageProbe);
+  if (results?.appBooted && results.url === page.url
+      && results.appVersion && !results.appVersion.includes('—')) break;
+  await new Promise(resolve => setTimeout(resolve, 150));
+} while (Date.now() < renderDeadline);
 
 // 窗口尺寸落盘：从主进程改一次窗口大小，等一下再读 config.json。
 // 跑之前先把原尺寸记下来，验完还原 —— 这个检查不该顺手改掉用户的窗口几何。
