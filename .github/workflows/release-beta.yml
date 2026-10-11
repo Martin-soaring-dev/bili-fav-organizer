@@ -36,7 +36,7 @@ jobs:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           $version = $env:RELEASE_VERSION
-          if ($version -notmatch '^v\d+\.\d+-beta\.\d+) { throw "Unsupported release version: $version" }
+          if ($version -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Unsupported release version: $version" }
           $source = [System.IO.File]::ReadAllText("server.py")
           $commit = $env:GITHUB_SHA.Substring(0, 7)
           $buildDate = (& git log -1 --format=%ad --date=short).Trim()
@@ -122,7 +122,8 @@ jobs:
           if (-not (Test-Path $iscc)) { throw "Inno Setup 不可用，无法生成安装包。" }
           $tag = $env:GITHUB_REF_NAME
           # Inno 的文件版本必须是数字四段：v0.207 -> 0.207.0.0
-          $fileVersion = (((($tag -replace '-beta\..* + @('0','0','0','0'))[0..3]) -join '.'
+          $numeric = ($tag -replace '-beta[.].*$', '').TrimStart('v','V')
+          $fileVersion = ((($numeric -split '[.]') + @('0','0','0','0'))[0..3]) -join '.'
           & $iscc "/DAppVersion=$tag" "/DFileVersion=$fileVersion" "packaging\BiliFavOrganizer.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup 编译失败（退出码 $LASTEXITCODE）。" }
           $setup = "dist\BiliFavOrganizer-Setup-$tag.exe"
@@ -144,9 +145,9 @@ jobs:
       - name: Build Electron neo test installer
         shell: pwsh
         run: |
-          npx electron-builder --config electron-builder.yml --win nsis --x64
+          $neoVersion = $env:GITHUB_REF_NAME.TrimStart('v') -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
+          npx electron-builder --config electron-builder.yml --win nsis --x64 "-c.extraMetadata.version=$neoVersion"
           if ($LASTEXITCODE -ne 0) { throw "Electron installer build failed." }
-          $neoVersion = $env:GITHUB_REF_NAME.TrimStart('v') -replace '-beta\.', '.0-beta.'
           # The package.json version is 0.209.0; beta suffix supplied at CI runtime.
           $expected = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
           if (-not (Test-Path $expected)) { throw "Electron artifact missing: $expected" }
@@ -167,7 +168,7 @@ jobs:
         run: |
           $tag = $env:GITHUB_REF_NAME
           $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
-          $neoVersion = $tag.TrimStart('v') -replace '^(\\d+\\.\\d+)-beta\\.', '$1.0-beta.'
+          $neoVersion = $tag.TrimStart('v') -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
           $neo = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
           $assets = @($env:ASSET_NAME, $env:CHECKSUM_NAME, $env:SETUP_NAME, $env:SETUP_CHECKSUM, $neo, "$neo.sha256")
           foreach ($asset in $assets) { if (-not (Test-Path $asset)) { throw "Missing release asset: $asset" } }
