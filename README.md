@@ -187,7 +187,7 @@ Windows 默认目录：`%LOCALAPPDATA%\BiliFavOrganizer\`（Win+R 输入该路�
 - 程序 ZIP 与数据目录分离；升级 / 移动程序不会清除数据
 - 首次启动会把项目目录中的旧配置 / 旧 SQLite 迁移到用户数据目录（旧库保留可回滚）
 - 可用环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 覆盖数据目录
-- **换电脑**：页面「导出项目数据」→ 新电脑「读取项目数据」（不含 Cookie / API Key）；完整搬迁请私下复制整个数据目录
+- **换电脑**：本机「设置 → 数据 → 导出项目数据」得到 zip，在新电脑「读取项目数据」导入。这个包是本机数据目录整包、**明文**：含明文数据库、B 站 Cookie 与 API Key，也可能含供应商/模型配置，请按凭据同等级别保管、不要上传网盘。只想带走收藏索引与整理结果而不含密钥时，用 JSON 导出（`/api/data/export`）
 - 清理数据请用页面上的清除功能，不要手删文件
 
 ---
@@ -231,6 +231,7 @@ bili-fav-organizer/
 | [docs/design/scan-sqlite-migration-plan.md](docs/design/scan-sqlite-migration-plan.md) | 扫描策略状态机、SQLite 迁移 |
 | [docs/design/persistent-index-folder-profiles.md](docs/design/persistent-index-folder-profiles.md) | 持久索引、画像门槛、默认夹规则 |
 | [docs/design/provider-api-compatibility.md](docs/design/provider-api-compatibility.md) | 供应商 API 差异与模型规格来源 |
+| [docs/release-audit.md](docs/release-audit.md) | 发布体系审计：构建/打包链路、运行时自更新、待修问题与优先级 |
 | [docs/project-overview.md](docs/project-overview.md) | 项目全景梳理 |
 
 ---
@@ -309,7 +310,8 @@ python -m unittest discover -s tests -v
 pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 ```
 
-发布产物：`BiliFavOrganizer-Windows-x64-<tag>.zip` + SHA256。
+发布产物（每个 Release 共 4 个附件）：`BiliFavOrganizer-Windows-x64-<tag>.zip`（便携版）+ 其 `.sha256`、
+`BiliFavOrganizer-Setup-<tag>.exe`（安装版）+ 其 `.sha256`。CI 在 tag `v*` 时构建并**先跑一遍测试**（不过不发版）。
 
 ---
 

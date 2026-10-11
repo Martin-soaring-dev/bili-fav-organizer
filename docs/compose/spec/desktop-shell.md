@@ -10,6 +10,52 @@ commits: # 留空
 
 ## Report
 
+### neo 打包线起步（2026-10-11）
+
+在 T9 之前先打通一条「能打能跑」的 Electron 打包线，便于试用与验收；两条线并存：
+
+| 线 | 产物 | 形态 |
+|---|---|---|
+| 老线（不变） | `BiliFavOrganizer-Windows-x64-<版本>.zip` + `BiliFavOrganizer-Setup-<版本>.exe` | 控制台 + 浏览器（PyInstaller + Inno） |
+| neo（新） | `BiliFavOrganizer-neo-Setup-<版本>.exe` | Electron 壳（electron-builder + NSIS） |
+
+- 配置：`electron-builder.yml`（`appId`/NSIS/`artifactName: BiliFavOrganizer-neo-Setup-${version}`）；
+  `npmRebuild: false`（node-pty 1.1.0 自带与 Electron 44/ABI 149 匹配的预编译产物，
+  不必为它拉 VS 工具链；`asarUnpack` 解开 `node-pty/prebuilds/**`）。
+- **后端随包走（过渡形态）**：`extraResources` 把 PyInstaller 冻结出的后端整目录放进
+  `resources/backend`，壳启动时优先拉起它（`resolveFrozenBackend()`，dev 下可用 `BFO_BACKEND_EXE`
+  显式指向）。因此打包后的 App 不再依赖仓库源码树与系统 Python；壳与后端的契约（`--port 0` +
+  `BFO_READY` 握手、stdin 看门狗、优雅退出）完全沿用 T2，未改一行协议。
+- 实测（`dist/electron/win-unpacked` 隔离数据目录启动）：`isPackaged: true`、
+  `resources/backend/BiliFavOrganizer.exe` 在位并被拉起、页面来自冻结后端、
+  包内 `require('node-pty')` 可用（`spawn/fork/createTerminal/open/native`）、preload 桥正常。
+- **体积**：安装包 **148.3MB**，解包 **483.9MB** —— 远超 S2.7 里写的「便携版 < 260MB」目标，
+  因为同时背着 Electron 本体与冻结的 Python 后端。**T9 需要一次专门的体积治理**
+  （Electron locales/无用资源、Node 后端替换 Python 后端后可省掉约 100MB）。
+- 顺手修掉一个只在冻结后端才暴露的问题：PyInstaller 产物在中文 Windows 上即使给了
+  `PYTHONIOENCODING` 也按 ANSI 代码页写 stderr，而壳按 UTF-8 读 → `shell.log` 中文乱码。
+  现在 `server.py` 在**输出被重定向时**（= 被壳托管）把 stdout/stderr 换成 UTF-8
+  （跑真实控制台时保持系统代码页，老便携版的控制台中文不受影响）；壳侧同时改用
+  `StringDecoder` 拼接，避免多字节字符被 chunk 切断。
+- **尚未做（T9 范围）**：更新器重构（现在这套会去杀后端 pid、用旧 exe 名与 `--port` 重启，
+  在 Electron 下不成立）、neo 的便携形态、CI 里加 neo 线、体积治理、签名。
+
+### 发布体系审计（2026-10-11）
+
+对构建/打包与运行时自更新链路做了一次只读审计，全文见 `docs/release-audit.md`。要点：
+
+- **三处现成可修**（均已复核）：安装版 helper 的 `param()` 缺 `$WorkDir`、`Popen` 也没传，
+  内部两处清理对 `$null` 操作被 `catch {}` 吞掉 → 每次安装版更新在 `%TEMP%\.bfo-setup-*` 残留约 25MB；
+  清道夫无条件清理 `{安装目录名}.previous-*` → 若更新在「旧目录改名」与「stage 上位」之间崩溃，
+  回滚的唯一旧副本会在 2 小时后被当残留删掉；「应用更新」页的 `#about-latest` 是死元素（永远「尚未检查」）。
+- **Electron 共存三处必须重构**（已写进 T9 验收）：更新助手重启的是后端 pid/旧 exe 而非壳自身；
+  助手传 `--port` 而 Electron 只认 `BFO_PORT`，于是壳会起一个随机新端口、页面停在旧 URL；
+  便携分支「单进程 + 固定端口 + 覆盖后重启同一 exe」的模型与壳的托管模型不兼容。
+- **卫生问题**：CI 不跑测试且无 `pull_request` 触发（已知 `test_vault_api.py` 有 2 个红灯，加门禁前要先处理）；
+  发布物完全不签名；`.sha256` 与载荷同源、无独立信任根；`install_mode` 只看注册表，
+  导致「装过安装版的机器上再跑便携 exe」会去更新注册表里记录的那个目录。
+- 版本链本身是一致且受门禁保护的（tag 格式 + README 更新日志段落必须存在）。
+
 ### T2 后端托管化（2026-10-11）
 
 壳不再假设端口，也不再只杀直接子进程。
@@ -130,5 +176,5 @@ commits: # 留空
 - [ ] T6: Node 侧 `llm_analyzer` 与长任务编排 — acceptance: 同一模型配置下分析/定案/执行的状态机与 Python 一致，两两互斥语义保持 (covers: S2.2; depends: T2)
 - [ ] T7: Node 侧 `server` 路由全量对齐 — acceptance: `/api/*` 逐条双跑一致，含 token / origin / vault 门禁 (covers: S2.2, S2.5; depends: T3, T4, T5, T6)
 - [ ] T8: 视觉迁移（原型 token 落进前端 + 托盘、开机自启、窗口位置持久化） — acceptance: 深/浅色与四种材质可切换且与原型一致；托盘菜单四项可用 (covers: S2.3, S2.4; depends: T1)
-- [ ] T9: 打包切换（electron-builder `nsis` + `portable`） — acceptance: 便携版解包体积记录在案；安装版可启动并复用既有数据目录 (covers: S2.7; depends: T7, T8)
+- [ ] T9: 打包切换（electron-builder `nsis` + `portable`） — acceptance: 便携版解包体积记录在案；安装版可启动并复用既有数据目录；**且按 `docs/release-audit.md` 的 2.2 重做更新链路**：① 更新助手必须重启**壳自身**（现在是杀后端 pid、重启旧 exe，壳不在其列；`BiliFavOrganizer.exe` 这个名字与「覆盖后重启同一 exe」的假设在 Electron 下作废）；② 端口只能来自壳的分配+握手（`--port 0` + `BFO_READY`）或 `BFO_PORT`，**不得把运行期随机端口写进重启命令**（Electron 不读 `--port`）；③ 产物改名后同步更新 asset 名模板（`_latest_release_version` / `_download_release_asset`）与三处文档（README 快速开始、`packaging/使用说明.txt`、`docs/快速上手.md`） (covers: S2.7; depends: T7, T8)
 - [ ] T10: 双跑验收与退役 Python — acceptance: 全量只读接口双跑一致、迁移后的 Node 测试全绿，之后移除 Python 依赖与 PyInstaller 链 (covers: S2.2, S2.8; depends: T9)

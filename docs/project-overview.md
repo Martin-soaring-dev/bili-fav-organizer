@@ -268,8 +268,10 @@ tests/
 |------|------|
 | 源码运行 | `python server.py` 或 `BiliFavOrganizer.bat`（Windows 自动装 Python + 依赖） |
 | 便携打包 | PyInstaller（`BiliFavOrganizer.spec`）→ `dist/BiliFavOrganizer/` |
-| CI/CD | `.github/workflows/release-windows.yml`：tag `v*` → 构建 → 拒绝打包本地数据 → ZIP + SHA256 → GitHub Release |
-| 产物命名 | `BiliFavOrganizer-Windows-x64-<tag>.zip` |
+| 安装打包 | Inno Setup（`packaging/BiliFavOrganizer.iss`），默认免管理员，可装当前用户或全机 |
+| CI/CD | `.github/workflows/ci.yml`（主分支/PR 跑测试）；`.github/workflows/release-windows.yml`：tag `v*` → 跑测试 → 构建 → 拒绝打包本地数据 → ZIP + Setup + 各自 SHA256 → GitHub Release |
+| 产物命名 | `BiliFavOrganizer-Windows-x64-<tag>.zip`、`BiliFavOrganizer-Setup-<tag>.exe`（各带 `.sha256`） |
+| 软件更新 | 应用内「检查更新」（`/api/update/*`）：便携版覆盖 ZIP、安装版静默跑安装包；详见 `docs/release-audit.md` |
 | 依赖 | fastapi, uvicorn, requests, pydantic, qrcode[pil], browsercookie, pycryptodomex |
 
 ---
