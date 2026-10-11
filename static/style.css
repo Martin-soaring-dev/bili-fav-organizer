@@ -24,6 +24,10 @@
   --scroll-hover: #5e5e5e;
   --primary-text: #06241d;
   --mono: 'Cascadia Code', Consolas, 'Courier New', monospace;
+  /* 顶栏即窗口标题栏，高度与系统的最小化/最大化/关闭按钮一致（Electron 侧同为 32） */
+  --topbar-h: 32px;
+  /* 左侧图标栏宽度（图标栏 / 设置浮层定位都用它） */
+  --rail-w: 44px;
 }
 :root[data-theme="light"] {
   --bg: #f3f5f7; --bg2: #ffffff; --panel: #ffffff; --border: #cfd6dd;
@@ -61,28 +65,35 @@ body {
 
 #app { display: flex; flex-direction: column; height: 100vh; }
 
-/* 顶栏 */
+/* 顶栏 —— 它本身就是标题栏：高度严格等于系统按钮高度，内容单行居中不换行 */
 .topbar {
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
-  padding: 10px 18px;
+  height: var(--topbar-h);
+  padding: 0 12px;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 16px;
   margin-left: auto;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  min-width: 0;
   justify-content: flex-end;
 }
-.brand { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; font-size: 15px; font-weight: 700; color: var(--accent); }
+.brand {
+  display: flex; align-items: center; gap: 7px; flex-wrap: nowrap;
+  min-width: 0; font-size: 13px; font-weight: 700; color: var(--accent);
+}
 /* 平涂标志自身带色（深/亮青），深浅顶栏都够对比，无需按主题切换文件 */
-.brand-mark { display: block; width: 32px; height: 32px; flex: none; }
+.brand-mark { display: block; width: 18px; height: 18px; flex: none; }
 .app-version, .update-status { color: var(--muted); font-size: 11px; font-weight: 400; }
 /* 顶栏署名：可点击直达仓库，尺寸与版本号一致，不抢视觉重心 */
 .brand-credit { color: var(--muted); font-size: 11px; font-weight: 400; text-decoration: none; }
@@ -131,7 +142,10 @@ body {
   stroke-linejoin: round;
 }
 button.mini-btn { padding: 5px 10px; font-size: 12px; }
-.status-strip { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--muted); }
+.status-strip {
+  display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--muted);
+  flex-wrap: nowrap; min-width: 0; white-space: nowrap;
+}
 .status-strip b { color: var(--text); }
 .status-strip #load-stats { margin-left: auto; white-space: nowrap; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: #555; display: inline-block; }
@@ -148,7 +162,7 @@ button.mini-btn { padding: 5px 10px; font-size: 12px; }
 
 /* 左侧图标栏：底部 显示 / 设置 / 锁定 */
 .rail {
-  flex: 0 0 48px; width: 48px;
+  flex: 0 0 var(--rail-w); width: var(--rail-w);
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 10px 0;
   background: var(--bg2);
@@ -156,12 +170,12 @@ button.mini-btn { padding: 5px 10px; font-size: 12px; }
 }
 .rail-gap { flex: 1 1 auto; }
 .rail-btn {
-  width: 36px; height: 36px; border-radius: 6px;
+  width: 32px; height: 32px; border-radius: 6px;
   border: 0; background: transparent; color: var(--muted);
   display: grid; place-items: center; cursor: pointer;
   transition: background .12s linear, color .12s linear;
 }
-.rail-btn svg { width: 19px; height: 19px; }
+.rail-btn svg { width: 18px; height: 18px; }
 .rail-btn:hover { background: var(--hover); color: var(--text); }
 .rail-btn.is-active { background: var(--soft-accent); color: var(--accent); }
 .logs {
@@ -375,7 +389,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 /* 扫描状态弹窗 */
 .modal {
   position: fixed; inset: 0; background: rgba(0,0,0,.65);
-  display: flex; align-items: center; justify-content: center; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  /* 必须高于设置浮层（120），否则从设置里打开的弹窗会被压在面板下面 */
+  z-index: 160;
 }
 .modal-box {
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
@@ -875,6 +891,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 }
 .compact-modal { width: min(560px, 92vw); }
 
+/* 数据任务弹窗（导出/导入/清除）：进度条铺满，路径等长文本可断行 */
+#data-task-modal #data-task-text { margin: 0; }
+#data-task-bar { width: 100%; margin: 12px 0 0; }
+#data-task-modal #data-task-detail { margin: 8px 0 0; word-break: break-all; }
+
 /* 扫描异常提示：优先引导用户手动处理，远端清理必须单独确认。 */
 .scan-issue-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--accent2); border-radius: 8px; background: var(--soft-warn); font-size: 13px; }
 .scan-issue-banner[hidden], .scan-issue-picker[hidden], .scan-clean-confirm[hidden], .scan-issue-history[hidden], .scan-issue-options[hidden] { display: none; }
@@ -1020,25 +1041,28 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .vault-qr-status { font-size: 13px; min-height: 1.4em; }
 .vault-qr-step { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 14px; }
 
-/* 设置中心：右侧覆盖面板 */
+/* 设置中心：右侧覆盖面板（浮起一张圆角卡，四周留 6px 缝隙） */
 .settings-panel {
-  position: fixed; top: var(--topbar-h, 44px); bottom: 0; z-index: 120;
-  left: 48px;
-  right: var(--sidebar-shell-w, 30px);
+  position: fixed; z-index: 120;
+  top: calc(var(--topbar-h, 44px) + 6px); bottom: 6px;
+  left: calc(var(--rail-w, 48px) + 6px);
+  right: calc(var(--sidebar-shell-w, 30px) + 6px);
   width: auto;
   color: var(--text, #eee);
   /* Win11 毛玻璃：半透明底 + 背景模糊 + 略提亮 */
   background: color-mix(in srgb, var(--panel, #1c1c1e) 58%, transparent);
   -webkit-backdrop-filter: blur(var(--panel-blur, 24px)) saturate(1.45);
   backdrop-filter: blur(var(--panel-blur, 24px)) saturate(1.45);
-  border-left: 1px solid color-mix(in srgb, var(--border, #444) 70%, transparent);
-  border-right: 1px solid color-mix(in srgb, var(--border, #444) 70%, transparent);
-  box-shadow: 0 0 28px rgba(0,0,0,.22);
+  border: 1px solid color-mix(in srgb, var(--border, #444) 70%, transparent);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,.26);
   display: flex; flex-direction: column;
-  animation: settings-slide-in .15s cubic-bezier(.2, .9, .25, 1);
+  /* 更长的尾程、更缓的曲线：滑出之后不再"顿"一下 */
+  animation: settings-slide-in .2s cubic-bezier(.16, 1, .3, 1);
 }
 @keyframes settings-slide-in {
-  from { opacity: 0; transform: translateX(-12px); }
+  from { opacity: 0; transform: translateX(-10px) scale(.995); }
   to { opacity: 1; transform: none; }
 }
 .settings-panel[hidden] { display: none !important; }
@@ -1108,7 +1132,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 /* 主界面隐藏已迁入设置的连接配置 */
 .card.conn-card { display: none !important; }
 @media (max-width: 900px) {
-  .settings-panel { left: 0; }
+  .settings-panel { left: 6px; }
 }
 
 .log-actions { display: inline-flex; gap: 6px; }
@@ -1148,6 +1172,9 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .icon-btn:hover, .btn.icon-btn:hover { background: rgba(127,127,127,.18); }
 .icon-btn:active, .btn.icon-btn:active { background: rgba(127,127,127,.32); }
 .topbar-actions .icon-btn { font-size: 16px; }
+/* 顶栏按钮必须装得进 32px 的标题栏，别再撑高整行 */
+.topbar-actions .icon-btn { width: 26px; height: 26px; padding: 0; border-radius: 6px; }
+.topbar-actions .icon-btn svg { width: 16px; height: 16px; }
 
 /* 解锁模式切换 */
 .lock-mode { display: flex; flex-direction: column; gap: 10px; }
@@ -1159,45 +1186,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 }
 .link-btn:hover { opacity: .85; }
 .lock-hello-status { min-height: 1.2em; font-size: 13px; }
-
-/* ===== 日志页签：始终可见 =====
-   展开：贴日志右缘 top:0（按下态）；收起：贴左缘；竖排「日志」不换行 */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: absolute;
-  left: 320px;
-  top: 0;
-  width: 28px;
-  height: 72px;
-  padding: 4px 0;
-  border: 1px solid var(--border, #bbb);
-  border-left: none;
-  background: var(--panel, #fff);
-  color: var(--accent, #0a7);
-  cursor: pointer;
-  z-index: 40;
-  border-radius: 0 12px 12px 0;
-  box-shadow: 3px 0 8px rgba(0,0,0,.08);
-  transition: left .15s ease, background .12s ease;
+/* 未绑定 Windows Hello：按钮置灰不可点，别再发起一次注定失败的验证 */
+#lock-hello-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  filter: grayscale(.35);
 }
-  writing-mode: vertical-rl;
-  text-orientation: upright;
-  letter-spacing: 0.2em;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  user-select: none;
-}
-  left: 0;
-  border: 1px solid var(--border, #bbb);
-  border-left: none;
-  box-shadow: 3px 0 10px rgba(0,0,0,.14);
-}
-@media (max-width: 900px) {
-}
+#lock-back-hello[hidden] { display: none !important; }
 
 /* 更新按钮：无背景，悬停/按下不加底色，仅颜色变化 */
 #check-updates.icon-btn {
@@ -1354,3 +1349,65 @@ svg.theme-ico[hidden] { display: none !important; }
 
 .theme-pick-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-blur-label { display: block; white-space: nowrap; }
+
+/* ===================== 设置页里的状态指示灯（模型 / 登录，挂在测试按钮旁） ===================== */
+.lamp-tag {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: 4px;
+  font-size: 12px; color: var(--muted); white-space: nowrap;
+}
+.lamp {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: var(--muted); box-shadow: inset 0 0 0 1px rgba(0,0,0,.18);
+}
+.lamp.ok { background: var(--green); box-shadow: 0 0 6px color-mix(in srgb, var(--green) 70%, transparent); }
+.lamp.err { background: var(--danger); }
+.lamp.warn { background: var(--accent2); }
+.lamp.testing { background: var(--accent); animation: lamp-pulse 1s ease-in-out infinite; }
+@keyframes lamp-pulse { 50% { opacity: .35; } }
+
+/* ===================== 统一底纹：全窗口一套毛玻璃 ===================== */
+/* 之前是四种配方（标题栏不透明、内容 62%、图标栏 72%、页面底 90% 无模糊），
+   看起来各管各的。现在只留一层：整块页面 = 半透 + 模糊，其余区域一律透明，
+   靠 1px 边框做层次。 */
+:root {
+  --surface-alpha: 72%;                 /* 唯一的半透度 */
+  --surface-blur: var(--panel-blur, 24px);   /* 模糊半径仍由「显示」页的滑块控制 */
+}
+.topbar, .rail, .panels, .sidebar, .logs, .sidebar-tabs, .layout {
+  background: transparent;
+}
+.topbar { border-bottom: 1px solid var(--border); }
+
+/* 内容区与右侧侧栏之间：一条贯穿全高的浅分割线（以前只有日志面板自带边框，
+   收起/展开时会看着断断续续） */
+.sidebar-shell { border-left: 1px solid var(--border); }
+.sidebar-tabs { border-left: none; }
+
+/* 未钉住时，侧栏是「悬停滑出、盖在内容之上」的浮层 —— 它必须有底，
+   否则后面的内容会透上来（统一底纹时踩过这个坑）。用与设置浮层同一套毛玻璃。 */
+.sidebar-shell:not(.pinned) .sidebar {
+  background: color-mix(in srgb, var(--panel, #1c1c1e) 66%, transparent);
+  -webkit-backdrop-filter: blur(var(--surface-blur, 24px)) saturate(1.45);
+  backdrop-filter: blur(var(--surface-blur, 24px)) saturate(1.45);
+  border: 1px solid color-mix(in srgb, var(--border, #444) 70%, transparent);
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -6px 0 20px rgba(0,0,0,.20);
+}
+
+/* ===================== 设置 → 数据：三个按钮等宽等高、间距均匀 ===================== */
+.settings-tab[data-tab-panel="data"] .row {
+  display: flex; align-items: center; gap: 10px; margin: 4px 0 8px;
+}
+.settings-tab[data-tab-panel="data"] .row .btn {
+  height: 32px; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px;
+}
+
+/* ===================== 数据任务弹窗：进度条明显一些 ===================== */
+#data-task-bar {
+  width: 100%; height: 8px; margin: 12px 0 0;
+  appearance: none; border: 0; border-radius: 4px; overflow: hidden;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+}
+#data-task-bar::-webkit-progress-bar { background: color-mix(in srgb, var(--border) 55%, transparent); }
+#data-task-bar::-webkit-progress-value { background: var(--accent); transition: width .2s linear; }

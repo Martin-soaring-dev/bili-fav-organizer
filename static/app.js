@@ -13,7 +13,13 @@
     if (mode === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.setAttribute("data-theme", mode);
     localStorage.setItem("theme-mode", mode);
+    // 标题栏是系统画的（titleBarOverlay）：符号色要跟着应用的明暗，底色也要一并给它，
+    // 否则透明底在深色下会让人以为最小化/最大化的悬停与按下没反应。
+    const bg = getComputedStyle(document.documentElement).getPropertyValue("--bg2").trim();
+    window.shell?.setTheme?.(mode);
   }
+  // 自动模式下系统换了明暗：页面自己重算一次并上报（applyTheme 会重新读 --bg2）
+  window.shell?.onSystemThemeChanged?.(() => applyTheme(localStorage.getItem("theme-mode") || "system"));
   applyTheme(savedTheme);
   if (themeModeEl) {
     themeModeEl.addEventListener("change", () => applyTheme(themeModeEl.value));
@@ -108,6 +114,34 @@
   const lockScreen = $("app-lock-screen");
   const lockModal = $("app-lock-modal");
   let pendingHelloBind = false;
+  let suggestHelloBind = false;   // 刚走完初始化：解锁后引导一次 Windows Hello 绑定
+  // 本机是否已绑定 Windows Hello。没绑定时锁屏上那条路必须整体不可用：
+  // 按钮置灰、密码页里的「使用 Windows Hello」链接收起，也不能再发起验证
+  // （否则会弹出一次注定失败的 Hello，用户只能取消）。
+  let helloAvailable = false;
+
+  function setHelloAvailable(bound) {
+    helloAvailable = !!bound;
+    const btn = $("lock-hello-btn");
+    if (btn) {
+      btn.disabled = !helloAvailable;
+      btn.title = helloAvailable ? "" : "尚未绑定 Windows Hello，请用应用密码解锁";
+    }
+    const link = $("lock-back-hello");
+    if (link) {
+      link.hidden = !helloAvailable;
+      link.disabled = !helloAvailable;
+    }
+    const status = $("lock-hello-status");
+    if (status && !helloAvailable) status.textContent = "尚未绑定 Windows Hello，请用应用密码解锁";
+  }
+
+  async function refreshHelloAvailability() {
+    try {
+      const vs = await api("GET", "/api/vault/status");
+      setHelloAvailable(!!(vs && vs.has_device_wrap));
+    } catch (_) { /* 读不到就维持原状 */ }
+  }
 
   function showLockScreen(show) {
     if (!lockScreen) return;
@@ -117,11 +151,17 @@
       if (window.shell && window.shell.terminal) {
         window.shell.terminal.lockdown().catch(() => {});
       }
+      refreshHelloAvailability();
       beginUnlockFlow();
     }
   }
 
   function setLockMode(mode) {
+    // 没绑定 Hello 时不允许切到那一步：直接落到密码，并说清原因
+    if (mode === "hello" && !helloAvailable) {
+      log("尚未绑定 Windows Hello，请用应用密码解锁", "warn");
+      mode = "password";
+    }
     const show = (id, on) => { const el = $(id); if (el) el.hidden = !on; };
     show("lock-mode-hello", mode === "hello");
     show("lock-mode-password", mode === "password");
@@ -140,12 +180,27 @@
 
   let helloTried = false;
   let helloAutoConsumed = false;   // 启动时的自动验证只发生一次
+
+  // Hello 验证期间把壳窗口让开：验证框是系统凭据 broker 的窗口，属于更高完整性级别，
+  // 我们无权把它置顶（实测 SetWindowPos 返回 ACCESS_DENIED，UIPI 策略），
+  // 既然抬不动它，就让自己退让，结束后再还原并抢回焦点。
+  async function helloAside(run) {
+    const shell = window.shell;
+    try { if (shell && shell.helloAside) await shell.helloAside(); } catch (_) {}
+    try {
+      return await run();
+    } finally {
+      try { if (shell && shell.helloRestore) await shell.helloRestore(); } catch (_) {}
+    }
+  }
+
   async function tryWindowsHelloAuto() {
     const status = $("lock-hello-status");
     if (status) status.textContent = "正在请求 Windows Hello…";
     try {
-      if (window.shell && window.shell.raiseWindow) window.shell.raiseWindow().catch(() => {});
-      const r = await api("POST", "/api/vault/hello-verify", {}, { timeoutMs: 35000 });
+      // 后端最坏要在对话框上等 45s，前端必须比它长，否则对话框还在就报超时
+      const r = await helloAside(
+        () => api("POST", "/api/vault/hello-verify", {}, { timeoutMs: 55000 }));
       if (r && r.ok) {
         await unlockWithVault({ useHello: true });
         return true;
@@ -202,10 +257,15 @@
     log("应用已解锁", "ok");
     await syncAfterUnlock();
     await refreshAppLock();
+    hideOnboardingModal();          // 初始化已完成：别让设置密码那个弹窗在解锁后还挂着
     if (pendingHelloBind) {
       pendingHelloBind = false;
+      suggestHelloBind = false;     // 反正马上要绑，不用再引导
       log("解锁完成，正在完成 Windows Hello 绑定…", "info");
       completeHelloBind();
+    } else if (suggestHelloBind) {
+      suggestHelloBind = false;
+      showHelloSuggest();
     }
   }
 
@@ -231,6 +291,7 @@
       const vs = await api("GET", "/api/vault/status");
       bound = !!(vs && vs.has_device_wrap);
     } catch (_) {}
+    setHelloAvailable(bound);
     if (!bound) {
       // 未绑定 Windows Hello：不自动认证，直接密码/恢复码
       setLockMode("password");
@@ -352,7 +413,14 @@
   if ($("app-lock-btn")) $("app-lock-btn").addEventListener("click", () => openSettings("security"));
   if ($("app-lock-close")) $("app-lock-close").addEventListener("click", closeAppLockModal);
   if ($("app-lock-unlock-btn")) $("app-lock-unlock-btn").addEventListener("click", submitUnlock);
-  if ($("lock-hello-btn")) $("lock-hello-btn").addEventListener("click", () => tryWindowsHelloAuto());
+  if ($("lock-hello-btn")) $("lock-hello-btn").addEventListener("click", () => {
+    if (!helloAvailable) {
+      log("尚未绑定 Windows Hello，请用应用密码解锁", "warn");
+      setLockMode("password");
+      return;
+    }
+    tryWindowsHelloAuto();
+  });
   if ($("lock-other-ways")) $("lock-other-ways").addEventListener("click", () => setLockMode("password"));
   if ($("lock-forgot")) $("lock-forgot").addEventListener("click", () => setLockMode("recovery"));
   if ($("lock-forgot2")) $("lock-forgot2").addEventListener("click", () => setLockMode("recovery"));
@@ -407,6 +475,9 @@
       try {
         await api("POST", "/api/vault/complete-onboarding", {});
         modal.style.display = "none";
+        // 初始化弹窗也要一起收掉：原来只关了恢复码弹窗，解锁后它还挂在屏幕上
+        hideOnboardingModal();
+        suggestHelloBind = true;   // 解锁后引导绑定 Windows Hello
         log("恢复码已确认保存，加密库已上锁，请用密码解锁后使用", "ok");
         await refreshAppLock();
         showLockScreen(true);
@@ -414,6 +485,32 @@
         log(e.error || e.message || "完成初始化失败", "err");
       }
     };
+  }
+
+  function hideOnboardingModal() {
+    const m = $("vault-onboarding-modal");
+    if (m) m.style.display = "none";
+  }
+
+  function showHelloSuggest() {
+    const m = $("hello-suggest-modal");
+    if (m) m.style.display = "flex";
+  }
+  // 事件只在这里绑一次（之前吃过「同一个按钮绑两份处理器」的亏）
+  if ($("hello-suggest-bind")) {
+    $("hello-suggest-bind").addEventListener("click", async () => {
+      const m = $("hello-suggest-modal");
+      if (m) m.style.display = "none";
+      await completeHelloBind();
+      updateHelloBtn();
+    });
+  }
+  if ($("hello-suggest-later")) {
+    $("hello-suggest-later").addEventListener("click", () => {
+      const m = $("hello-suggest-modal");
+      if (m) m.style.display = "none";
+      log("已跳过 Windows Hello 绑定，之后可在「设置 → 安全」里绑定", "info");
+    });
   }
 
   async function refreshVaultStatus() {
@@ -658,6 +755,12 @@
     return false;
   }
 
+  // 「最新版本」这一行以前没人写，永远停在「尚未检查」
+  const setLatestLabel = (text) => {
+    const el = $("about-latest");
+    if (el) el.textContent = text;
+  };
+
   async function checkForUpdates() {
     const button = $("check-updates");
     button.disabled = true;
@@ -669,16 +772,19 @@
       const currentVersion = result.current_version || "dev";
       $("app-version").textContent = `版本 ${currentVersion}`;
       if (result.version_comparable === false) {
+        setLatestLabel("开发构建不做比较");
         setUpdateStatus(`当前是开发构建（${currentVersion}），不做版本比较`, "");
         log(`当前 ${currentVersion} 不是正式发布版本，跳过更新比较；如需正式版请手动下载 Release 包`, "info");
         return;
       }
       if (!result.update_available) {
+        setLatestLabel(`${result.latest_version || currentVersion}（已是最新）`);
         setUpdateStatus(`已是最新版本（${currentVersion}）`, "ok");
         log(`版本检查完成：当前 ${currentVersion}，已是最新版本`, "ok");
         return;
       }
 
+      setLatestLabel(result.latest_version || "未知");
       log(`发现新版本 ${result.latest_version}（当前 ${currentVersion}）`, "info");
       if (!result.supports_self_update) {
         const status = $("update-status");
@@ -892,6 +998,7 @@
         fillModelSelect();
       }
       renderActiveModelInfo();
+      try { refreshModelLamp(); } catch (_) { /* 启动早期还没这盏灯 */ }
       if (c.scan_interval) $("scan-interval").value = String(c.scan_interval);
       if (c.write_interval) $("write-interval").value = String(c.write_interval);
       if (c.folder_merge_interval) $("merge-interval").value = String(c.folder_merge_interval);
@@ -1275,24 +1382,112 @@
 
   // 旧的 JSON 单独导入监听器已移除：统一走 dataImportZip（按扩展名分流 zip/json）
 
+  // ---------- 数据任务弹窗（导出 / 导入 / 清除 共用：确认 → 进度 → 完成） ----------
+  const dataTask = (() => {
+    const modal = $("data-task-modal");
+    let resolveOk = null;
+    let abortFn = null;
+    function paint(o) {
+      $("data-task-title").textContent = o.title || "";
+      $("data-task-text").textContent = o.text || "";
+      $("data-task-detail").textContent = o.detail || "";
+      const bar = $("data-task-bar");
+      bar.style.display = o.bar ? "block" : "none";
+      bar.value = 0;
+      const ok = $("data-task-ok");
+      ok.textContent = o.okText || "确定";
+      ok.style.display = o.showOk === false ? "none" : "";
+      const cancel = $("data-task-cancel");
+      cancel.textContent = o.cancelText || "取消";
+      cancel.style.display = o.showCancel === false ? "none" : "";
+      modal.style.display = "flex";
+    }
+    function settle(value) {
+      const r = resolveOk;
+      resolveOk = null;
+      abortFn = null;
+      modal.style.display = "none";
+      if (r) r(value);
+    }
+    $("data-task-ok").addEventListener("click", () => settle(true));
+    $("data-task-cancel").addEventListener("click", () => {
+      // 进度阶段点取消 = 中断任务（弹窗留给调用方收尾）；确认阶段 = 返回 false
+      if (abortFn) {
+        const f = abortFn;
+        abortFn = null;
+        f();
+        return;
+      }
+      settle(false);
+    });
+    $("data-task-x").addEventListener("click", () => $("data-task-cancel").click());
+    return {
+      confirm(o) {
+        return new Promise((resolve) => {
+          resolveOk = resolve;
+          paint(Object.assign({}, o, { showCancel: true }));
+        });
+      },
+      progress(o) {
+        abortFn = o.onCancel || null;
+        paint(Object.assign({}, o, { bar: true, showOk: false, showCancel: true }));
+        return {
+          set(pct, detail) {
+            const bar = $("data-task-bar");
+            if (typeof pct === "number") bar.value = Math.max(0, Math.min(100, pct));
+            if (detail !== undefined) $("data-task-detail").textContent = detail;
+          },
+        };
+      },
+      done(o) {
+        paint(Object.assign({}, o, { showCancel: false, okText: o.okText || "确定" }));
+      },
+    };
+  })();
+  const fmtBytes = (n) => {
+    const v = Number(n) || 0;
+    if (v < 1024) return `${v} B`;
+    if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`;
+    if (v < 1024 * 1024 * 1024) return `${(v / 1048576).toFixed(1)} MB`;
+    return `${(v / 1073741824).toFixed(2)} GB`;
+  };
+
   const clearModal = $("clear-modal");
   if ($("data-clear-btn")) $("data-clear-btn").addEventListener("click", () => { clearModal.style.display = "flex"; });
   $("clear-close").addEventListener("click", () => { clearModal.style.display = "none"; });
   $("clear-all").addEventListener("click", () => document.querySelectorAll(".clear-options input").forEach(x => x.checked = true));
   $("clear-none").addEventListener("click", () => document.querySelectorAll(".clear-options input").forEach(x => x.checked = false));
   $("clear-confirm").addEventListener("click", async () => {
-    const scopes = [...document.querySelectorAll(".clear-options input:checked")].map(x => x.value);
-    if (!scopes.length) { log("请至少选择一类数据", "warn"); return; }
-    if (!confirm("确定清除已选数据？清除前会自动备份。")) return;
+    const picked = [...document.querySelectorAll(".clear-options input:checked")];
+    if (!picked.length) { log("请至少选择一类数据", "warn"); return; }
+    const scopes = picked.map(x => x.value);
+    const names = picked.map(x => (x.closest("label")?.textContent || x.value).trim());
+    const ok = await dataTask.confirm({
+      title: "清除当前数据",
+      text: `将清除：${names.join("、")}。清除前会自动备份，此操作不可撤销。`,
+      okText: "确认清除",
+    });
+    if (!ok) return;
+    const bar = dataTask.progress({ title: "正在清除", text: "正在清除已选数据…" });
     try {
       const r = await api("POST", "/api/data/clear", { scopes });
-      log(`已清除：${r.cleared.join("、")}`, "warn"); clearModal.style.display = "none";
+      bar.set(100);
+      log(`已清除：${r.cleared.join("、")}`, "warn");
+      clearModal.style.display = "none";
+      dataTask.done({
+        title: "清除完成",
+        text: `已清除：${(r.cleared || []).join("、")}`,
+        detail: r.backup ? `清除前已自动备份到 ${r.backup}` : "",
+      });
       refreshStats(); loadFolderMerge();
       if (scopes.includes("folder_profile")) {
         await loadFolderProfiles();
         await refreshOrganizationReadiness();
       }
-    } catch (e) { log("清除失败: " + (e.error || e.message), "err"); }
+    } catch (e) {
+      dataTask.done({ title: "清除失败", text: (e.error || e.message || String(e)) });
+      log("清除失败: " + (e.error || e.message), "err");
+    }
   });
 
   // ---------- 扫码登录 ----------
@@ -1390,6 +1585,43 @@
     } catch (e) { log("保存 Cookie 失败: " + e.message, "err"); }
   });
 
+  // ---------- 状态指示灯（模型 / 登录，挂在设置页各自的「测试」按钮旁）----------
+  // 侧栏收起时日志看不见，测试结果就无处可查，所以把结论直接标在按钮边上
+  function setLamp(id, state, text, short) {
+    const lamp = $(id);
+    if (!lamp) return;
+    lamp.className = "lamp" + (state ? " " + state : "");
+    const wrap = lamp.closest(".lamp-tag");
+    if (wrap) wrap.title = text;
+    const note = $(id + "-text");
+    if (note && short !== undefined) note.textContent = short;
+  }
+  function refreshLoginLamp() {
+    return api("GET", "/api/login/status").then((s) => {
+      const ok = !!(s && s.configured);
+      setLamp("lamp-login", ok ? "ok" : "err",
+        ok ? `B 站登录：已登录${s.mid ? `（mid=${s.mid}）` : ""}` : "B 站登录：未登录，扫码或填 Cookie 后再测",
+        ok ? `已登录${s.mid ? ` · mid=${s.mid}` : ""}` : "未登录");
+    }).catch(() => setLamp("lamp-login", "err", "B 站登录：状态未知", "状态未知"));
+  }
+  async function refreshModelLamp() {
+    // 锁屏启动时配置拉不到（403），解锁后没人再拉一次，缓存一直是空的 —— 自己补一次
+    if (!modelsCache.length) {
+      try { await loadConfig(); } catch (_) { /* 仍锁着就算了，先显示未知 */ }
+    }
+    let m = null;
+    try { m = typeof modelById === "function" ? modelById(activeModelId) : null; } catch (_) { m = null; }
+    const st = m && m.test_status;
+    const label = { ok: "已通过", fail: "失败", testing: "测试中", untested: "未测试" }[st] || "未知";
+    const state = st === "ok" ? "ok" : st === "fail" ? "err" : st === "testing" ? "testing" : "warn";
+    setLamp("lamp-model", m ? state : "", m
+      ? `模型 ${m.name}：${label}${m.test_message ? `（${m.test_message}）` : ""}`
+      : "模型：未选择，先在下方添加并选择模型",
+    m ? `${label}` : "未选择模型");
+  }
+  refreshLoginLamp();
+  refreshModelLamp();
+
   // ---------- 连接测试 ----------
   async function testCookie() {
     log("测试 Cookie 读取 ...");
@@ -1398,6 +1630,7 @@
       if (r.ok) log("✅ " + r.message, "ok");
       else log("❌ Cookie 测试失败: " + r.error, "err");
     } catch (e) { log("❌ 请求失败: " + e.message, "err"); }
+    refreshLoginLamp();
   }
   $("test-cookie-qr").addEventListener("click", testCookie);
   $("test-cookie-manual").addEventListener("click", testCookie);
@@ -1409,6 +1642,7 @@
       if (r.ok) log("✅ " + r.message, "ok");
       else log("❌ 模型连接失败: " + r.error, "err");
     } catch (e) { log("❌ 请求失败: " + e.message, "err"); }
+    refreshModelLamp();
   });
 
   // ---------- 扫描状态弹窗 ----------
@@ -4190,6 +4424,7 @@
     setManageStatus(`测试完成：成功 ${ok} · 失败 ${fail}`);
     await loadConfig();
     renderManageLists();
+    refreshModelLamp();      // 顶栏指示灯跟着测试结果走
   });
 
   // ---------- 初始化 ----------
@@ -4225,6 +4460,26 @@
     const panel = $("settings-panel");
     if (panel) panel.hidden = true;
   }
+  // 点面板以外的地方、或按 Esc 也能关掉设置
+  document.addEventListener("pointerdown", (e) => {
+    const panel = $("settings-panel");
+    if (!panel || panel.hidden) return;
+    const t = e.target;
+    // 例外只有两类：齿轮自己（它是开关，这里先关掉的话紧接着的 click 又会打开），
+    // 以及任何对话框 —— .modal 是 position:fixed; inset:0 的全屏遮罩，所以「点对话框内部」
+    // 与「点它的遮罩」都落在 .modal 里；不排除它们，从设置里打开的弹窗一被点击，
+    // 面板就会在背后消失（导出/导入、管理模型、清除数据这些都是从设置里开的）。
+    if (panel.contains(t)
+        || (t.closest && t.closest('.modal'))
+        || (t.closest && t.closest("#settings-btn, #rail-settings"))) return;
+    closeSettings();
+  });
+  document.addEventListener("keydown", (e) => {
+    const panel = $("settings-panel");
+    if (e.key === "Escape" && panel && !panel.hidden) closeSettings();
+  });
+  // 壳层托盘「设置」的语义是「打开」（不是开关），走专用事件而不是模拟点击
+  document.addEventListener("shell:open-settings", () => openSettings());
   async function showFavoritesInSettings() {
     const host = $("settings-favorites-host");
     if (!host) return;
@@ -4266,7 +4521,8 @@
       refreshUsage();
     }
     if (name === "favorites") showFavoritesInSettings();
-    if (name === "about") {
+    // 「当前版本」搬到了独立的「应用更新」页，进这两页时都同步一次
+    if (name === "update" || name === "about") {
       const av = $("about-version"), pv = $("app-version");
       if (av && pv) av.textContent = pv.textContent;
     }
@@ -4366,7 +4622,12 @@
     } catch (_) {}
   }
 
-  if ($("settings-btn")) $("settings-btn").addEventListener("click", () => openSettings());
+  // 齿轮是开关：面板开着时再点一次就收起（左侧图标栏的其它按钮与空白处本来就会关掉面板）
+  if ($("settings-btn")) $("settings-btn").addEventListener("click", () => {
+    const panel = $("settings-panel");
+    if (panel && !panel.hidden) closeSettings();
+    else openSettings();
+  });
   if ($("settings-close")) $("settings-close").addEventListener("click", closeSettings);
   if ($("settings-nav")) {
     $("settings-nav").addEventListener("click", (e) => {
@@ -4423,10 +4684,10 @@
     };
     setState("正在请求 Windows Hello…", "");
     try {
-      if (window.shell && window.shell.raiseWindow) window.shell.raiseWindow().catch(() => {});
-      await api("POST", "/api/vault/bind-device", {});
+      await helloAside(() => api("POST", "/api/vault/bind-device", {}));
       const vs = await api("GET", "/api/vault/status");
       if (vs && vs.has_device_wrap) setState("已绑定", "ok");
+      setHelloAvailable(!!(vs && vs.has_device_wrap));
       log("Windows Hello 绑定成功", "ok");
       updateHelloBtn();
       refreshSettingsData();
@@ -4439,6 +4700,7 @@
     }
   }
   if ($("settings-sec-hello")) {
+    // 曾经这里还挂过第二个 click 处理函数，一次点击会跑两遍、弹两次 Windows Hello —— 已合并到下面唯一那个
     $("settings-sec-hello").addEventListener("click", async () => {
       try {
         const vs = await api("GET", "/api/vault/status");
@@ -4446,17 +4708,20 @@
           log("请先设置应用密码", "warn");
           return;
         }
-        if (vs.has_device_wrap && vs.unlocked) {
-          const st = $("settings-sec-hello-state");
-          if (st) {
-            st.textContent = "已绑定";
-            st.style.color = "var(--green)";
+        if (vs.has_device_wrap) {
+          if (!vs.unlocked) {
+            log("请先解锁加密库后再解绑 Windows Hello", "warn");
+            showLockScreen(true);
+            return;
           }
-          log("本机已绑定 Windows Hello / DPAPI，如需重绑请先解锁后再次点击", "info");
+          await api("POST", "/api/vault/unbind-device", {});
+          log("已解绑 Windows Hello", "ok");
+          setHelloAvailable(false);
+          updateHelloBtn();
           return;
         }
         if (!vs.unlocked) {
-          // 要求用户先解锁一次，解锁成功后自动继续绑定
+          // 绑定需要先解锁一次，解锁成功后自动继续
           pendingHelloBind = true;
           const st = $("settings-sec-hello-state");
           if (st) {
@@ -4469,10 +4734,12 @@
           return;
         }
         await completeHelloBind();
+        updateHelloBtn();
       } catch (e) {
-        log(e.error || e.message || "绑定失败", "err");
+        log(e.error || e.message || "操作失败", "err");
       }
     });
+    updateHelloBtn();
   }
   if ($("settings-save-advanced")) {
     $("settings-save-advanced").addEventListener("click", async () => {
@@ -4766,26 +5033,71 @@
   setInterval(() => {
     try { if (typeof refreshStats === "function") refreshStats(); } catch (_) {}
     refreshUsage();
+    // 顶栏两盏灯也跟着刷（登录可能过期、模型可能换了）
+    try { refreshLoginLamp(); } catch (_) {}
+    try { refreshModelLamp(); } catch (_) {}
   }, 60000);
 
 
-  // 数据：整目录 zip 导出
+  // 数据：整目录 zip 导出（桌面壳走原生保存对话框 + 主进程落盘，带进度可取消）
   let vaultUnlockedCached = true;
-  function downloadExportZip() {
-    // 在用户点击手势内同步发起下载（await 会丢失手势，浏览器会静默拦截）
+  async function downloadExportZip() {
     if (!vaultUnlockedCached) {
       log("导出失败：加密库已锁定，请先解锁", "err");
       const screen = document.getElementById("app-lock-screen");
       if (screen) screen.hidden = false;
       return;
     }
-    log("正在导出数据目录 zip…", "info");
-    const f = document.createElement("iframe");
-    f.hidden = true;
-    f.src = "/api/data/export-zip?t=" + Date.now();
-    document.body.appendChild(f);
-    setTimeout(() => { f.remove(); }, 30000);
-    log("已请求下载 zip（若未出现下载条，请看浏览器下载列表）", "ok");
+    const shell = window.shell;
+    if (!shell || !shell.data) {
+      // 浏览器模式：在用户点击手势内同步发起下载（await 会丢失手势，浏览器会静默拦截）
+      log("正在导出数据目录 zip…", "info");
+      const f = document.createElement("iframe");
+      f.hidden = true;
+      f.src = "/api/data/export-zip?t=" + Date.now();
+      document.body.appendChild(f);
+      setTimeout(() => { f.remove(); }, 30000);
+      log("已请求下载 zip（若未出现下载条，请看浏览器下载列表）", "ok");
+      return;
+    }
+    const picked = await shell.data.chooseSavePath();
+    if (!picked || !picked.ok) return;   // 用户在保存对话框里取消
+    const bar = dataTask.progress({
+      title: "导出项目数据",
+      text: "正在打包并保存…",
+      // 打包在后端先完成才开始传输，这段没有任何字节可报，先把话说清楚
+      detail: `正在打包数据（${picked.filePath}）…此包为明文备份，含 Cookie 与 API Key，请勿上传网盘`,
+      onCancel: () => shell.data.cancelDownload(),
+    });
+    shell.data.onProgress(({ received, total }) => {
+      const pct = total ? Math.round((received / total) * 100) : 0;
+      bar.set(pct, total
+        ? `${fmtBytes(received)} / ${fmtBytes(total)}（${pct}%）`
+        : fmtBytes(received));
+    });
+    let r;
+    try {
+      r = await shell.data.download({
+        url: `${location.origin}/api/data/export-zip?t=${Date.now()}`,
+        filePath: picked.filePath,
+        headers: API_TOKEN ? { "X-BiliFav-Token": API_TOKEN } : {},
+      });
+    } finally {
+      shell.data.offProgress();
+    }
+    if (r && r.ok) {
+      log(`已导出项目数据：${r.filePath}`, "ok");
+      dataTask.done({
+        title: "导出完成",
+        text: `已完成，保存到 ${r.filePath}`,
+        detail: fmtBytes(r.bytes),
+      });
+    } else if (r && r.canceled) {
+      dataTask.done({ title: "已取消", text: "导出已取消，未写入文件。" });
+    } else {
+      log("导出失败：" + ((r && r.error) || "未知错误"), "err");
+      dataTask.done({ title: "导出失败", text: (r && r.error) || "未知错误" });
+    }
   }
   if ($("settings-data-export")) {
     $("settings-data-export").onclick = downloadExportZip;
@@ -4803,16 +5115,20 @@
       if (!file) return;
       const isZip = /\.zip$/i.test(file.name) || file.type === "application/zip";
       const isJson = /\.json$/i.test(file.name) || file.type === "application/json";
-      const ok = window.confirm(
-        isZip
-          ? "将用 zip 覆盖本机数据目录（导入前自动备份）。确定继续？"
-          : "将导入 JSON 项目数据（覆盖，导入前自动备份）。确定继续？"
-      );
+      if (!isZip && !isJson) {
+        log("请选择 .zip 或 .json 文件", "warn");
+        return;
+      }
+      const ok = await dataTask.confirm({
+        title: "读取项目数据",
+        text: isZip
+          ? "将用该 zip 覆盖本机数据目录，导入前会自动备份。"
+          : "将导入 JSON 项目数据（覆盖），导入前会自动备份。",
+        detail: file.name,
+        okText: "开始导入",
+      });
       if (!ok) return;
-      const bar = document.createElement("progress");
-      bar.value = 0; bar.max = 100;
-      bar.style.cssText = "position:fixed;right:16px;bottom:16px;width:220px;z-index:9999";
-      document.body.appendChild(bar);
+      const bar = dataTask.progress({ title: "正在导入", text: `正在读取 ${file.name}…` });
       try {
         if (isZip) {
           const b64 = await new Promise((resolve, reject) => {
@@ -4821,26 +5137,31 @@
             fr.onerror = reject;
             fr.readAsDataURL(file);
           });
-          bar.value = 40;
+          bar.set(35, "正在解压并写入数据目录…");
           const r = await api("POST", "/api/data/import-zip", { zip_b64: b64 });
-          bar.value = 100;
-          log("已导入 zip：" + ((r && r.files) || 0) + " 个文件" + (r && r.migrated ? "；" + r.migrated : ""), "ok");
-        } else if (isJson) {
+          bar.set(100);
+          const files = (r && r.files) || 0;
+          log(`已导入 zip：${files} 个文件` + (r && r.migrated ? `；${r.migrated}` : ""), "ok");
+          dataTask.done({
+            title: "导入完成",
+            text: `已从 ${file.name} 导入 ${files} 个文件`,
+            detail: (r && r.migrated) || "",
+          });
+        } else {
           const text = await file.text();
           const bundle = JSON.parse(text);
-          bar.value = 40;
+          bar.set(60, "正在写入数据…");
           await api("POST", "/api/data/import", { bundle, scope: "all" });
-          bar.value = 100;
+          bar.set(100);
           log("已导入 JSON 项目数据", "ok");
-        } else {
-          log("请选择 .zip 或 .json 文件", "warn");
+          dataTask.done({ title: "导入完成", text: `已从 ${file.name} 导入 JSON 项目数据` });
         }
         refreshDataPath();
         refreshUsage();
       } catch (e) {
-        log("导入失败：" + (e.error || e.message || e), "err");
-      } finally {
-        setTimeout(() => bar.remove(), 800);
+        const msg = e.error || e.message || String(e);
+        log("导入失败：" + msg, "err");
+        dataTask.done({ title: "导入失败", text: msg });
       }
     });
   })();
@@ -4860,21 +5181,7 @@
     }).catch(() => {});
   }
   if ($("settings-sec-hello")) {
-    $("settings-sec-hello").addEventListener("click", async () => {
-      try {
-        const vs = await api("GET", "/api/vault/status");
-        if (vs && vs.has_device_wrap) {
-          await api("POST", "/api/vault/unbind-device", {});
-          log("已解绑 Windows Hello", "ok");
-          updateHelloBtn();
-          return;
-        }
-        await completeHelloBind();
-        updateHelloBtn();
-      } catch (e) {
-        log(e.error || e.message || "操作失败", "err");
-      }
-    });
+    // 唯一的绑定/解绑入口（原来这里还挂着一份旧实现，一次点击会弹两次 Windows Hello）
     updateHelloBtn();
   }
 
