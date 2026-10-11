@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import server
+import store
 import vault as vault_mod
 
 
@@ -19,13 +20,18 @@ class VaultApiTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         root = Path(self._tmp.name)
-        self._old = (server.VAULT, server.VAULT_DB_ENC, server._APP_LOCK.copy())
+        self._old = (server.VAULT, server.VAULT_DB_ENC, server._APP_LOCK.copy(),
+                     store.DATA_DIR, store.DB_FILE)
+        store.DATA_DIR = root / "data"
+        store.DB_FILE = store.DATA_DIR / "library.sqlite3"
+        store._initialize()
         server.VAULT = vault_mod.Vault(root / "vault.json")
         server.VAULT_DB_ENC = root / "library.sqlite3.enc"
         server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
 
     def tearDown(self):
-        server.VAULT, server.VAULT_DB_ENC, old_lock = self._old
+        (server.VAULT, server.VAULT_DB_ENC, old_lock,
+         store.DATA_DIR, store.DB_FILE) = self._old
         server._APP_LOCK.update(old_lock)
         self._tmp.cleanup()
 
