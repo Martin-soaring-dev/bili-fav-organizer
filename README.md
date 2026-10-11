@@ -238,6 +238,17 @@ bili-fav-organizer/
 
 ## 更新日志
 
+### [v0.209](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.209)（2026-10-12）
+
+**正式版：保险库可靠性修复、旧版数据迁移验证与 Windows 双桌面版本交付。**
+
+- 修复加密数据库快照、锁定后的明文清理、解锁失败保护及重复初始化问题；强化 SQLite 一致性与恢复校验。
+- 兼容 v0.208 旧数据库；已使用非空合成数据完成迁移、密码与恢复码解锁及密文损坏保护测试。
+- 同时提供传统 Windows 安装版、Windows 便携版与 Electron Neo 桌面安装版，并发布对应 SHA-256 校验文件。
+- 自动化 Windows CI、打包检查和四轮隔离验收已开展。已知限制：旧版 v0.208 的更新器不会主动提示预发布版；Neo 卸载残留曾有一次未复现的验收报告，建议卸载后检查目录。安装包暂未进行代码签名。
+- 建议升级前备份个人数据；历史数据如启用保险库，须妥善保存恢复码。
+
+
 ### [v0.209-beta.2](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.209-beta.2)（2026-10-11 · 预发布）
 
 **修复 Beta.1 加密仓库迁移和解锁安全缺陷，改善 Electron neo 标题栏布局。仍为预发布版，请先备份重要数据。**
