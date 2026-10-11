@@ -48,10 +48,14 @@ def run_node(node: str, script: Path, args: list[str], *, cwd: Path,
     result = subprocess.run(command, cwd=cwd, env=env, text=True, encoding="utf-8",
                             errors="replace", capture_output=True, timeout=timeout,
                             check=False)
+    # Windows GitHub runners often default stdout to cp1252; Node/CDP returns
+    # Unicode (Chinese UI text). Never let logging abort a valid smoke test.
     if result.stdout:
-        print(result.stdout, end="", flush=True)
+        sys.stdout.buffer.write(result.stdout.encode("utf-8", errors="replace"))
+        sys.stdout.buffer.flush()
     if result.stderr:
-        print(result.stderr, end="", file=sys.stderr, flush=True)
+        sys.stderr.buffer.write(result.stderr.encode("utf-8", errors="replace"))
+        sys.stderr.buffer.flush()
     return result
 
 
