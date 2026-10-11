@@ -170,6 +170,11 @@ def _legacy_bundle():
 
 
 def _initialize():
+    # When a vault snapshot exists, the database must be restored only AFTER
+    # authenticating the DEK. Never copy a legacy DB or create an empty DB here:
+    # that would mask a missing/corrupted encrypted snapshot on unlock.
+    if not DB_FILE.exists() and (DATA_DIR / "library.sqlite3.enc").exists():
+        return
     _migrate_database_location()
     existed = DB_FILE.exists()
     if not existed:
