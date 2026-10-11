@@ -1,15 +1,17 @@
 {
   "name": "bili-fav-organizer-shell",
-  "version": "0.0.0",
+  "version": "0.209.0",
   "private": true,
-  "description": "B站收藏夹智能整理 —— Electron 桌面壳（业务后端仍为 Python，见 docs/compose/spec/desktop-shell.md T1/T2）",
+  "description": "B站收藏夹智能整理 —— Electron 桌面壳（neo 线）；便携版/老安装包仍走 PyInstaller + Inno",
+  "author": "Martin-soaring-dev",
   "main": "electron/main.js",
   "scripts": {
     "dev": "electron .",
     "start": "electron ."
   },
   "devDependencies": {
-    "electron": "^44.7.0"
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

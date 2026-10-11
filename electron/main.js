@@ -1,7 +1,8 @@
 'use strict';
 // Electron 壳：窗口、托盘、单实例，以及托管 Python 后端（拉起 → 握手 → 收摊）。
-const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, ipcMain, dialog } = require('electron');
 const { spawn } = require('node:child_process');
+const { StringDecoder } = require('node:string_decoder');
 const fs = require('node:fs');
 const path = require('node:path');
 const pty = require('node-pty');
@@ -50,9 +51,21 @@ function logLine(tag, text) {
 
 const log = (...a) => logLine('shell', a.join(' '));
 
-// 后端输出按行转发：一行一条，方便与 shell.log 里的壳日志对照
-function forwardBackend(tag, chunk) {
-  const text = String(chunk);
+// 后端输出按行转发：一行一条，方便与 shell.log 里的壳日志对照。
+// 用 StringDecoder 拼接：直接 String(chunk) 会在多字节字符被 chunk 切断时产生乱码。
+const backendDecoders = new WeakMap();
+
+function backendText(stream, chunk) {
+  let decoder = backendDecoders.get(stream);
+  if (!decoder) {
+    decoder = new StringDecoder('utf8');
+    backendDecoders.set(stream, decoder);
+  }
+  return decoder.write(chunk);
+}
+
+function forwardBackend(tag, stream, chunk) {
+  const text = backendText(stream, chunk);
   for (const l of text.split(/\r?\n/)) if (l.trim()) logLine(tag, l);
 }
 
@@ -91,15 +104,30 @@ const TERM_CWD = APP_DATA_ROOT;   // 与 /api/terminal/exec 的工作目录一�
 
 function resolveShell() {
   const dirs = (process.env.PATH || '').split(';');
-  for (const name of ['pwsh.exe', 'powershell.exe']) {
+  const fromPath = (name) => {
     for (const dir of dirs) {
       try {
-        if (dir && fs.existsSync(path.join(dir, name))) {
-          return { exe: path.join(dir, name), args: ['-NoLogo'] };
-        }
+        if (dir && fs.existsSync(path.join(dir, name))) return path.join(dir, name);
       } catch { /* 路径里可能有非法字符，跳过 */ }
     }
+    return null;
+  };
+  // 用系统已装的 PowerShell 7：PATH 里没有就再查标准安装位置，
+  // 免得环境变量被裁剪时悄悄掉回 Windows PowerShell 5.1
+  const pf = process.env.ProgramFiles || 'C:\\Program Files';
+  const local = process.env.LOCALAPPDATA || '';
+  const pwsh = [
+    fromPath('pwsh.exe'),
+    path.join(pf, 'PowerShell', '7', 'pwsh.exe'),
+    local && path.join(local, 'Microsoft', 'WindowsApps', 'pwsh.exe'),
+  ].filter(Boolean);
+  for (const exe of pwsh) {
+    try {
+      if (fs.existsSync(exe)) return { exe, args: ['-NoLogo'] };
+    } catch { /* 跳过不可用的路径 */ }
   }
+  const legacy = fromPath('powershell.exe');
+  if (legacy) return { exe: legacy, args: ['-NoLogo'] };
   return { exe: process.env.ComSpec || 'cmd.exe', args: [] };
 }
 
@@ -120,15 +148,38 @@ function killAllTerminals() {
 }
 
 function registerShellIpc() {
-  // Windows Hello 的验证框跟着前台窗口走：先把本窗口提到最前，它才不会被压在下面
-  ipcMain.handle('shell:raise-window', () => {
+  // 渲染进程的主题（自动/浅色/深色）决定标题栏按钮配色
+  ipcMain.on('shell:set-theme', (_e, payload) => {
+    const mode = typeof payload === 'string' ? payload : payload && payload.mode;
+    const next = ['light', 'dark', 'system'].includes(mode) ? mode : 'system';
+    const changed = next !== themeMode;
+    themeMode = next;
+    // 关键：那三个按钮的悬停/按下高亮由 Chromium 按「应用主题」画，不是我们 CSS 画的。
+    // 系统是浅色而应用选了深色时，它会画浅色主题的深色高亮 —— 压在深色标题栏上等于看不见。
+    // 把应用的明暗也告诉它，按钮反馈才跟得上。
+    if (nativeTheme.themeSource !== next) nativeTheme.themeSource = next;
+    if (changed) applyOverlay();
+  });
+
+  // Windows Hello 的验证框由系统的凭据 broker（CredentialUIBroker.exe）绘制，不是本窗口的子窗口。
+  // 它属于更高完整性级别，我们**没有权限**把那个窗口置顶（实测 SetWindowPos 返回 ACCESS_DENIED，
+  // 这是 UIPI 的策略，不是参数问题），也没法让它一出现就是前台。
+  // 既然抬不动它，就让自己让开：验证期间把本窗口最小化，结束后还原并抢回焦点。
+  ipcMain.handle('shell:hello-aside', () => {
     if (win && !win.isDestroyed()) {
-      win.setAlwaysOnTop(true);
-      win.moveTop();
+      win.setAlwaysOnTop(false);
+      win.minimize();
+      log('Hello 验证开始：本窗口已让开');
+    }
+    return { ok: true };
+  });
+
+  ipcMain.handle('shell:hello-restore', () => {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
       win.focus();
-      setTimeout(() => {
-        if (win && !win.isDestroyed()) win.setAlwaysOnTop(false);
-      }, 2500);
+      log('Hello 验证结束：本窗口已还原');
     }
     return { ok: true };
   });
@@ -208,6 +259,86 @@ function registerTerminalIpc() {
   });
 }
 
+/* ---------------- 数据包导出/导入 ---------------- */
+// 导出走「原生保存对话框 + 主进程落盘」：页面里的隐藏 iframe 只能丢进浏览器下载目录，
+// 既不能选路径，也拿不到进度，更没法取消。
+let downloadAbort = null;
+
+function stamp() {
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+
+async function streamToFile(url, filePath, headers, signal) {
+  const res = await fetch(url, { headers, signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const total = Number(res.headers.get('content-length') || 0);
+  let received = 0;
+  let lastSent = 0;
+  const out = fs.createWriteStream(filePath);
+  const reader = res.body.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.length;
+      await new Promise((resolve, reject) => {
+        out.write(Buffer.from(value), err => (err ? reject(err) : resolve()));
+      });
+      // 分块很密，节流到 ~10 次/秒，别把 IPC 灌满
+      const now = Date.now();
+      if (now - lastSent > 100 && win && !win.isDestroyed()) {
+        lastSent = now;
+        win.webContents.send('data:progress', { received, total });
+      }
+    }
+  } finally {
+    await new Promise(resolve => out.end(resolve));
+  }
+  if (win && !win.isDestroyed()) win.webContents.send('data:progress', { received, total });
+  return { bytes: received, total };
+}
+
+function registerDataIpc() {
+  ipcMain.handle('data:choose-save', async () => {
+    if (!win || win.isDestroyed()) return { ok: false, error: 'no-window' };
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: '导出项目数据',
+      message: '此包为本机数据目录整包（明文）：含明文数据库、B 站 Cookie 与 API Key，请勿上传网盘',
+      defaultPath: path.join(app.getPath('downloads'), `BiliFavOrganizer-${stamp()}.zip`),
+      filters: [{ name: '项目数据包', extensions: ['zip'] }],
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    return { ok: true, filePath };
+  });
+
+  // 只接受本机后端地址，避免把主进程当任意下载器用
+  ipcMain.handle('data:download', async (_e, opts) => {
+    const url = String((opts && opts.url) || '');
+    const filePath = String((opts && opts.filePath) || '');
+    if (!backendUrl || !url.startsWith(`${backendUrl}/`)) return { ok: false, error: 'url' };
+    if (!filePath) return { ok: false, error: 'path' };
+    downloadAbort = new AbortController();
+    try {
+      const r = await streamToFile(url, filePath, (opts && opts.headers) || {}, downloadAbort.signal);
+      log(`导出完成 ${filePath}（${r.bytes} 字节）`);
+      return { ok: true, bytes: r.bytes, filePath };
+    } catch (e) {
+      const aborted = downloadAbort?.signal.aborted;
+      try { fs.rmSync(filePath, { force: true }); } catch { /* 没写成就算了 */ }
+      log(`导出${aborted ? '已取消' : '失败'}：${e.message}`);
+      return { ok: false, canceled: Boolean(aborted), error: e.message };
+    } finally {
+      downloadAbort = null;
+    }
+  });
+
+  ipcMain.on('data:cancel-download', () => {
+    if (downloadAbort) downloadAbort.abort();
+  });
+}
+
 /* ---------------- config.json（沿用应用自己的文件，不新建） ---------------- */
 function readConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch { return {}; }
@@ -256,6 +387,16 @@ function resolvePython() {
   return 'python';
 }
 
+// 随包的冻结后端：打包版把它放在 resources/backend（electron-builder 的 extraResources），
+// 有它就不用源码树与系统 Python 了。dev 下要试这条路可以设 BFO_BACKEND_EXE 指过去。
+function resolveFrozenBackend() {
+  const explicit = process.env.BFO_BACKEND_EXE;
+  if (explicit && fs.existsSync(explicit)) return explicit;
+  if (!app.isPackaged) return null;
+  const bundled = path.join(process.resourcesPath, 'backend', 'BiliFavOrganizer.exe');
+  return fs.existsSync(bundled) ? bundled : null;
+}
+
 const HANDSHAKE_TIMEOUT = 30000;
 
 // 等后端那一行 BFO_READY：它既给出真实端口，也等于「已在收连接」的就绪信号
@@ -274,7 +415,7 @@ function awaitHandshake(child) {
     const timer = setTimeout(() => finish(reject, new Error('后端 30 秒内未回传端口')), HANDSHAKE_TIMEOUT);
 
     child.stdout.on('data', d => {
-      buf += String(d);
+      buf += backendText(child.stdout, d);
       let i;
       while (!settled && (i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i).trim();
@@ -293,7 +434,7 @@ function awaitHandshake(child) {
         }
       }
     });
-    child.stderr.on('data', d => forwardBackend('py!', d));
+    child.stderr.on('data', d => forwardBackend('py!', child.stderr, d));
     child.on('exit', onExit);
   });
 }
@@ -348,9 +489,14 @@ async function ensureBackend() {
 
   const py = resolvePython();
   const port = FIXED_PORT;   // 0 = 交给系统分配
-  log(`拉起 Python 后端：${py} server.py --port ${port} --no-browser --handshake`);
-  const child = spawn(py, ['server.py', '--port', String(port), '--no-browser', '--handshake'], {
-    cwd: REPO_ROOT,
+  const frozen = resolveFrozenBackend();
+  const cmd = frozen || py;
+  const args = frozen
+    ? ['--port', String(port), '--no-browser', '--handshake']
+    : ['server.py', '--port', String(port), '--no-browser', '--handshake'];
+  log(`拉起后端：${cmd} ${args.join(' ')}${frozen ? '（随包冻结后端）' : ''}`);
+  const child = spawn(cmd, args, {
+    cwd: frozen ? path.dirname(cmd) : REPO_ROOT,
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
     env: {
@@ -385,13 +531,35 @@ async function ensureBackend() {
 }
 
 /* ---------------- 窗口 ---------------- */
+// 标题栏按钮的配色不能只看系统主题：应用自己可以选浅色/深色（渲染进程的 data-theme），
+// 系统是浅色而应用切到深色时，跟着系统走会让按钮变成深色压在深底上——看不见。
+// 所以由渲染进程把生效的 mode 报上来，系统主题只在 mode=system（自动）时才参与。
+let themeMode = 'system';
+
 function overlayTheme() {
-  const dark = nativeTheme.shouldUseDarkColors;
+  const dark = themeMode === 'dark'
+    || (themeMode === 'system' && nativeTheme.shouldUseDarkColors);
   return {
+    // 底色保持透明：按钮和它的悬停/按下层都由 Chromium 自己画在标题栏之上，
+    // 给不透明底色反而会让标题栏变成唯一一块平板，跟别处的毛玻璃不搭。
     color: '#00000000',
     symbolColor: dark ? '#ffffff' : '#1b1b1b',
     height: CAPTION_H,
   };
+}
+
+function applyOverlay() {
+  if (!win || win.isDestroyed()) return;
+  const theme = overlayTheme();
+  win.setTitleBarOverlay(theme);
+  log(`标题栏配色更新 symbolColor=${theme.symbolColor} bg=${theme.color} mode=${themeMode}`);
+}
+
+// 系统明暗变化（自动模式下生效）：光重算符号色不够 —— 顶栏底色是页面算出来报上来的，
+// 系统换了明暗页面才知道，所以还要让页面重新上报一次，否则按钮区域停在旧配色上。
+function onSystemThemeChanged() {
+  applyOverlay();
+  if (win && !win.isDestroyed()) win.webContents.send('shell:system-theme-changed');
 }
 
 function createWindow() {
@@ -441,9 +609,7 @@ function createWindow() {
   win.on('resize', saveBounds);
   win.on('move', saveBounds);
 
-  nativeTheme.on('updated', () => {
-    if (win && !win.isDestroyed()) win.setTitleBarOverlay(overlayTheme());
-  });
+  nativeTheme.on('updated', onSystemThemeChanged);
 
   win.loadURL(backendUrl);
 }
@@ -477,6 +643,7 @@ app.whenReady().then(async () => {
   }
   registerShellIpc();
   registerTerminalIpc();
+  registerDataIpc();
   createTray();
   createWindow();
 });
