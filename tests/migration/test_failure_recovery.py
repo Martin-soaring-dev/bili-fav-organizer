@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from migration.support import fixture, probe, runtime
+from migration.support import core_sha256, fixture, probe, runtime
 
 
 class FailureRecoveryTests(unittest.TestCase):
@@ -74,8 +74,12 @@ class FailureRecoveryTests(unittest.TestCase):
         result = probe(current, "onboard")
         meta_after = (current.local_app_data / "vault.json").read_bytes()
         self.assertEqual(meta_before, meta_after)
-        self.assertEqual(200, result["onboarding"]["http_status"])
-        self.assertEqual(first["decrypted_snapshot"]["sha256"], result["decrypted_snapshot"]["sha256"])
+        self.assertEqual(409, result["onboarding"]["http_status"])
+        self.assertFalse(result["onboarding"]["body"]["ok"])
+        unlocked = probe(current, "unlock")
+        self.assertEqual(200, unlocked["unlock"]["http_status"])
+        self.assertEqual(core_sha256(first["decrypted_snapshot"]),
+                         core_sha256(unlocked["database_after_unlock"]))
 
 
 if __name__ == "__main__":
