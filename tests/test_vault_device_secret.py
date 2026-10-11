@@ -38,6 +38,7 @@ class VaultDeviceSecretTests(unittest.TestCase):
             server.DEVICE_SECRET_BLOB,
             server.VAULT,
             store.DATA_DIR,
+            store.DB_FILE,
             server.VAULT_DB_ENC,
         )
         server.USER_DATA_DIR = root
@@ -48,6 +49,8 @@ class VaultDeviceSecretTests(unittest.TestCase):
         # 所以它必须跟着 store.DATA_DIR 一起换。
         store.DATA_DIR = root / "data"
         store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        store.DB_FILE = store.DATA_DIR / "library.sqlite3"
+        store._initialize()
         server.VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
 
         vault = vault_mod.Vault(root / "vault.json")
@@ -60,7 +63,7 @@ class VaultDeviceSecretTests(unittest.TestCase):
     def tearDown(self):
         (server.USER_DATA_DIR, server.APP_UNLOCK_BLOB,
          server.DEVICE_SECRET_BLOB, server.VAULT, store.DATA_DIR,
-         server.VAULT_DB_ENC) = self._old
+         store.DB_FILE, server.VAULT_DB_ENC) = self._old
         server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
         self._tmp.cleanup()
 
