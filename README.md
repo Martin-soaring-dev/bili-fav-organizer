@@ -235,6 +235,7 @@ bili-fav-organizer/
 |------|------|
 | [docs/brand/README.md](docs/brand/README.md) | 完整视觉规范、SVG 设计语言、应用接入与资产索引 |
 | [docs/design/scan-sqlite-migration-plan.md](docs/design/scan-sqlite-migration-plan.md) | 扫描策略状态机、SQLite 迁移 |
+| [docs/design/data-reliability-task-scheduler-refactor-plan.md](docs/design/data-reliability-task-scheduler-refactor-plan.md) | 数据可靠性、统一任务调度、保险库模式 B 与验收路线 |
 | [docs/design/persistent-index-folder-profiles.md](docs/design/persistent-index-folder-profiles.md) | 持久索引、画像门槛、默认夹规则 |
 | [docs/design/provider-api-compatibility.md](docs/design/provider-api-compatibility.md) | 供应商 API 差异与模型规格来源 |
 | [docs/release-audit.md](docs/release-audit.md) | 发布体系审计：构建/打包链路、运行时自更新、待修问题与优先级 |
