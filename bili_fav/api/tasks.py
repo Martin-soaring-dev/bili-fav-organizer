@@ -49,4 +49,12 @@ def create_task_router(snapshot: Callable[[], Mapping]) -> APIRouter:
             for kind in LEGACY_KINDS
         ]}
 
+
+    @router.get("/legacy/{kind}")
+    def get_legacy_task(kind: str):
+        from fastapi import HTTPException
+        if kind not in LEGACY_KINDS:
+            raise HTTPException(status_code=404, detail="Unknown task kind")
+        return normalize_legacy_task(kind, snapshot().get(f"{kind}_run"))
+
     return router
