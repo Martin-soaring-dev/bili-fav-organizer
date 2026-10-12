@@ -3377,7 +3377,11 @@ def folder_organize_suggest():
         finally:
             state["running"] = False
 
-    threading.Thread(target=run, daemon=True).start()
+    try:
+        _scan_task_bridge().launch("folder_merge_ai", run, resource="folder-merge-ai")
+    except Exception as exc:
+        state["running"] = False
+        return JSONResponse({"ok": False, "error": f"任务调度失败：{exc}"}, status_code=503)
     return {"ok": True, "started": True}
 
 
@@ -3629,7 +3633,11 @@ def folder_organize_start():
             emit("ok" if state["status"] == "done" else "warn", "收藏夹合并任务已结束",
                  phase="folder_merge", kind="folder_merge_end")
 
-    threading.Thread(target=run, daemon=True).start()
+    try:
+        _scan_task_bridge().launch("folder_merge", run, resource="folder-merge")
+    except Exception as exc:
+        state["running"] = False
+        return JSONResponse({"ok": False, "error": f"任务调度失败：{exc}"}, status_code=503)
     return {"ok": True, "started": True, "total": len(pending)}
 
 
@@ -4177,7 +4185,11 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                  total=state["total"], generated=state["generated"],
                  skipped=state["skipped"], failed=state["failed"])
 
-    threading.Thread(target=run, daemon=True).start()
+    try:
+        _scan_task_bridge().launch("folder_profile", run, resource="folder-profile")
+    except Exception as exc:
+        state["running"] = False
+        return JSONResponse({"ok": False, "error": f"任务调度失败：{exc}"}, status_code=503)
     return {"ok": True, "started": True, "total": len(requested)}
 
 
@@ -4526,7 +4538,11 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
             state["continuous"] = False
             state["waiting"] = False
 
-    threading.Thread(target=run, daemon=True).start()
+    try:
+        _scan_task_bridge().launch("analyze", run, resource="analyze")
+    except Exception as exc:
+        state["running"] = False
+        return JSONResponse({"ok": False, "error": f"任务调度失败：{exc}"}, status_code=503)
     return {"ok": True, "started": True, "total": len(videos), "pending": pending0}
 
 
@@ -5162,7 +5178,11 @@ def apply_start():
                     emit("ok", f"已自动刷新收藏夹目录：{len(refreshed)} 个",
                          phase="apply", kind="folders_refreshed")
 
-    threading.Thread(target=run, daemon=True).start()
+    try:
+        _scan_task_bridge().launch("apply", run, resource="apply")
+    except Exception as exc:
+        state["running"] = False
+        return JSONResponse({"ok": False, "error": f"任务调度失败：{exc}"}, status_code=503)
     return {"ok": True, "started": True, "total": total, "batch_size": batch_size,
             "held_unknown": held_unknown}
 
