@@ -100,7 +100,15 @@ class TaskManager:
             self._records[record.id] = record
             self._cancel[record.id] = cancel
             self._save()
-            self._pool.submit(self._run, record.id, worker, cancel)
+            try:
+                self._pool.submit(self._run, record.id, worker, cancel)
+            except RuntimeError as exc:
+                record.state = "failed"
+                record.error = f"Scheduler unavailable: {exc}"
+                record.finished_at = time.time()
+                self._cancel.pop(record.id, None)
+                self._save()
+                raise
             return record.id
 
     def _run(self, task_id: str, worker: Callable[[Event], Any], cancel: Event) -> None:
@@ -110,6 +118,7 @@ class TaskManager:
                 record.state = "cancelled"
                 record.finished_at = time.time()
                 self._save()
+                self._cancel.pop(task_id, None)
                 return
             record.state = "running"
             record.started_at = time.time()
