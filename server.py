@@ -56,6 +56,7 @@ from bili_fav.api.tasks import create_task_router
 from bili_fav.api.registry import register_legacy_routes
 from bili_fav.domain.versions import version_key as _version_key, is_newer_version as _is_newer_version
 from bili_fav.domain.llm_settings import thinking_params as _thinking_params
+from bili_fav.security.redaction import mask_secret as _mask
 from bili_fav.application.task_bridge import LegacyTaskBridge
 
 HERE = Path(__file__).resolve().parent
@@ -1307,12 +1308,6 @@ def _migrate_legacy_settings():
                 log.info("已迁移旧设置文件到用户数据目录：%s", destination)
             except Exception as e:
                 log.warning("无法迁移旧设置文件 %s：%s", legacy, e)
-
-
-def _mask(v: str) -> str:
-    """凭据脱敏：只保留尾 4 位。"""
-    v = v or ""
-    return ("****" + v[-4:]) if len(v) > 4 else ("****" if v else "")
 
 
 def load_config() -> dict:
