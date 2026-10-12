@@ -53,6 +53,7 @@ import llm_analyzer
 import store
 
 from bili_fav.api.tasks import create_task_router
+from bili_fav.api.registry import register_legacy_routes
 from bili_fav.application.task_bridge import LegacyTaskBridge
 
 HERE = Path(__file__).resolve().parent
@@ -566,12 +567,10 @@ class AppLockPasswordIn(BaseModel):
     auto_unlock: bool = False
 
 
-@app.get("/api/app-lock/status")
 def app_lock_status():
     return _app_lock_status()
 
 
-@app.post("/api/app-lock/set-password")
 def app_lock_set_password(body: AppLockPasswordIn):
     password = body.password or ""
     if len(password) < 6:
@@ -589,7 +588,6 @@ def app_lock_set_password(body: AppLockPasswordIn):
     return {"ok": True, **_app_lock_status()}
 
 
-@app.post("/api/app-lock/unlock")
 def app_lock_unlock(body: AppLockPasswordIn):
     if not _APP_LOCK["enabled"]:
         _APP_LOCK["unlocked"] = True
@@ -606,7 +604,6 @@ def app_lock_unlock(body: AppLockPasswordIn):
     return {"ok": True, **_app_lock_status()}
 
 
-@app.post("/api/app-lock/lock")
 def app_lock_lock():
     if _APP_LOCK["enabled"]:
         _APP_LOCK["unlocked"] = False
@@ -614,7 +611,6 @@ def app_lock_lock():
     return {"ok": True, **_app_lock_status()}
 
 
-@app.post("/api/app-lock/remove")
 def app_lock_remove(body: AppLockPasswordIn):
     if not _APP_LOCK["enabled"]:
         return {"ok": True, **_app_lock_status()}
@@ -767,12 +763,10 @@ class VaultUnlockIn(BaseModel):
     bound_mid: str = ""
 
 
-@app.get("/api/vault/status")
 def vault_status():
     return _vault_status_payload()
 
 
-@app.post("/api/vault/onboarding")
 def vault_onboarding(body: VaultInitIn):
     """新用户：绑定 mid + 设密码，返回一次性恢复码明文。"""
     password = body.password or ""
@@ -796,7 +790,6 @@ def vault_onboarding(body: VaultInitIn):
 
 
 
-@app.post("/api/vault/unbind-device")
 def vault_unbind_device():
     try:
         VAULT._pop_wrap("device")
@@ -815,7 +808,6 @@ class VaultUnlockDeviceIn(BaseModel):
     skip_hello: bool = False
 
 
-@app.post("/api/vault/unlock-device")
 def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
     """Hello 验证后解锁：无设备包装则现场绑定，再用设备材料解 DEK。"""
     skip_hello = bool(body and body.skip_hello)
@@ -859,7 +851,6 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
             **_vault_status_payload()}
 
 
-@app.post("/api/vault/unlock")
 def vault_unlock(body: VaultUnlockIn):
     try:
         if body.recovery_code:
@@ -888,7 +879,6 @@ def vault_unlock(body: VaultUnlockIn):
             **_vault_status_payload()}
 
 
-@app.post("/api/vault/lock")
 def vault_lock():
     try:
         _vault_save_db_encrypted()
@@ -899,7 +889,6 @@ def vault_lock():
     return {"ok": True, **_vault_status_payload()}
 
 
-@app.post("/api/vault/complete-onboarding")
 def vault_complete_onboarding():
     if not VAULT.is_unlocked():
         return JSONResponse({"ok": False, "error": "加密库未解锁"}, status_code=403)
@@ -920,7 +909,6 @@ class VaultSetPasswordIn(BaseModel):
     password: str = ""
 
 
-@app.post("/api/vault/set-password")
 def vault_set_password(body: VaultSetPasswordIn):
     password = body.password or ""
     if len(password) < 6:
@@ -939,7 +927,6 @@ class VaultBindDeviceIn(BaseModel):
     skip_hello: bool = False
 
 
-@app.post("/api/vault/bind-device")
 def vault_bind_device(body: VaultBindDeviceIn | None = None):
     """绑定 Windows/DPAPI 设备包装（须先有应用密码并解锁）。
 
@@ -1106,7 +1093,6 @@ def _raise_credential_dialog(stop: threading.Event) -> None:
         stop.wait(0.3)
 
 
-@app.post("/api/vault/hello-verify")
 def vault_hello_verify():
     """调用 Windows Hello / PIN（UserConsentVerifier）。取消或失败返回明确状态。"""
     if sys.platform != "win32":
@@ -1555,7 +1541,6 @@ def get_session_cookie() -> bili_api.CookieInfo:
     return bili_api.load_cookie_from_string(cookie)
 
 
-@app.get("/api/cookie")
 def get_cookie():
     """返回当前是否已配置 cookie（不回显原值，只给尾 4 位、长度与 mid）。"""
     cfg = load_config()
@@ -1574,7 +1559,6 @@ class CookieIn(BaseModel):
     cookie_string: str = ""
 
 
-@app.post("/api/cookie")
 def set_cookie(body: CookieIn):
     """保存手动粘贴的 cookie（留空 / 脱敏值 → 不覆盖）。"""
     v = (body.cookie_string or "").strip()
@@ -1585,7 +1569,6 @@ def set_cookie(body: CookieIn):
     return {"ok": True}
 
 
-@app.get("/api/config")
 def get_config():
     """返回配置，但凭据只回**尾 4 位**（P0-1）。附带供应商/模型索引（密钥脱敏）。"""
     raw = load_config()
@@ -1639,7 +1622,6 @@ class ConfigIn(BaseModel):
     confidence_merge_min: Optional[float] = None
 
 
-@app.post("/api/config")
 def set_config(cfg: ConfigIn):
     cur = load_config()
     if cfg.base_url is not None:
@@ -1742,12 +1724,10 @@ DEFAULT_CONFIDENCE = {
 }
 
 
-@app.get("/api/prompts/defaults")
 def prompts_defaults():
     return {"ok": True, "defaults": {**DEFAULT_PROMPTS, **DEFAULT_CONFIDENCE}}
 
 
-@app.get("/api/data/paths")
 def data_paths():
     return {
         "ok": True,
@@ -1756,7 +1736,6 @@ def data_paths():
     }
 
 
-@app.get("/api/data/usage")
 def data_usage():
     def _dir_size(path: Path) -> int:
         total = 0
@@ -1795,7 +1774,6 @@ def data_usage():
     }
 
 
-@app.post("/api/data/open-folder")
 def data_open_folder():
     """打开数据目录并尽量置顶资源管理器窗口。"""
     try:
@@ -1905,18 +1883,15 @@ def _model_output_limit_error(provider: dict, model_name: str,
     return None
 
 
-@app.get("/api/providers/presets")
 def provider_presets():
     return {"presets": PROVIDER_PRESETS}
 
 
-@app.get("/api/providers")
 def providers_list():
     return {"providers": [_public_provider(p) for p in store.list_providers()],
             "models": _effective_model_rows(store.list_models())}
 
 
-@app.post("/api/providers")
 def providers_create(body: ProviderIn):
     name = (body.name or "").strip()
     base_url = (body.base_url or "").strip()
@@ -1930,7 +1905,6 @@ def providers_create(body: ProviderIn):
     return {"ok": True, "provider": _public_provider(provider), "models": []}
 
 
-@app.put("/api/providers/{provider_id}")
 def providers_update(provider_id: str, body: ProviderUpdateIn):
     api_key = body.api_key
     if api_key is not None and "****" in (api_key or ""):
@@ -1942,7 +1916,6 @@ def providers_update(provider_id: str, body: ProviderUpdateIn):
     return {"ok": True, "provider": _public_provider(provider)}
 
 
-@app.delete("/api/providers/{provider_id}")
 def providers_delete(provider_id: str):
     cfg = load_config()
     models = store.list_models(provider_id)
@@ -1956,12 +1929,10 @@ def providers_delete(provider_id: str):
     return {"ok": True}
 
 
-@app.get("/api/models")
 def models_list(provider_id: Optional[str] = None):
     return {"models": _effective_model_rows(store.list_models(provider_id))}
 
 
-@app.delete("/api/providers/{provider_id}/models")
 def provider_models_delete_all(provider_id: str):
     if not store.get_provider(provider_id):
         return JSONResponse({"ok": False, "error": "供应商不存在"}, status_code=404)
@@ -1974,7 +1945,6 @@ def provider_models_delete_all(provider_id: str):
     return {"ok": True, "removed": len(removed_ids)}
 
 
-@app.post("/api/models")
 def models_create(body: ModelIn):
     provider = store.get_provider(body.provider_id)
     if not provider:
@@ -1994,7 +1964,6 @@ def models_create(body: ModelIn):
     return {"ok": True, "model": _effective_model_rows([model])[0]}
 
 
-@app.put("/api/models/{model_id}")
 def models_update(model_id: str, body: ModelUpdateIn):
     if body.provider_id and not store.get_provider(body.provider_id):
         return JSONResponse({"ok": False, "error": "目标供应商不存在"}, status_code=404)
@@ -2021,7 +1990,6 @@ def models_update(model_id: str, body: ModelUpdateIn):
     return {"ok": True, "model": _effective_model_rows([model])[0]}
 
 
-@app.delete("/api/models/{model_id}")
 def models_delete(model_id: str):
     cfg = load_config()
     if str(cfg.get("active_model_id") or "") == str(model_id):
@@ -2230,7 +2198,6 @@ def _fetch_remote_models(provider: dict) -> list[dict]:
     return models
 
 
-@app.post("/api/providers/{provider_id}/remote-models")
 def provider_remote_models(provider_id: str):
     provider = store.get_provider(provider_id)
     if not provider:
@@ -2263,7 +2230,6 @@ def provider_remote_models(provider_id: str):
     }
 
 
-@app.post("/api/models/sync")
 def models_sync(body: ModelSyncIn):
     provider = store.get_provider(body.provider_id)
     if not provider:
@@ -2330,7 +2296,6 @@ def models_sync(body: ModelSyncIn):
     return {"ok": True, "models": _effective_model_rows(store.list_models(body.provider_id))}
 
 
-@app.post("/api/models/{model_id}/test")
 def models_test(model_id: str):
     model = store.get_model(model_id)
     if not model:
@@ -2443,14 +2408,12 @@ TERM_OUT: list[str] = []
 _TERM_LOCK = threading.Lock()
 
 
-@app.get("/api/terminal/output")
 def terminal_output(since: int = 0):
     with _TERM_LOCK:
         lines = TERM_OUT[since:]
         return {"ok": True, "since": since, "next": since + len(lines), "lines": lines}
 
 
-@app.post("/api/terminal/exec")
 def terminal_exec(body: TermExecIn):
     cmd = (body.cmd or "").strip()
     if not cmd:
@@ -2482,7 +2445,6 @@ def terminal_exec(body: TermExecIn):
     return {"ok": True}
 
 
-@app.get("/api/data/export-zip")
 def data_export_zip():
     """导出整个数据目录为 zip（排除 runtime / backups / shell）。
 
@@ -2545,7 +2507,6 @@ class ZipImportIn(BaseModel):
     zip_b64: str = ""
 
 
-@app.post("/api/data/import-zip")
 def data_import_zip(body: ZipImportIn):
     """导入完整数据目录 zip；明文旧库自动迁移加密。"""
     import base64
@@ -2587,7 +2548,6 @@ def data_import_zip(body: ZipImportIn):
     return {"ok": True, "files": extracted, "backup": bk, "migrated": migrated}
 
 
-@app.get("/api/data/export")
 def data_export():
     """导出全部项目数据为一个 JSON 文件下载（不含 cookie / api_key）。"""
     bundle = store.export_all()
@@ -2596,7 +2556,6 @@ def data_export():
                         headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
-@app.post("/api/data/import")
 def data_import(body: DataIn):
     """导入项目数据（覆盖当前数据）。导入前自动备份当前数据。"""
     if not body.bundle:
@@ -2610,7 +2569,6 @@ def data_import(body: DataIn):
     return {"ok": True, "stats": st, "backup": bk}
 
 
-@app.post("/api/data/clear")
 def data_clear(body: DataIn):
     """清除指定范围的数据。scope: scan / analysis / plan / all。清除前**自动备份**。"""
     valid = {"scan", "analysis", "plan", "folder_merge", "folder_profile", "all"}
@@ -2630,7 +2588,6 @@ def data_clear(body: DataIn):
 
 
 # ============ 事件流（SSE） ============
-@app.get("/api/events/stream")
 async def events_stream(since: int = 0):
     """服务器推送事件流；空闲时不发送任何数据（事件驱动，非轮询）。"""
     from fastapi.responses import StreamingResponse
@@ -2764,14 +2721,12 @@ async def local_api_guard(request, call_next):
     return await call_next(request)
 
 
-@app.get("/api/scan/issues")
 def scan_issues_get():
     issues = _pending_scan_issues()
     return {"issues": issues, "blocked": bool(issues),
             "running": bool((APP.get("scan_run") or {}).get("running"))}
 
 
-@app.post("/api/scan/issues/{media_id}/recover")
 def scan_issue_recover(media_id: str, body: ScanRecoveryIn):
     issue = next((row for row in _pending_scan_issues() if row["media_id"] == media_id), None)
     if not issue:
@@ -2803,7 +2758,6 @@ def _folder_view(folders: list) -> dict:
     return {"folders": rows, "selected_ids": list(selected)}
 
 
-@app.get("/api/folders")
 def folders_get():
     return _folder_view(store.load_folders())
 
@@ -2823,7 +2777,6 @@ def _refresh_folder_directory() -> list | None:
         return None
 
 
-@app.post("/api/folders/refresh")
 def folders_refresh():
     if APP["scan_run"] and APP["scan_run"].get("running"):
         return JSONResponse({"ok": False, "error": "扫描运行中，暂不刷新目录"}, status_code=409)
@@ -2838,7 +2791,6 @@ def folders_refresh():
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
-@app.put("/api/scan/selection")
 def scan_selection(body: ScanSelectionIn):
     valid = {str(f["media_id"]) for f in store.load_folders()}
     ids = list(dict.fromkeys(str(x) for x in body.folder_ids))
@@ -2849,7 +2801,6 @@ def scan_selection(body: ScanSelectionIn):
     return {"ok": True, "folder_ids": ids}
 
 
-@app.post("/api/scan")
 def scan(body: Optional[ScanIn] = None):
     return _start_scan(body)
 
@@ -3140,12 +3091,10 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
         return JSONResponse({"ok": False, "error": app_state["error"]}, status_code=503)
     return {"ok": True, "started": True, "run_id": run_id, "task_id": task_id}
 
-@app.get("/api/scan/status")
 def scan_status():
     return APP["scan_run"] or {"running": False, "error": None}
 
 
-@app.post("/api/scan/stop")
 def scan_stop():
     if APP["scan_run"]:
         APP["scan_run"]["stop"] = True
@@ -3153,7 +3102,6 @@ def scan_stop():
     return {"ok": False, "error": "没有运行中的扫描"}
 
 
-@app.get("/api/scan/tree")
 def scan_tree():
     """返回收藏夹树：每个夹的名称/应有条数/已扫条数/是否完成，供前端弹窗展示。"""
     folders = store.load_folders()
@@ -3186,7 +3134,6 @@ def scan_tree():
     }
 
 
-@app.get("/api/library/folders/{media_id}/items")
 def library_folder_items(media_id: str, q: str = "", offset: int = 0, limit: int = 100):
     """浏览本地 SQLite 中已扫描的收藏夹内容，不触发 B 站网络请求。"""
     if not any(str(folder.get("media_id")) == str(media_id) for folder in store.load_folders()):
@@ -3224,7 +3171,6 @@ class FolderMergePlanIn(BaseModel):
     groups: list[FolderMergeGroupIn]
 
 
-@app.get("/api/folder-organize")
 def folder_organize_get():
     saved_run = store.load_folder_merge_state()
     if not APP.get("folder_merge_run") and saved_run.get("running"):
@@ -3259,7 +3205,6 @@ def folder_organize_get():
             "ai_run": APP.get("folder_merge_ai_run") or {"running": False}}
 
 
-@app.post("/api/folder-organize/suggest")
 def folder_organize_suggest():
     if APP.get("folder_merge_ai_run") and APP["folder_merge_ai_run"].get("running"):
         return JSONResponse({"ok": False, "error": "AI 合并分析已在运行"}, status_code=409)
@@ -3385,7 +3330,6 @@ def folder_organize_suggest():
     return {"ok": True, "started": True}
 
 
-@app.put("/api/folder-organize/draft")
 def folder_organize_draft(body: FolderMergePlanIn):
     known = {str(f["media_id"]): f for f in store.load_folders()}
     groups = []
@@ -3413,7 +3357,6 @@ def folder_organize_draft(body: FolderMergePlanIn):
     return {"ok": True, "groups": groups}
 
 
-@app.put("/api/folder-organize/plan")
 def folder_organize_plan(body: FolderMergePlanIn):
     if body.groups:
         readiness = _organization_profile_readiness()
@@ -3473,7 +3416,6 @@ def folder_organize_plan(body: FolderMergePlanIn):
     return {"ok": True, "groups": groups}
 
 
-@app.post("/api/folder-organize/start")
 def folder_organize_start():
     if APP.get("folder_merge_run") and APP["folder_merge_run"].get("running"):
         return JSONResponse({"ok": False, "error": "收藏夹合并已在运行"}, status_code=409)
@@ -3641,7 +3583,6 @@ def folder_organize_start():
     return {"ok": True, "started": True, "total": len(pending)}
 
 
-@app.post("/api/folder-organize/stop")
 def folder_organize_stop():
     state = APP.get("folder_merge_run")
     if state and state.get("running"):
@@ -3651,7 +3592,6 @@ def folder_organize_stop():
 
 
 # ============ 连接测试 ============
-@app.post("/api/test/cookie")
 def test_cookie():
     """测试已保存 Cookie 与 B站登录态(nav)。"""
     try:
@@ -3665,7 +3605,6 @@ def test_cookie():
         return {"ok": False, "error": str(e)}
 
 
-@app.post("/api/test/llm")
 def test_llm(body: Optional[ModelTestIn] = None):
     """测试选中的模型；未传模型 ID 时测试当前激活模型。"""
     raw = load_config()
@@ -3706,7 +3645,6 @@ PASSPORT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 
-@app.post("/api/login/qr/generate")
 def login_qr_generate():
     """生成 B站登录二维码（返回 base64 图片 + qrcode_key）。"""
     try:
@@ -3735,7 +3673,6 @@ def login_qr_generate():
         return {"ok": False, "error": str(e)}
 
 
-@app.get("/api/login/qr/poll")
 def login_qr_poll():
     """轮询扫码状态；成功后解析并保存 cookie。"""
     s = LOGIN.get("session")
@@ -3771,7 +3708,6 @@ def login_qr_poll():
         return {"ok": False, "status": "error", "message": str(e)}
 
 
-@app.get("/api/login/status")
 def login_status():
     cfg = load_config()
     ck = cfg.get("cookie_string", "") or ""
@@ -3929,12 +3865,10 @@ def _organization_profile_readiness() -> dict:
                           "请先完成未扫描的收藏夹扫描，再生成或重建这些收藏夹的画像。")))}
 
 
-@app.get("/api/organization/readiness")
 def organization_readiness_get():
     return _organization_profile_readiness()
 
 
-@app.get("/api/folder-profiles")
 def folder_profiles_get():
     folders = store.load_folders()
     default_ids = _default_folder_ids(folders)
@@ -3960,7 +3894,6 @@ def folder_profiles_get():
     return {"folders": rows, "run": APP.get("folder_profile_run") or {"running": False}}
 
 
-@app.delete("/api/folder-profiles/{media_id}")
 def folder_profile_delete(media_id: str):
     """删除某个收藏夹的本地画像；不会改动 B 站收藏夹简介。"""
     folders = store.load_folders()
@@ -3977,7 +3910,6 @@ class FolderIntroPublishIn(BaseModel):
     intro: str = Field(max_length=200)
 
 
-@app.get("/api/folder-profiles/{media_id}/bilibili")
 def folder_profile_bilibili_info(media_id: str):
     """按需读取 B 站收藏夹简介，用于上传前对比。"""
     folder = next((row for row in store.load_folders()
@@ -4001,7 +3933,6 @@ def folder_profile_bilibili_info(media_id: str):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
-@app.post("/api/folder-profiles/{media_id}/publish-intro")
 def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
     """把用户确认的画像简介写回 B 站；保留远端标题、隐私状态与封面。"""
     folder = next((row for row in store.load_folders()
@@ -4036,7 +3967,6 @@ def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
-@app.post("/api/folder-profiles/generate")
 def folder_profiles_generate(body: FolderProfileGenerateIn):
     current = APP.get("folder_profile_run") or {}
     if current.get("running"):
@@ -4193,12 +4123,10 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
     return {"ok": True, "started": True, "total": len(requested)}
 
 
-@app.get("/api/folder-profiles/status")
 def folder_profiles_status():
     return APP.get("folder_profile_run") or {"running": False, "done": 0, "total": 0}
 
 
-@app.post("/api/folder-profiles/stop")
 def folder_profiles_stop():
     state = APP.get("folder_profile_run")
     if state and state.get("running"):
@@ -4336,7 +4264,6 @@ def _make_analyzer(folders: list[str], folder_profiles: list[dict] | None = None
         default_folders=inbox, on_context_split=report_context_split)
 
 
-@app.post("/api/analyze/start")
 def analyze_start(body: Optional[AnalyzeIn] = None):
     if APP["analyze_run"] and APP["analyze_run"].get("running"):
         return JSONResponse({"ok": False, "error": "分析已在运行中"}, status_code=400)
@@ -4546,14 +4473,12 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
     return {"ok": True, "started": True, "total": len(videos), "pending": pending0}
 
 
-@app.get("/api/analyze/status")
 def analyze_status():
     return APP["analyze_run"] or {"running": False, "done": 0, "total": 0,
                                   "pending": 0,
                                   "failed": 0, "stop": False, "error": None}
 
 
-@app.post("/api/analyze/stop")
 def analyze_stop():
     if APP["analyze_run"]:
         APP["analyze_run"]["stop"] = True
@@ -4562,7 +4487,6 @@ def analyze_stop():
     return {"ok": False, "error": "没有运行中的分析"}
 
 
-@app.post("/api/analyze/continuous")
 def analyze_continuous(body: AnalyzeContinuousIn):
     state = APP.get("analyze_run")
     if not state or not state.get("running"):
@@ -4573,7 +4497,6 @@ def analyze_continuous(body: AnalyzeContinuousIn):
 
 
 # ============ 阶段3: 预归类方案 ============
-@app.get("/api/plan")
 def get_plan():
     """返回分析结果 + 现有收藏夹，供前端展示归类方案。"""
     readiness = _organization_profile_readiness()
@@ -4651,7 +4574,6 @@ def get_plan():
     }
 
 
-@app.post("/api/plan/mark_invalid")
 def plan_mark_invalid():
     """把所有标题恰为「已失效视频」的视频标记为删除（写入 plan.json，等执行）。
 
@@ -4677,7 +4599,6 @@ class PlanReview(BaseModel):
     apply_list: list  # [{bvid, action, target_folder, create_new_name?}]
 
 
-@app.post("/api/plan/apply")
 def apply_plan(body: PlanReview):
     """把前端确认后的归类方案存入 plan.json，作为执行阶段的输入。
 
@@ -4754,7 +4675,6 @@ class PlanStatusIn(BaseModel):
     all: bool = False         # True 表示对 plan 中全部条目生效
 
 
-@app.post("/api/plan/set_status")
 def plan_set_status(body: PlanStatusIn):
     """把条目在「待操作 / 已完成」之间移动（例如把已完成的移回待操作）。"""
     st = body.status if body.status in ("pending", "done") else "pending"
@@ -4776,7 +4696,6 @@ class PlanRemoveIn(BaseModel):
     bvids: list = []
 
 
-@app.post("/api/plan/remove")
 def plan_remove(body: PlanRemoveIn):
     """把条目从方案中彻底移除（只删本地方案，不动 B站）。"""
     plan = store.load_plan_raw()
@@ -4792,7 +4711,6 @@ def plan_remove(body: PlanRemoveIn):
 
 
 # ============ 阶段4: 执行 ============
-@app.post("/api/apply/start")
 def apply_start():
     """批量执行 plan：失效视频 batch-del，其余视频 move。
 
@@ -5187,7 +5105,6 @@ def apply_start():
             "held_unknown": held_unknown}
 
 
-@app.get("/api/apply/status")
 def apply_status():
     return APP["apply_run"] or {"running": False, "done": 0, "total": 0,
                                 "ok": 0, "failed": 0, "skip": 0, "unknown": 0,
@@ -5195,7 +5112,6 @@ def apply_status():
                                 "log": []}
 
 
-@app.post("/api/apply/stop")
 def apply_stop():
     if APP["apply_run"]:
         APP["apply_run"]["stop"] = True
@@ -5693,7 +5609,6 @@ def _run_installer_update_worker(release: dict, info: dict):
             shutil.rmtree(work_dir, ignore_errors=True)
 
 
-@app.get("/api/version")
 def app_version_get():
     return {
         "version": _app_version(),
@@ -5708,7 +5623,6 @@ def app_version_get():
     }
 
 
-@app.post("/api/update/check")
 def update_check():
     global _UPDATE_RELEASE
     current_version = _app_version()
@@ -5753,7 +5667,6 @@ def update_check():
     }
 
 
-@app.post("/api/update/install")
 def update_install():
     global _UPDATE_RELEASE
     if os.environ.get("BFO_PARENT_PIPE") == "1" or "-beta." in _app_version():
@@ -5789,7 +5702,6 @@ def update_install():
             "install_mode": "installed" if installed else "portable"}
 
 
-@app.post("/api/update/cancel")
 def update_cancel():
     """取消正在进行的更新下载；已进入替换阶段后无法中止。"""
     with _UPDATE_LOCK:
@@ -5808,13 +5720,11 @@ def update_cancel():
     return {"ok": True, "status": "cancelled"}
 
 
-@app.get("/api/update/status")
 def update_status_get():
     return _update_state_snapshot()
 
 
 # ============ 全局状态 ============
-@app.get("/api/status")
 def status():
     return {
         "stats": store.stats(),
@@ -5861,7 +5771,6 @@ def _asset_version() -> str:
 _ASSET_VERSION_RE = re.compile(r"\?v=[A-Za-z0-9._-]*")
 
 
-@app.get("/")
 def index():
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     html = _ASSET_VERSION_RE.sub("?v=" + _asset_version(), html)
@@ -6009,6 +5918,9 @@ def main():
     if os.environ.get("BFO_PARENT_PIPE") == "1":
         threading.Thread(target=_watch_parent_pipe, daemon=True, name="parent-pipe").start()
     _UVICORN_SERVER.run()
+
+
+register_legacy_routes(app, globals())
 
 
 if __name__ == "__main__":
