@@ -213,9 +213,19 @@ class SQLiteTaskStore:
             except Exception:
                 pass
             raise TypeError("connection_factory 必须返回独占的 sqlite3.Connection")
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON")
+            return conn
+        except Exception:
+            # A lifecycle connection owns a lease as soon as the factory
+            # returns.  If connection setup fails (for example the PRAGMA is
+            # rejected), release that lease before propagating the error.
+            try:
+                conn.close()
+            except Exception:
+                pass
+            raise
 
     def _connect_ready(self) -> sqlite3.Connection:
         conn = self._connect()

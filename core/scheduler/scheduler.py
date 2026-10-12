@@ -180,7 +180,7 @@ class TaskScheduler:
             TaskStatus.INTERRUPTED, TaskStatus.FAILED,
             TaskStatus.NEEDS_RECONCILIATION,
         },
-        TaskStatus.PAUSED: {TaskStatus.RESUMING, TaskStatus.CANCELLED},
+        TaskStatus.PAUSED: {TaskStatus.RESUMING, TaskStatus.INTERRUPTED, TaskStatus.CANCELLED},
         TaskStatus.RESUMING: {
             TaskStatus.RUNNING, TaskStatus.PAUSING, TaskStatus.CANCELLING,
             TaskStatus.INTERRUPTED, TaskStatus.NEEDS_RECONCILIATION,
@@ -446,28 +446,37 @@ class TaskScheduler:
     cancel = cancel_task
 
     def resume_task(self, task_id: str) -> TaskRecord:
+        with self._condition:
+            if not self._admission_open:
+                raise AdmissionClosedError("调度器正在执行维护屏障，暂不能恢复任务")
         current = self.store.get(task_id)
         if current.status == TaskStatus.NEEDS_RECONCILIATION:
             result = self.reconcile_task(task_id)
             if not result.resolved or not result.safe_to_resume:
                 return self.store.get(task_id)
             current = self.store.get(task_id)
-        if current.status not in {TaskStatus.PAUSED, TaskStatus.INTERRUPTED}:
-            raise InvalidTaskTransitionError(
-                f"不能从 {current.status.value} 恢复任务"
-            )
-        if current.reconciliation_required:
-            raise InvalidTaskTransitionError("任务仍有未核对副作用，不能恢复")
-        if current.resume_policy == ResumePolicy.NEVER:
-            raise InvalidTaskTransitionError("该任务策略禁止恢复")
-        record = self._change(
-            task_id,
-            expected={current.status},
-            status=TaskStatus.RESUMING,
-            error=None,
-            resume_intent=ResumeIntent.MANUAL,
-        )
         with self._condition:
+            # Serialize the final state change with close_admission(). A
+            # resume that began just before a vault barrier must not dispatch
+            # a worker after the barrier closed admission.
+            if not self._admission_open:
+                raise AdmissionClosedError("调度器正在执行维护屏障，暂不能恢复任务")
+            current = self.store.get(task_id)
+            if current.status not in {TaskStatus.PAUSED, TaskStatus.INTERRUPTED}:
+                raise InvalidTaskTransitionError(
+                    f"不能从 {current.status.value} 恢复任务"
+                )
+            if current.reconciliation_required:
+                raise InvalidTaskTransitionError("任务仍有未核对副作用，不能恢复")
+            if current.resume_policy == ResumePolicy.NEVER:
+                raise InvalidTaskTransitionError("该任务策略禁止恢复")
+            record = self._change(
+                task_id,
+                expected={current.status},
+                status=TaskStatus.RESUMING,
+                error=None,
+                resume_intent=ResumeIntent.MANUAL,
+            )
             self._condition.notify_all()
         return record
 
@@ -607,6 +616,8 @@ class TaskScheduler:
             return ReconciliationResult(False, False, "该任务类型未注册核对器")
         keys = set(current.resource_keys)
         with self._condition:
+            if not self._admission_open:
+                raise AdmissionClosedError("调度器正在执行维护屏障，暂不能核对任务")
             if self._reserved_resources.intersection(keys):
                 raise ResourceBusyError("任务所需资源正在被其它任务占用")
             self._reserved_resources.update(keys)
@@ -714,7 +725,24 @@ class TaskScheduler:
             TaskStatus.RUNNING, TaskStatus.PAUSING, TaskStatus.RESUMING,
             TaskStatus.CANCELLING,
         }
-        for record in self.store.list(active_states):
+        for record in self.store.list(active_states | {TaskStatus.PAUSED}):
+            if record.status == TaskStatus.PAUSED:
+                # App workers (including user-paused and vault-paused workers)
+                # are process-local closures. A PAUSED row from an older owner
+                # therefore cannot actually resume after restart; retain its
+                # checkpoint and mark it for business-layer recovery.
+                if record.owner_epoch >= self._owner_epoch:
+                    continue
+                self._change(
+                    record.task_id,
+                    expected={TaskStatus.PAUSED},
+                    status=TaskStatus.INTERRUPTED,
+                    error={
+                        "category": "paused_task_after_restart",
+                        "message": "程序重启后原任务工作器已丢失；请从业务页面按检查点继续",
+                    },
+                )
+                continue
             if record.reconciliation_required:
                 status = TaskStatus.NEEDS_RECONCILIATION
                 category = "needs_reconciliation"

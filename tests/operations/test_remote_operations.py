@@ -187,6 +187,113 @@ class RemoteOperationTests(unittest.TestCase):
         self.assertEqual(final.attempt, 2)
         self.assertEqual(final.status, OperationStatus.CONFIRMED)
 
+    def test_manual_review_is_evidenced_and_can_be_resolved(self):
+        self.install_schema()
+        coordinator = RemoteOperationCoordinator(self.repo)
+        operation = coordinator.prepare(self.intent())
+        with self.assertRaises(TimeoutError):
+            coordinator.execute(operation.operation_id,
+                                lambda _: (_ for _ in ()).throw(TimeoutError()))
+
+        with self.assertRaises(UnsafeRetry):
+            self.repo.record_reconciliation(
+                operation.operation_id, decision="manual_review", evidence="  "
+            )
+        with self.assertRaises(UnsafeRetry):
+            self.repo.record_reconciliation(
+                operation.operation_id, decision="manual_review",
+                evidence={"user_note": "  "},
+            )
+        with self.assertRaises(UnsafeRetry):
+            self.repo.record_reconciliation(
+                operation.operation_id, decision="confirmed", evidence={},
+            )
+        not_applied = self.repo.record_reconciliation(
+            operation.operation_id, decision="not_applied",
+            preconditions_valid=True,
+            evidence={"source_still_contains": [101, 102]},
+        )
+        self.assertEqual(not_applied.status, OperationStatus.NOT_APPLIED)
+        with self.assertRaises(InvalidOperationTransition):
+            self.repo.record_reconciliation(
+                operation.operation_id, decision="confirmed",
+                evidence={"checked": "must not skip the manual-review state"},
+            )
+        manual = self.repo.record_reconciliation(
+            operation.operation_id, decision="manual_review",
+            evidence={"review": "仍无法判断，转人工复核"},
+        )
+        self.assertEqual(manual.status, OperationStatus.MANUAL_REVIEW)
+
+        # MANUAL_REVIEW continues to hold the resource until an evidenced
+        # resolution; after a human confirms the remote effect, new writes can
+        # proceed without repeating the old request.
+        with self.assertRaises(ConflictingOperation):
+            self.repo.prepare(self.intent(task_id="task-2"))
+        confirmed = self.repo.record_reconciliation(
+            operation.operation_id, decision="confirmed",
+            evidence={"checked": "B 站收藏夹内容已显示目标结果"},
+        )
+        self.assertEqual(confirmed.status, OperationStatus.CONFIRMED)
+        self.assertIsNotNone(confirmed.resolved_at)
+        self.assertEqual(
+            [event.to_status for event in self.repo.events(operation.operation_id)],
+            [OperationStatus.PREPARED, OperationStatus.DISPATCHING,
+             OperationStatus.NEEDS_RECONCILIATION, OperationStatus.NOT_APPLIED,
+             OperationStatus.MANUAL_REVIEW, OperationStatus.CONFIRMED],
+        )
+        self.repo.prepare(self.intent(task_id="task-2"))
+
+    def test_manual_review_can_return_to_safe_retry_path(self):
+        self.install_schema()
+        coordinator = RemoteOperationCoordinator(self.repo)
+        operation = coordinator.prepare(self.intent())
+        with self.assertRaises(TimeoutError):
+            coordinator.execute(operation.operation_id,
+                                lambda _: (_ for _ in ()).throw(TimeoutError()))
+        self.repo.record_reconciliation(
+            operation.operation_id, decision="manual_review",
+            evidence={"review": "需要进一步核对"},
+        )
+        with self.assertRaises(UnsafeRetry):
+            self.repo.record_reconciliation(
+                operation.operation_id, decision="not_applied",
+                preconditions_valid=False,
+                evidence={"checked": "前置条件已变化"},
+            )
+        self.repo.record_reconciliation(
+            operation.operation_id, decision="not_applied",
+            preconditions_valid=True,
+            evidence={"checked": "来源仍包含全部视频，目标未变化"},
+        )
+        sent = []
+        coordinator.execute(
+            operation.operation_id,
+            lambda current: sent.append(current.operation_id) or {"ok": True},
+            retry=True,
+            validate_retry=lambda current: current.preconditions["source_contains_all"],
+        )
+        self.assertEqual(sent, [operation.operation_id])
+        self.assertEqual(self.repo.get(operation.operation_id).attempt, 2)
+        self.assertEqual(self.repo.get(operation.operation_id).status,
+                         OperationStatus.CONFIRMED)
+
+    def test_new_conflicting_intent_is_rejected_before_prepared_row_is_created(self):
+        self.install_schema()
+        coordinator = RemoteOperationCoordinator(self.repo)
+        first = coordinator.prepare(self.intent())
+        with self.assertRaises(TimeoutError):
+            coordinator.execute(first.operation_id,
+                                lambda _: (_ for _ in ()).throw(TimeoutError()))
+        before = self.repo.list_operations(account_id="account-123")
+        with self.assertRaises(ConflictingOperation):
+            self.repo.prepare(self.intent(
+                task_id="new-direct-request", request_summary={"batch_size": 5}
+            ))
+        after = self.repo.list_operations(account_id="account-123")
+        self.assertEqual([row.operation_id for row in before],
+                         [row.operation_id for row in after])
+
     def test_not_applied_without_valid_preconditions_cannot_be_recorded(self):
         self.install_schema()
         coordinator = RemoteOperationCoordinator(self.repo)

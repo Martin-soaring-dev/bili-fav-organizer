@@ -1,6 +1,7 @@
 """Integration-contract tests for the composite Bilibili write adapter."""
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 import unittest
 
@@ -169,6 +170,54 @@ class BiliOperationAdapterTests(unittest.TestCase):
         self.assertEqual(self.adapter.last_operation_id, operation_id)
         self.assertEqual(self.repo.get(operation_id).attempt, 2)
         self.assertEqual(self.repo.get(operation_id).status, OperationStatus.CONFIRMED)
+
+    def test_direct_intro_retry_reuses_identity_and_requires_fresh_validation(self):
+        self.session.failures["update_folder_intro"] = [
+            bili_api.WriteUncertainError("lost response"), None,
+        ]
+        intro = "同一逻辑请求的简介"
+        folder_info = {"title": "目标收藏夹", "attr": 1}
+        first_request = BiliOperationAdapter(
+            self.session, self.coordinator,
+            task_id="publish-intro:stable-request", account_id="account-stable-1",
+        )
+        with self.assertRaises(bili_api.WriteUncertainError):
+            first_request.update_folder_intro("10", folder_info, intro)
+        operation_id = first_request.last_operation_id
+        self.repo.record_reconciliation(
+            operation_id, decision="not_applied", preconditions_valid=True,
+            evidence={"checked": "远端标题、隐私状态与目标内容均已核验"},
+        )
+
+        # The direct route recreates an adapter for every HTTP request. A
+        # stable task key plus the same intent must select the existing row.
+        retry_adapter = BiliOperationAdapter(
+            self.session, self.coordinator,
+            task_id="publish-intro:stable-request", account_id="account-stable-1",
+        )
+        with self.assertRaises(UnsafeRetry):
+            retry_adapter.update_folder_intro(
+                "10", folder_info, intro, retry=True,
+                validate_retry=lambda _operation: False,
+            )
+        self.assertEqual(len(self.session.calls), 1)
+        self.assertEqual(retry_adapter.update_folder_intro(
+            "10", folder_info, intro, retry=True,
+            validate_retry=lambda operation: (
+                operation.preconditions["title"] == "目标收藏夹"
+                and operation.preconditions["intro_sha256"] ==
+                hashlib.sha256(b"").hexdigest()
+            ),
+        ), {"updated": True})
+        self.assertEqual(retry_adapter.last_operation_id, operation_id)
+        self.assertEqual(self.repo.get(operation_id).attempt, 2)
+        self.assertEqual(self.repo.get(operation_id).status, OperationStatus.CONFIRMED)
+
+        # Repeating a confirmed direct request returns its saved result without
+        # issuing another remote write or adding another operation row.
+        retry_adapter.update_folder_intro("10", folder_info, intro)
+        self.assertEqual(len(self.session.calls), 2)
+        self.assertEqual(len(self.repo.list_operations()), 1)
 
     def test_only_explicit_api_response_evidence_is_rejected(self):
         self.session.failures["rename_folder"] = bili_api.BiliApiError(

@@ -8,6 +8,7 @@ import unittest
 import uuid
 from contextlib import ExitStack
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -27,6 +28,7 @@ with sqlite3.connect(TEST_ROOT / "library.sqlite3") as conn:
     conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6, 'test')")
 import server
 import store
+from core.database import DatabaseNotInitializedError, DatabaseRecoveryRequiredError
 from fastapi.testclient import TestClient
 
 
@@ -138,6 +140,112 @@ class ScanTroubleshootingTests(unittest.TestCase):
         self.recover("refresh")
         self.assertFalse(server.scan_issues_get()["blocked"])
         self.assertNotIn("clean", self.fake.calls)
+
+    def test_save_config_can_persist_qr_login_before_database_initialization(self):
+        profile = TEST_ROOT / f"fresh-config-{uuid.uuid4().hex}"
+        profile.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, profile, True)
+        config_file = profile / "config.json"
+        secrets_file = profile / "secrets.json"
+        secrets_file.write_text('{"api_key":"legacy-key"}', encoding="utf-8")
+
+        with patch.object(server, "USER_DATA_DIR", profile), \
+             patch.object(server, "CONFIG_FILE", config_file), \
+             patch.object(server, "SECRETS_FILE", secrets_file), \
+             patch.object(server.store, "list_providers",
+                          side_effect=DatabaseNotInitializedError("first use")):
+            server.save_config({"cookie_string": "SESSDATA=qr-login", "api_key": "legacy-key",
+                                "scan_interval": 2})
+
+        self.assertEqual({"scan_interval": 2}, server._read_json_file(config_file)[0])
+        self.assertEqual({"api_key": "legacy-key", "cookie_string": "SESSDATA=qr-login"},
+                         server._read_json_file(secrets_file)[0])
+
+    def test_save_config_does_not_swallow_database_recovery_required(self):
+        profile = TEST_ROOT / f"recovery-config-{uuid.uuid4().hex}"
+        profile.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, profile, True)
+
+        with patch.object(server, "USER_DATA_DIR", profile), \
+             patch.object(server, "CONFIG_FILE", profile / "config.json"), \
+             patch.object(server, "SECRETS_FILE", profile / "secrets.json"), \
+             patch.object(server.store, "list_providers",
+                          side_effect=DatabaseRecoveryRequiredError("restore required")):
+            with self.assertRaises(DatabaseRecoveryRequiredError):
+                server.save_config({"scan_interval": 2})
+
+    def test_scan_tree_and_organize_suggest_accept_legacy_media_count(self):
+        legacy_folders = [{"media_id": "10", "title": "旧版收藏夹", "media_count": 3}]
+        with patch.object(server.store, "load_folders", return_value=legacy_folders), \
+             patch.object(server.store, "load_folder_scan_states", return_value={}), \
+             patch.object(server.store, "load_videos_raw", return_value={}):
+            tree = server.scan_tree()
+        self.assertEqual(3, tree["folders"][0]["expected"])
+
+        with patch.object(server, "_organization_profile_readiness",
+                          return_value={"ready": True, "missing": []}), \
+             patch.object(server.store, "load_folders", return_value=legacy_folders), \
+             patch.object(server.store, "load_videos", return_value=[]), \
+             patch.object(server, "_current_folder_profile_contexts", return_value=[]), \
+             patch.object(server, "make_llm_config", return_value=SimpleNamespace(configured=False)):
+            result = server.folder_organize_suggest()
+        self.assertEqual(400, result.status_code)
+        self.assertIn("LLM 未配置", result.body.decode("utf-8"))
+
+    def test_scheduler_pause_emits_paused_scan_end_and_clears_running_state(self):
+        self.fake.count = 0
+        self.fake.readable = 0
+        before = len(server.APP["events"])
+
+        def submit_inline(_task_type, state, runner, **_kwargs):
+            try:
+                runner()
+            except server.PauseRequested:
+                pass
+            return SimpleNamespace(task_id=state["id"]), None
+
+        with patch.object(server, "_submit_app_task", side_effect=submit_inline), \
+             patch.object(server, "_task_safe_point",
+                          side_effect=server.PauseRequested("user pause")):
+            result = server.scan(server.ScanIn(folder_ids=["10"], mode="rebuild"))
+
+        self.assertTrue(result["started"])
+        self.assertFalse(server.APP["scan_run"]["running"])
+        self.assertEqual("paused", server.APP["scan_run"]["status"])
+        events = [event for event in server.APP["events"][before:]
+                  if event.get("run_id") == result["run_id"]]
+        self.assertTrue(any(event.get("kind") == "scan_end" and
+                            event.get("outcome") == "paused" for event in events))
+
+    def test_manual_stop_rate_limit_is_reported_as_cancellation(self):
+        self.fake.count = 1
+        self.fake.readable = 0
+        before = len(server.APP["events"])
+
+        def stop_then_rate_limit(*_args, **_kwargs):
+            server.APP["scan_run"]["stop"] = True
+            raise server.bili_api.RateLimitedError("已手动停止（请求间隔等待期间）")
+
+        self.fake.iter_folder_videos = stop_then_rate_limit
+
+        def submit_inline(_task_type, state, runner, **_kwargs):
+            try:
+                runner()
+            except server.CancelRequested:
+                pass
+            return SimpleNamespace(task_id=state["id"]), None
+
+        with patch.object(server, "_submit_app_task", side_effect=submit_inline):
+            result = server.scan(server.ScanIn(folder_ids=["10"], mode="rebuild"))
+
+        self.assertTrue(result["started"])
+        self.assertFalse(server.APP["scan_run"]["running"])
+        self.assertEqual("cancelled", server.APP["scan_run"]["status"])
+        events = [event for event in server.APP["events"][before:]
+                  if event.get("run_id") == result["run_id"]]
+        self.assertTrue(any(event.get("kind") == "scan_end" and
+                            event.get("outcome") == "cancelled" for event in events))
+        self.assertFalse(any(event.get("outcome") == "rate_limited" for event in events))
 
     def test_retry_with_gap_stays_blocked(self):
         self.run_scan()

@@ -4,6 +4,8 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from core.database import (
     ActiveConnectionsError,
     DatabaseAlreadyInitializedError,
     DatabaseLifecycle,
+    DatabaseLifecycleError,
     DatabaseNotInitializedError,
     DatabaseRecoveryRequiredError,
     DatabaseState,
@@ -164,6 +167,57 @@ class CandidateDatabaseTests(unittest.TestCase):
         self.assertEqual(0, lifecycle.active_connection_count)
         lifecycle.install_candidate(self.candidate)
         self.assertEqual("new", self._read_marker(self.active))
+
+    def test_begin_drain_closes_gate_and_waits_for_existing_connections(self):
+        self._make_db(self.active, "old")
+        lifecycle = DatabaseLifecycle(self.active)
+        lifecycle.set_state(DatabaseState.READY)
+        connection = lifecycle.connect(owner="test-reader")
+        completed = threading.Event()
+        errors = []
+
+        def drain():
+            try:
+                lifecycle.begin_drain(timeout=2)
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                completed.set()
+
+        thread = threading.Thread(target=drain)
+        thread.start()
+        deadline = time.monotonic() + 1
+        while lifecycle.state is DatabaseState.READY and time.monotonic() < deadline:
+            time.sleep(0.001)
+        self.assertEqual(DatabaseState.DRAINING, lifecycle.state)
+        with self.assertRaises(DatabaseLifecycleError):
+            lifecycle.connect(owner="late-reader")
+        self.assertFalse(completed.is_set())
+
+        connection.close()
+        self.assertTrue(completed.wait(1))
+        thread.join(timeout=1)
+        self.assertEqual([], errors)
+        self.assertEqual(DatabaseState.DRAINING, lifecycle.state)
+        self.assertEqual(0, lifecycle.active_connection_count)
+
+        maintenance = lifecycle.connect_for_drain(owner="test-maintenance")
+        self.assertEqual(1, lifecycle.active_connection_count)
+        maintenance.close()
+        self.assertEqual(0, lifecycle.active_connection_count)
+
+    def test_begin_drain_timeout_restores_ready_without_discarding_connection(self):
+        self._make_db(self.active, "old")
+        lifecycle = DatabaseLifecycle(self.active)
+        lifecycle.set_state(DatabaseState.READY)
+        connection = lifecycle.connect(owner="stuck-reader")
+        try:
+            with self.assertRaises(ActiveConnectionsError):
+                lifecycle.begin_drain(timeout=0)
+            self.assertEqual(DatabaseState.READY, lifecycle.state)
+            self.assertEqual(1, lifecycle.active_connection_count)
+        finally:
+            connection.close()
 
     @staticmethod
     def _read_marker(path: Path) -> str:

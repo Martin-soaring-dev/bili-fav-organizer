@@ -160,7 +160,7 @@ button.mini-btn { padding: 5px 10px; font-size: 12px; }
 .layout > .panels { order: 2; }
 .layout > .sidebar-shell { order: 3; }
 
-/* 左侧图标栏：底部 显示 / 设置 / 锁定 */
+/* 左侧图标栏：底部 主题 / 任务 / 设置 / 锁定 */
 .rail {
   flex: 0 0 var(--rail-w); width: var(--rail-w);
   display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -172,7 +172,7 @@ button.mini-btn { padding: 5px 10px; font-size: 12px; }
 .rail-btn {
   width: 32px; height: 32px; border-radius: 6px;
   border: 0; background: transparent; color: var(--muted);
-  display: grid; place-items: center; cursor: pointer;
+  display: grid; place-items: center; cursor: pointer; position: relative;
   transition: background .12s linear, color .12s linear;
 }
 .rail-btn svg { width: 18px; height: 18px; }
@@ -1411,6 +1411,64 @@ svg.theme-ico[hidden] { display: none !important; }
 }
 #data-task-bar::-webkit-progress-bar { background: color-mix(in srgb, var(--border) 55%, transparent); }
 #data-task-bar::-webkit-progress-value { background: var(--accent); transition: width .2s linear; }
+
+/* ===================== 后台任务与远端写入核对 ===================== */
+.rail-task-active-count[hidden], .task-center-list[hidden] {
+  display: none !important;
+}
+.rail-task-active-count {
+  position: absolute; top: -3px; right: -3px;
+  min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+  color: #fff; background: var(--accent); font-size: 9px; line-height: 15px;
+  text-align: center;
+}
+.task-center-box { width: min(940px, 94vw); height: min(700px, 86vh); }
+.task-center-head-actions { display: flex; align-items: center; gap: 8px; }
+.task-center-tabs {
+  display: flex; gap: 6px; padding: 8px 16px 0; border-bottom: 1px solid var(--border);
+}
+.task-center-tab {
+  padding: 7px 12px; border: 0; border-bottom: 2px solid transparent;
+  color: var(--muted); background: transparent; cursor: pointer;
+}
+.task-center-tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 700; }
+.task-center-list { display: flex; flex-direction: column; gap: 10px; }
+.task-center-empty { padding: 18px 8px; color: var(--muted); text-align: center; }
+.task-center-item {
+  padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+}
+.task-center-item-top {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+}
+.task-center-item-title { min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.task-center-item-meta, .task-center-item-detail {
+  margin-top: 6px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere;
+}
+.task-center-item-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.task-center-status {
+  flex: 0 0 auto; padding: 3px 8px; border-radius: 999px;
+  color: var(--muted); background: color-mix(in srgb, var(--border) 55%, transparent);
+  font-size: 11px; font-weight: 700;
+}
+.task-center-status.running, .task-center-status.resuming { color: var(--accent); }
+.task-center-status.paused, .task-center-status.needs_reconciliation { color: var(--accent2); }
+.task-center-status.completed { color: var(--green); }
+.task-center-status.failed { color: var(--danger); }
+.task-center-operation-summary {
+  width: 100%; min-height: 56px; margin-top: 8px; padding: 8px;
+  border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); background: var(--bg); resize: vertical;
+}
+.task-center-confirm {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 8px;
+  color: var(--muted); font-size: 12px;
+}
+.task-center-confirm input { margin-top: 2px; }
+@media (max-width: 640px) {
+  .task-center-box { width: 96vw; height: 90vh; }
+  .task-center-item-top { flex-direction: column; }
+}
 
 /* Electron neo: native titlebar overlay + continuous Mica surface. Browser stays
    unchanged. Chromium owns the caption controls; all interactive children opt out. */

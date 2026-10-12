@@ -3675,7 +3675,16 @@
         refreshStats();
       }
       if (ev.kind === "scan_end") {
-        $("scan-progress").style.display = "none";
+        const box = $("scan-progress");
+        if (ev.outcome === "paused") {
+          box.style.display = "flex";
+          if (typeof ev.done === "number") setProgress(box, "scan", ev.done, ev.total || 0);
+          const progress = typeof ev.done === "number" && typeof ev.total === "number"
+            ? `（${ev.done}/${ev.total} 条）` : "";
+          $("scan-text").textContent = `扫描已暂停${progress}；可从扫描页继续`;
+        } else {
+          box.style.display = "none";
+        }
         refreshStats();
         if (folderProfileListLoaded) loadFolderProfiles();
         refreshOrganizationReadiness();
@@ -4433,6 +4442,376 @@
     refreshModelLamp();      // 顶栏指示灯跟着测试结果走
   });
 
+  // ---------- 统一任务中心 ----------
+  const taskCenterModal = $("task-center-modal");
+  const taskCenterActiveStatuses = new Set([
+    "QUEUED", "RUNNING", "PAUSING", "PAUSED", "RESUMING", "CANCELLING",
+  ]);
+  const taskTypeLabels = {
+    scan: "收藏夹扫描",
+    analyze: "内容分析",
+    folder_profile: "收藏夹画像生成",
+    folder_merge_suggestions: "收藏夹合并建议",
+    apply: "批量整理执行",
+    folder_merge: "收藏夹合并执行",
+  };
+  const taskStatusLabels = {
+    QUEUED: "等待运行", RUNNING: "运行中", PAUSING: "正在暂停",
+    PAUSED: "已暂停", RESUMING: "正在恢复", CANCELLING: "正在取消",
+    CANCELLED: "已取消", INTERRUPTED: "已中断",
+    NEEDS_RECONCILIATION: "等待远端核对", COMPLETED: "已完成", FAILED: "失败",
+  };
+  const operationStatusLabels = {
+    DISPATCHING: "正在发送", NEEDS_RECONCILIATION: "等待核对",
+    NOT_APPLIED: "已核实未生效，可安全重试", MANUAL_REVIEW: "人工复核中",
+  };
+  let taskCenterTimer = null;
+  let taskCenterLoading = false;
+  let taskCenterTab = "tasks";
+
+  function taskCenterStatus(text, isError = false) {
+    const status = $("task-center-status");
+    if (!status) return;
+    status.textContent = text || "";
+    status.classList.toggle("error", !!isError);
+  }
+
+  function taskCenterButton(label, className, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className || "mini";
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function taskProgressText(task) {
+    const progress = task.progress || {};
+    const parts = [];
+    if (progress.done != null && progress.total != null) {
+      parts.push(String(progress.done) + "/" + String(progress.total));
+    }
+    if (progress.current) parts.push(String(progress.current));
+    if (task.pause_reason) {
+      const reason = {
+        USER: "用户暂停", VAULT_LOCK: "保险库锁定暂停",
+        SCHEDULER_SHUTDOWN: "应用关闭暂停",
+        RESOURCE_MAINTENANCE: "资源维护暂停",
+      }[task.pause_reason] || task.pause_reason;
+      parts.push(reason);
+    }
+    if (task.reconciliation_required) {
+      parts.push(task.reconciliation_reason || "需要核对远端写入结果");
+    }
+    if (task.error) {
+      const error = task.error.message || task.error.category || JSON.stringify(task.error);
+      parts.push("错误：" + String(error).slice(0, 240));
+    }
+    return parts.join(" · ") || ("尝试 " + (task.attempt || 0) + " · 修订 " + (task.revision || 0));
+  }
+
+  function setTaskCenterTab(tab) {
+    taskCenterTab = tab === "operations" ? "operations" : "tasks";
+    document.querySelectorAll("[data-task-center-tab]").forEach(button => {
+      const active = button.dataset.taskCenterTab === taskCenterTab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    $("task-center-tasks").hidden = taskCenterTab !== "tasks";
+    $("task-center-operations").hidden = taskCenterTab !== "operations";
+  }
+
+  async function runTaskAction(task, action) {
+    if (action === "cancel" &&
+        !confirm("取消此任务？已保存的检查点会保留，未完成的工作不会继续运行。")) return;
+    const labels = { pause: "暂停", resume: "恢复", cancel: "取消" };
+    taskCenterStatus("正在" + labels[action] + "任务…");
+    try {
+      await api("POST", "/api/tasks/" + encodeURIComponent(task.task_id) + "/" + action, {});
+      await refreshTaskCenter();
+    } catch (e) {
+      taskCenterStatus(labels[action] + "失败：" + (e.error || e.message), true);
+      await refreshTaskCenter();
+    }
+  }
+
+  function renderTaskCenterTasks(tasks) {
+    const host = $("task-center-tasks");
+    if (!host) return;
+    host.replaceChildren();
+    if (!tasks.length) {
+      const empty = document.createElement("div");
+      empty.className = "task-center-empty";
+      empty.textContent = "暂无任务记录。";
+      host.appendChild(empty);
+      return;
+    }
+    const ordered = [...tasks].sort((a, b) => {
+      const active = Number(taskCenterActiveStatuses.has(b.status)) -
+        Number(taskCenterActiveStatuses.has(a.status));
+      return active || String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+    });
+    ordered.forEach(task => {
+      const card = document.createElement("article");
+      card.className = "task-center-item";
+      const top = document.createElement("div");
+      top.className = "task-center-item-top";
+      const title = document.createElement("div");
+      title.className = "task-center-item-title";
+      title.textContent = (taskTypeLabels[task.task_type] || task.task_type) +
+        " · " + String(task.task_id).slice(0, 12);
+      const badge = document.createElement("span");
+      badge.className = "task-center-status " + String(task.status || "").toLowerCase();
+      badge.textContent = taskStatusLabels[task.status] || task.status || "未知";
+      top.append(title, badge);
+      card.appendChild(top);
+
+      const detail = document.createElement("div");
+      detail.className = "task-center-item-detail";
+      detail.textContent = taskProgressText(task);
+      card.appendChild(detail);
+      const meta = document.createElement("div");
+      meta.className = "task-center-item-meta";
+      meta.textContent = "开始：" + (task.created_at || "—") +
+        " · 更新：" + (task.updated_at || "—") +
+        " · 执行次数：" + (task.attempt || 0);
+      card.appendChild(meta);
+
+      const actions = document.createElement("div");
+      actions.className = "task-center-item-actions";
+      if (task.status === "RUNNING") {
+        actions.appendChild(taskCenterButton("暂停", "mini", () => runTaskAction(task, "pause")));
+        actions.appendChild(taskCenterButton("取消", "mini danger", () => runTaskAction(task, "cancel")));
+      } else if (task.status === "PAUSED") {
+        actions.appendChild(taskCenterButton("恢复", "mini", () => runTaskAction(task, "resume")));
+        actions.appendChild(taskCenterButton("取消", "mini danger", () => runTaskAction(task, "cancel")));
+      } else if (task.status === "INTERRUPTED") {
+        const interrupted = document.createElement("div");
+        interrupted.className = "task-center-item-detail";
+        interrupted.textContent = "应用重启时任务中断；为避免重复远端写入，不会自动重放。请从对应业务页按已保存进度重新发起。";
+        card.appendChild(interrupted);
+      } else if (["QUEUED", "PAUSING", "RESUMING"].includes(task.status)) {
+        actions.appendChild(taskCenterButton("取消", "mini danger", () => runTaskAction(task, "cancel")));
+      }
+      if (task.status === "NEEDS_RECONCILIATION" || task.reconciliation_required) {
+        actions.appendChild(taskCenterButton("查看远端写入核对", "mini",
+          () => setTaskCenterTab("operations")));
+      }
+      if (actions.childElementCount) card.appendChild(actions);
+      host.appendChild(card);
+    });
+  }
+
+  function submitOperationDecision(operation, decision, evidence, preconditionsValid) {
+    return api("POST",
+      "/api/remote-operations/" + encodeURIComponent(operation.operation_id) + "/reconcile",
+      { decision, evidence, preconditions_valid: preconditionsValid });
+  }
+
+  function renderRemoteOperationCard(operation) {
+    const card = document.createElement("article");
+    card.className = "task-center-item";
+    const top = document.createElement("div");
+    top.className = "task-center-item-top";
+    const title = document.createElement("div");
+    title.className = "task-center-item-title";
+    const target = operation.target || {};
+    title.textContent = (operation.operation_type || "远端写入") +
+      (target.media_id || target.folder_id ? " · " + (target.media_id || target.folder_id) : "");
+    const badge = document.createElement("span");
+    badge.className = "task-center-status " + String(operation.status || "").toLowerCase();
+    badge.textContent = operationStatusLabels[operation.status] || operation.status || "未知";
+    top.append(title, badge);
+    card.appendChild(top);
+
+    const meta = document.createElement("div");
+    meta.className = "task-center-item-meta";
+    meta.textContent = "操作 ID：" + operation.operation_id +
+      " · 任务：" + operation.task_id +
+      " · 尝试：" + (operation.attempt || 0) +
+      " · 更新：" + (operation.updated_at || "—");
+    card.appendChild(meta);
+    const summary = document.createElement("div");
+    summary.className = "task-center-item-detail";
+    summary.textContent = "前置条件：" + JSON.stringify(operation.preconditions || {}) +
+      "；目标结果：" + JSON.stringify(operation.postconditions || {});
+    card.appendChild(summary);
+    if (operation.reconciliation) {
+      const prior = document.createElement("div");
+      prior.className = "task-center-item-detail";
+      const decision = operation.reconciliation.decision || "已记录核对";
+      const evidenceText = operation.reconciliation.evidence
+        ? JSON.stringify(operation.reconciliation.evidence)
+        : "未提供依据";
+      prior.textContent = "上次核对：" + decision + " · " + evidenceText +
+        (operation.reconciliation.checked_at ? " · " + operation.reconciliation.checked_at : "");
+      card.appendChild(prior);
+    }
+
+    const evidence = document.createElement("textarea");
+    evidence.className = "task-center-operation-summary";
+    evidence.maxLength = 1000;
+    evidence.placeholder = "填写核验依据，例如 B 站页面上的当前简介或收藏夹状态。请勿粘贴 Cookie、token 等凭据。";
+    card.appendChild(evidence);
+
+    let preconditionsCheck = null;
+    if (operation.status === "NEEDS_RECONCILIATION" || operation.status === "MANUAL_REVIEW") {
+      const checkLabel = document.createElement("label");
+      checkLabel.className = "task-center-confirm";
+      preconditionsCheck = document.createElement("input");
+      preconditionsCheck.type = "checkbox";
+      const checkText = document.createElement("span");
+      checkText.textContent = "我已检查 B 站当前状态，原操作前置条件仍然成立；允许系统复用同一操作记录重试。";
+      checkLabel.append(preconditionsCheck, checkText);
+      card.appendChild(checkLabel);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "task-center-item-actions";
+    const addDecision = (label, decision, needsPreconditions = false) => {
+      actions.appendChild(taskCenterButton(label, "mini", async () => {
+        const note = evidence.value.trim();
+        if (!note) {
+          taskCenterStatus("请先填写核验依据。", true);
+          evidence.focus();
+          return;
+        }
+        const preconditionsValid = !!(preconditionsCheck && preconditionsCheck.checked);
+        if (needsPreconditions && !preconditionsValid) {
+          taskCenterStatus("确认未生效并允许重试前，必须勾选已核实前置条件。", true);
+          return;
+        }
+        if (decision === "confirmed" &&
+            !confirm("确认远端已经完成此操作？请确保依据足以证明结果，避免重复执行。")) return;
+        try {
+          taskCenterStatus("正在保存核对结论…");
+          await submitOperationDecision(operation, decision, note, preconditionsValid);
+          await refreshTaskCenter();
+        } catch (e) {
+          taskCenterStatus("核对失败：" + (e.error || e.message), true);
+        }
+      }));
+    };
+
+    if (operation.status === "NEEDS_RECONCILIATION") {
+      addDecision("确认远端已生效", "confirmed");
+      addDecision("确认未生效并允许安全重试", "not_applied", true);
+      addDecision("暂转人工复核", "manual_review");
+    } else if (operation.status === "NOT_APPLIED") {
+      addDecision("转人工复核", "manual_review");
+      const note = document.createElement("div");
+      note.className = "task-center-item-detail";
+      note.textContent = "如需重试，请从原业务页面再次执行同一操作；系统会校验前置条件并复用此操作记录。";
+      card.appendChild(note);
+    } else if (operation.status === "MANUAL_REVIEW") {
+      addDecision("人工确认远端已生效", "confirmed");
+      addDecision("人工确认未生效并允许安全重试", "not_applied", true);
+    } else {
+      const note = document.createElement("div");
+      note.className = "task-center-item-detail";
+      note.textContent = "请求仍在发送或等待返回。请先刷新确认状态，避免重复操作。";
+      card.appendChild(note);
+    }
+    if (actions.childElementCount) card.appendChild(actions);
+    return card;
+  }
+
+  function renderTaskCenterOperations(operations) {
+    const host = $("task-center-operations");
+    if (!host) return;
+    host.replaceChildren();
+    if (!operations.length) {
+      const empty = document.createElement("div");
+      empty.className = "task-center-empty";
+      empty.textContent = "当前没有待核对的远端写入。";
+      host.appendChild(empty);
+      return;
+    }
+    operations.forEach(operation => host.appendChild(renderRemoteOperationCard(operation)));
+  }
+
+  async function refreshTaskBadge() {
+    const badge = $("rail-task-active-count");
+    if (!badge) return;
+    try {
+      const result = await api("GET", "/api/tasks");
+      const count = (result.tasks || []).filter(task => taskCenterActiveStatuses.has(task.status)).length;
+      badge.textContent = count > 99 ? "99+" : String(count);
+      badge.hidden = count === 0;
+    } catch (_) {
+      badge.hidden = true;
+    }
+  }
+
+  async function refreshTaskCenter() {
+    if (taskCenterLoading || !taskCenterModal || taskCenterModal.style.display === "none") return;
+    taskCenterLoading = true;
+    const refresh = $("task-center-refresh");
+    if (refresh) refresh.disabled = true;
+    const [taskResult, operationResult] = await Promise.allSettled([
+      api("GET", "/api/tasks"),
+      api("GET", "/api/remote-operations/unresolved"),
+    ]);
+    taskCenterLoading = false;
+    if (refresh) refresh.disabled = false;
+    if (taskResult.status === "fulfilled") {
+      renderTaskCenterTasks(taskResult.value.tasks || []);
+      const count = (taskResult.value.tasks || []).filter(task => taskCenterActiveStatuses.has(task.status)).length;
+      const badge = $("rail-task-active-count");
+      if (badge) {
+        badge.textContent = count > 99 ? "99+" : String(count);
+        badge.hidden = count === 0;
+      }
+    } else {
+      renderTaskCenterTasks([]);
+    }
+    if (operationResult.status === "fulfilled") {
+      renderTaskCenterOperations(operationResult.value.operations || []);
+    } else {
+      renderTaskCenterOperations([]);
+    }
+    const errors = [];
+    if (taskResult.status === "rejected") {
+      errors.push("任务：" + (taskResult.reason.error || taskResult.reason.message));
+    }
+    if (operationResult.status === "rejected") {
+      errors.push("远端核对：" + (operationResult.reason.error || operationResult.reason.message));
+    }
+    if (errors.length) {
+      taskCenterStatus(errors.join("；"), true);
+    } else {
+      taskCenterStatus("任务 " + (taskResult.value.tasks || []).length +
+        " 项 · 待核对远端写入 " + (operationResult.value.operations || []).length +
+        " 项 · 每 5 秒刷新");
+    }
+  }
+
+  function openTaskCenter() {
+    if (!taskCenterModal) return;
+    taskCenterModal.style.display = "flex";
+    setTaskCenterTab(taskCenterTab);
+    refreshTaskCenter();
+    clearInterval(taskCenterTimer);
+    taskCenterTimer = setInterval(refreshTaskCenter, 5000);
+  }
+  function closeTaskCenter() {
+    if (taskCenterModal) taskCenterModal.style.display = "none";
+    clearInterval(taskCenterTimer);
+    taskCenterTimer = null;
+  }
+  $("rail-tasks")?.addEventListener("click", openTaskCenter);
+  $("task-center-close")?.addEventListener("click", closeTaskCenter);
+  $("task-center-refresh")?.addEventListener("click", refreshTaskCenter);
+  document.querySelectorAll("[data-task-center-tab]").forEach(button => {
+    button.addEventListener("click", () => setTaskCenterTab(button.dataset.taskCenterTab));
+  });
+  taskCenterModal?.addEventListener("click", event => {
+    if (event.target === taskCenterModal) closeTaskCenter();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && taskCenterModal && taskCenterModal.style.display === "flex") closeTaskCenter();
+  });
+
   // ---------- 初始化 ----------
   function init() {
     setMode("fast");
@@ -4450,7 +4829,9 @@
     loadFolderMerge();
     loadFolderProfiles();
     connectEvents();
+    refreshTaskBadge();
     setInterval(checkConn, 10000);   // 仅更新连接指示灯，不写日志
+    setInterval(refreshTaskBadge, 20000);
     log("系统就绪。请先扫码登录（或手动输入 Cookie）→ 扫描 → 分析 → 定案 → 执行。");
   }
 

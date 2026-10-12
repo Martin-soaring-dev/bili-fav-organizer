@@ -310,6 +310,58 @@ class SchedulerTests(unittest.TestCase):
         final = scheduler.wait_for_status(vault_task.task_id, {TaskStatus.COMPLETED}, timeout=2)
         self.assertEqual(final.status, TaskStatus.COMPLETED)
 
+    def test_vault_barrier_rejects_task_resume_while_admission_is_closed(self):
+        store = InMemoryTaskStore()
+        worker = _CompletingWorker()
+        scheduler = self._scheduler(store, {"scan": worker})
+        scheduler.start()
+        task, _ = store.create(TaskRecord(
+            task_type="scan", status=TaskStatus.PAUSED,
+            resume_policy=ResumePolicy.AUTO_SAFE,
+            pause_reason=PauseReason.VAULT_LOCK,
+            resume_intent=ResumeIntent.AFTER_VAULT_UNLOCK,
+            owner_epoch=scheduler.owner_epoch,
+        ))
+        scheduler.close_admission()
+
+        with self.assertRaises(AdmissionClosedError):
+            scheduler.resume_task(task.task_id)
+        self.assertEqual(scheduler.get_task(task.task_id).status, TaskStatus.PAUSED)
+        self.assertEqual(worker.calls, 0)
+
+    def test_restart_marks_old_owner_paused_tasks_interrupted_and_preserves_checkpoints(self):
+        store = InMemoryTaskStore()
+        old_owner_epoch = store.claim_owner_epoch("previous-process")
+        stale_vault_pause, _ = store.create(TaskRecord(
+            task_type="scan", status=TaskStatus.PAUSED,
+            resume_policy=ResumePolicy.AUTO_SAFE,
+            pause_reason=PauseReason.VAULT_LOCK,
+            resume_intent=ResumeIntent.AFTER_VAULT_UNLOCK,
+            owner_epoch=old_owner_epoch,
+            checkpoint={"version": 1, "done": 5},
+        ))
+        user_pause, _ = store.create(TaskRecord(
+            task_type="scan", status=TaskStatus.PAUSED,
+            resume_policy=ResumePolicy.AUTO_SAFE,
+            pause_reason=PauseReason.USER,
+            resume_intent=ResumeIntent.MANUAL,
+            owner_epoch=old_owner_epoch,
+        ))
+        scheduler = self._scheduler(store, {"scan": _CheckpointWorker()})
+        scheduler.start()
+
+        interrupted = scheduler.get_task(stale_vault_pause.task_id)
+        self.assertEqual(interrupted.status, TaskStatus.INTERRUPTED)
+        self.assertEqual(interrupted.checkpoint, {"version": 1, "done": 5})
+        self.assertEqual(interrupted.error["category"], "paused_task_after_restart")
+        self.assertEqual(interrupted.pause_reason, PauseReason.VAULT_LOCK)
+
+        interrupted_user_pause = scheduler.get_task(user_pause.task_id)
+        self.assertEqual(interrupted_user_pause.status, TaskStatus.INTERRUPTED)
+        self.assertEqual(interrupted_user_pause.pause_reason, PauseReason.USER)
+        self.assertEqual(interrupted_user_pause.error["category"],
+                         "paused_task_after_restart")
+
     def test_second_scheduler_owner_is_rejected(self):
         store = InMemoryTaskStore()
         first = self._scheduler(store=store)
@@ -386,6 +438,51 @@ class SQLiteTaskStoreTests(unittest.TestCase):
             for conn in opened:
                 with self.assertRaises(sqlite3.ProgrammingError):
                     conn.execute("SELECT 1")
+
+    def test_connection_setup_failure_releases_lifecycle_lease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = Path(directory) / "existing.sqlite3"
+            sqlite3.connect(database_path).close()
+
+            class TrackingLifecycle:
+                def __init__(self):
+                    self.path = database_path
+                    self.leases = 0
+
+                def connect(self, *, mode, owner):
+                    self.leases += 1
+                    lifecycle = self
+
+                    class FailingPragmaConnection(sqlite3.Connection):
+                        def __init__(self, *args, **kwargs):
+                            kwargs.pop("factory", None)
+                            super().__init__(*args, **kwargs)
+                            self._released = False
+
+                        def execute(self, sql, *args, **kwargs):
+                            if sql.strip().lower() == "pragma foreign_keys=on":
+                                raise sqlite3.DatabaseError("injected PRAGMA failure")
+                            return super().execute(sql, *args, **kwargs)
+
+                        def close(self):
+                            try:
+                                return super().close()
+                            finally:
+                                if not self._released:
+                                    self._released = True
+                                    lifecycle.leases -= 1
+
+                    return sqlite3.connect(
+                        f"file:{database_path.as_posix()}?mode={mode}",
+                        uri=True,
+                        factory=FailingPragmaConnection,
+                    )
+
+            lifecycle = TrackingLifecycle()
+            task_store = SQLiteTaskStore.from_lifecycle(lifecycle)
+            with self.assertRaisesRegex(sqlite3.DatabaseError, "injected PRAGMA failure"):
+                task_store._connect()
+            self.assertEqual(0, lifecycle.leases)
 
     def test_ensure_schema_only_verifies_migration_installed_tables(self):
         with tempfile.TemporaryDirectory() as directory:

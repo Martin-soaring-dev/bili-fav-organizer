@@ -81,6 +81,24 @@ def _canonical_json(value: Any) -> str:
                       separators=(",", ":"), allow_nan=False)
 
 
+def _has_reconciliation_evidence(evidence: Any) -> bool:
+    """Require a non-empty human note/evidence before changing a result state."""
+    if evidence is None:
+        return False
+    if isinstance(evidence, str):
+        return bool(evidence.strip())
+    if isinstance(evidence, Mapping):
+        return any(_has_reconciliation_evidence(value)
+                   for value in evidence.values())
+    if isinstance(evidence, (list, tuple, set)):
+        return any(_has_reconciliation_evidence(value) for value in evidence)
+    if isinstance(evidence, bool):
+        return evidence
+    if isinstance(evidence, (int, float)):
+        return evidence != 0
+    return False
+
+
 def redact_sensitive(value: Any) -> Any:
     """Return JSON-safe data with common credential fields removed.
 
@@ -320,7 +338,7 @@ class SqliteRemoteOperationRepository:
         OperationStatus.MANUAL_REVIEW.value,
         # The negative result may become stale if another write runs before
         # the caller retries. Keep the account/resource held until the caller
-        # retries this same operation or escalates it for manual review.
+        # retries this same operation or manually resolves it.
         OperationStatus.NOT_APPLIED.value,
     }
 
@@ -384,6 +402,15 @@ class SqliteRemoteOperationRepository:
                         "相同 operation_id 对应不同操作意图，拒绝覆盖"
                     )
                 return self._decode_row(existing)
+            # Check the account/resource barrier before persisting a new
+            # PREPARED row. A blocked request must not leave an invisible
+            # operation behind on every retry. begin_dispatch() repeats this
+            # check in its own transaction to cover races after preparation.
+            self._assert_no_conflict(conn, {
+                "operation_id": intent.operation_id,
+                "account_id": intent.account_id,
+                "resource_keys_json": _canonical_json(list(intent.resource_keys)),
+            })
             conn.execute(
                 """INSERT INTO remote_operations (
                     operation_id,intent_json,task_id,account_id,operation_type,
@@ -545,6 +572,8 @@ class SqliteRemoteOperationRepository:
             raise UnsafeRetry(
                 "只有证明前置状态仍有效，才能把操作核对为可重试的 NOT_APPLIED"
             )
+        if not _has_reconciliation_evidence(evidence):
+            raise UnsafeRetry("远端结果核对必须附带可审计的人工证据")
         now = self._clock()
         destination = mapping[decision]
         evidence_safe = redact_sensitive(evidence) if evidence is not None else None
@@ -559,16 +588,27 @@ class SqliteRemoteOperationRepository:
             if row is None:
                 raise OperationNotFound(operation_id)
             current = OperationStatus(row["status"])
-            if current is not OperationStatus.NEEDS_RECONCILIATION:
+            allowed = {
+                OperationStatus.NEEDS_RECONCILIATION: {
+                    "confirmed", "not_applied", "manual_review",
+                },
+                # NOT_APPLIED remains an account/resource barrier until it is
+                # retried safely or explicitly escalated to manual review.
+                OperationStatus.NOT_APPLIED: {"manual_review"},
+                # Manual review is not a terminal dead end: a human may attach
+                # evidence and resolve it, or reclassify it as safely retryable.
+                OperationStatus.MANUAL_REVIEW: {"confirmed", "not_applied"},
+            }
+            if decision not in allowed.get(current, set()):
                 raise InvalidOperationTransition(
-                    f"不能从 {current.value} 执行远端结果核对"
+                    f"不能从 {current.value} 执行 {decision} 核对"
                 )
             conn.execute(
                 """UPDATE remote_operations SET status=?, reconciliation_json=?,
                    error_code=NULL, version=version+1, updated_at=?,
                    resolved_at=? WHERE operation_id=?""",
                 (destination.value, _canonical_json(reconciliation), now,
-                 None if destination is OperationStatus.NOT_APPLIED else now,
+                 now if destination is OperationStatus.CONFIRMED else None,
                  operation_id),
             )
             self._append_event(

@@ -281,6 +281,62 @@ class DatabaseLifecycle:
                 self._condition.notify_all()
                 raise
 
+    def begin_drain(self, timeout: float | None = None) -> None:
+        """Close normal access, then wait for already-open connections to leave.
+
+        The state change and connection count are guarded by the same condition
+        lock used by :meth:`connect`, so no new lease can slip in after the
+        drain begins. On timeout, restore READY and report the outstanding
+        owners; the caller must not proceed with a database snapshot.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        with self._condition:
+            if self._state != DatabaseState.READY:
+                raise DatabaseLifecycleError(
+                    f"数据库当前不允许开始排空（状态：{self._state.value}）")
+            self._state = DatabaseState.DRAINING
+            self._condition.notify_all()
+            while self._leases:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    owners = ", ".join(
+                        str(item.get("owner", "unknown"))
+                        for item in list(self._leases.values())[:5]
+                    )
+                    count = len(self._leases)
+                    self._state = DatabaseState.READY
+                    self._condition.notify_all()
+                    raise ActiveConnectionsError(
+                        f"等待数据库连接排空超时：仍有 {count} 个连接未释放"
+                        + (f"（{owners}）" if owners else ""))
+                self._condition.wait(remaining)
+
+    def connect_for_drain(self, *, owner: str = "maintenance") -> sqlite3.Connection:
+        """Open the sole tracked maintenance connection after normal access drains."""
+        with self._condition:
+            if self._state != DatabaseState.DRAINING:
+                raise DatabaseLifecycleError(
+                    f"数据库不处于排空状态（{self._state.value}），不能打开维护连接")
+            if self._leases:
+                raise ActiveConnectionsError(
+                    f"排空后仍有 {len(self._leases)} 个数据库连接，不能打开维护连接")
+            if not self.path.is_file():
+                raise self._missing_error()
+            lease_id = uuid.uuid4().hex
+            self._leases[lease_id] = {
+                "owner": str(owner), "mode": "rw", "opened_at": time.time(),
+                "in_transaction": False,
+            }
+            try:
+                return sqlite3.connect(
+                    _sqlite_uri(self.path, "rw"), uri=True, timeout=30,
+                    factory=lambda *args, **kwargs: _TrackedConnection(
+                        *args, lifecycle=self, lease_id=lease_id, **kwargs))
+            except Exception:
+                self._leases.pop(lease_id, None)
+                self._condition.notify_all()
+                raise
+
     def connect_for_initialization(self, path: str | Path, *, create: bool) -> sqlite3.Connection:
         """Internal lifecycle connection used only while OPENING a known candidate."""
         target = Path(path)

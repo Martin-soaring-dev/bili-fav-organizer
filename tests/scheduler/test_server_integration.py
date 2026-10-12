@@ -119,6 +119,45 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
             """
             self._run_subprocess(env, script)
 
+    def test_unlock_starts_scheduler_and_recovers_stale_task_rows(self):
+        with tempfile.TemporaryDirectory(prefix="bfo-scheduler-unlock-recovery-") as temp_dir:
+            root = Path(temp_dir)
+            env = os.environ.copy()
+            env["LOCALAPPDATA"] = str(root / "profile")
+            env["HOME"] = str(root / "home")
+            env["BILI_FAV_ORGANIZER_DATA_DIR"] = str(root / "profile" / "data")
+            env["BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL"] = "1"
+            script = textwrap.dedent(r"""
+                import store
+                store.initialize_new_database()
+                import server
+                from core.scheduler import SQLiteTaskStore, TaskRecord, TaskStatus
+
+                # This row represents a cancellation persisted by the old
+                # process immediately before it exited.
+                task_store = SQLiteTaskStore.from_lifecycle(store._lifecycle())
+                stale, created = task_store.create(TaskRecord(
+                    task_type="scan", status=TaskStatus.CANCELLING))
+                assert created
+
+                server.VAULT.initialize(bound_mid="12345", password="safe-password")
+                server.VAULT.complete_onboarding()
+                server._vault_save_db_encrypted()
+                server.VAULT.lock()
+                assert store.database_state() == store.DatabaseState.LOCKED.value
+                assert not store.DB_FILE.exists()
+                assert server._TASK_SCHEDULER is None
+
+                unlocked = server.vault_unlock(
+                    server.VaultUnlockIn(password="safe-password"))
+                assert unlocked["ok"] is True, unlocked
+                assert server._TASK_SCHEDULER is not None
+                recovered = server._TASK_SCHEDULER.get_task(stale.task_id)
+                assert recovered.status is TaskStatus.CANCELLED, recovered
+                assert recovered.error["category"] == "cancelled_after_restart"
+            """)
+            self._run_subprocess(env, script)
+
 
 if __name__ == "__main__":
     unittest.main()

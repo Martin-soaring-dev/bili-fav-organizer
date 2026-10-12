@@ -173,6 +173,10 @@ class BiliOperationAdapter:
         intro_text = str(intro or "")
         intro_digest = hashlib.sha256(intro_text.encode("utf-8")).hexdigest()
         current_title = str((folder_info or {}).get("title") or "").strip()
+        current_intro = str((folder_info or {}).get("intro") or "")
+        current_intro_digest = hashlib.sha256(
+            current_intro.encode("utf-8")
+        ).hexdigest()
         try:
             privacy = int((folder_info or {}).get("attr") or 0) & 1
         except (TypeError, ValueError):
@@ -180,7 +184,8 @@ class BiliOperationAdapter:
         intent = self._intent(
             "update_folder_intro",
             target={"media_id": folder_id},
-            preconditions={"title": current_title, "privacy": privacy},
+            preconditions={"title": current_title, "privacy": privacy,
+                           "intro_sha256": current_intro_digest},
             postconditions={"intro_sha256": intro_digest},
             # The intro itself is user content; retain only a digest and length
             # in the operation record. The original value stays in the call.
@@ -390,6 +395,12 @@ class BiliOperationAdapter:
                 validate_retry = validate_retry or (
                     lambda candidate: candidate.operation_id == operation.operation_id
                 )
+        elif operation.status is OperationStatus.PREPARED:
+            # An explicit retry flag is only meaningful after an evidenced
+            # NOT_APPLIED reconciliation. A fresh PREPARED intent is a normal
+            # first dispatch and must not enter the retry-only state machine.
+            retry = False
+            validate_retry = None
         if operation.status is OperationStatus.CONFIRMED:
             if operation.remote_response is None or "result" not in operation.remote_response:
                 raise OperationResultUnavailable(
