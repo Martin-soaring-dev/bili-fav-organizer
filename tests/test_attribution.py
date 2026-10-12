@@ -22,7 +22,7 @@ INDEX = ROOT / "static" / "index.html"
 STYLE = ROOT / "static" / "style.css"
 APP_JS = ROOT / "static" / "app.js"
 SPEC = ROOT / "BiliFavOrganizer.spec"
-WORKFLOW = ROOT / ".github" / "workflows" / "release-windows.yml"
+WORKFLOW = ROOT / ".github" / "workflows" / "release-stable.yml"
 MANUAL = ROOT / "packaging" / "使用说明.txt"
 README = ROOT / "README.md"
 SERVER = ROOT / "server.py"
@@ -106,6 +106,10 @@ class ExecutableAttributionTests(unittest.TestCase):
         self.assertIn("'BUILD_DATE = \"\"'", flow)
         self.assertIn('Copy-Item "LICENSE"', flow)
         self.assertIn('Copy-Item "NOTICE"', flow)
+        self.assertIn('BiliFavOrganizer-neo-Setup-$neoVersion.exe', flow)
+        self.assertIn('gh release create $tag @assets', flow)
+        self.assertFalse((ROOT / ".github" / "workflows" / "release-windows.yml").exists(),
+                         "retired 4-asset publisher must not compete with the unified stable release")
 
 
 class LicenseFileTests(unittest.TestCase):
