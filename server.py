@@ -54,6 +54,7 @@ import store
 
 from bili_fav.api.tasks import create_task_router
 from bili_fav.api.registry import register_legacy_routes
+from bili_fav.domain.versions import version_key as _version_key, is_newer_version as _is_newer_version
 from bili_fav.application.task_bridge import LegacyTaskBridge
 
 HERE = Path(__file__).resolve().parent
@@ -223,24 +224,6 @@ def _log_attribution():
                 f"BiliFavOrganizer {_app_version()} · {AUTHOR}")
         except Exception:
             pass
-
-
-def _version_key(version: str) -> tuple[int, ...] | None:
-    match = re.fullmatch(r"[vV]?(\d+(?:\.\d+)*)", str(version or "").strip())
-    if not match:
-        return None
-    return tuple(int(part) for part in match.group(1).split("."))
-
-
-def _is_newer_version(latest: str, current: str) -> bool:
-    latest_key, current_key = _version_key(latest), _version_key(current)
-    if latest_key is None:
-        raise ValueError(f"Release 版本标签格式不支持：{latest}")
-    if current_key is None:
-        return True
-    width = max(len(latest_key), len(current_key))
-    return latest_key + (0,) * (width - len(latest_key)) > \
-        current_key + (0,) * (width - len(current_key))
 
 
 def _write_update_error(message: str) -> None:
