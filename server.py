@@ -55,6 +55,7 @@ import store
 from bili_fav.api.tasks import create_task_router
 from bili_fav.api.registry import register_legacy_routes
 from bili_fav.domain.versions import version_key as _version_key, is_newer_version as _is_newer_version
+from bili_fav.domain.llm_settings import thinking_params as _thinking_params
 from bili_fav.application.task_bridge import LegacyTaskBridge
 
 HERE = Path(__file__).resolve().parent
@@ -1359,20 +1360,6 @@ def save_config(cur: dict):
         prev.pop("api_key", None)
     prev.update(sec)
     _atomic_write(SECRETS_FILE, prev)
-
-
-def _thinking_params(effort: str) -> dict:
-    effort = (effort or "").strip().lower()
-    if not effort or effort in ("default", "auto"):
-        return {}
-    if effort in ("off", "none", "disable", "disabled"):
-        return {"enable_thinking": False}
-    params: dict = {"enable_thinking": True}
-    if effort in ("low", "medium", "high", "max"):
-        params["reasoning_effort"] = effort
-    elif effort == "xhigh":
-        params["reasoning_effort"] = "max"
-    return params
 
 
 def _build_model_test_payload(config: llm_analyzer.LLMConfig) -> dict:
