@@ -66,3 +66,29 @@ def test_manager_restart_keeps_completed_task(tmp_path, suffix):
         assert reopened.get(task_id)["state"] == "completed"
     finally:
         reopened.shutdown()
+
+def test_cancel_queued_task_releases_tracking(tmp_path):
+    blocker_started = threading.Event()
+    blocker_release = threading.Event()
+    manager = TaskManager(tmp_path / "tasks.sqlite3", max_workers=1)
+    def blocker(cancel):
+        blocker_started.set()
+        blocker_release.wait(3)
+    try:
+        first = manager.submit("blocker", blocker, resource="other")
+        assert blocker_started.wait(3)
+        queued = manager.submit("scan", lambda cancel: None, resource="scan")
+        assert manager.cancel(queued)
+    finally:
+        blocker_release.set()
+        manager.shutdown()
+    assert manager.get(queued)["state"] == "cancelled"
+    assert queued not in manager._cancel
+
+
+def test_submit_after_shutdown_is_failed_not_queued(tmp_path):
+    manager = TaskManager(tmp_path / "tasks.sqlite3")
+    manager.shutdown()
+    with pytest.raises(RuntimeError):
+        manager.submit("scan", lambda cancel: None)
+    assert manager.list()[0]["state"] == "failed"
