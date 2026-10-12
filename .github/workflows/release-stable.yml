@@ -1,21 +1,20 @@
 name: Stable Windows release (legacy and Electron neo)
 
+# Publish six assets for a pushed stable tag only.
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - "publish/v0.209"
     tags:
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
   build:
-    if: ${{ github.ref == 'refs/heads/publish/v0.209' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-beta.') }}
     runs-on: windows-latest
     env:
-      STABLE_RELEASE_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209') && 'v0.209' || github.ref_name }}
+      STABLE_RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -39,10 +38,10 @@ jobs:
       - name: Embed release version
         shell: pwsh
         env:
-          RELEASE_VERSION: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209') && 'v0.209' || github.ref_name }}
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           $version = $env:RELEASE_VERSION
-          if ($version -notmatch '^v[0-9]+([.][0-9]+)*$') { throw "Unsupported release version: $version" }
+          if ($version -notmatch '^v[0-9]+[.][0-9]+([.][0-9]+)?$') { throw "Unsupported release version: $version" }
           $source = [System.IO.File]::ReadAllText("server.py")
           $commit = $env:GITHUB_SHA.Substring(0, 7)
           $buildDate = (& git log -1 --format=%ad --date=short).Trim()
@@ -151,10 +150,12 @@ jobs:
       - name: Build Electron neo stable installer
         shell: pwsh
         run: |
-          $neoVersion = ($env:STABLE_RELEASE_TAG.TrimStart('v') + '.0')
+          $numeric = $env:STABLE_RELEASE_TAG.Substring(1)
+          $parts = $numeric.Split('.')
+          $neoVersion = if ($parts.Count -eq 2) { "$numeric.0" } else { $numeric }
           npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never "-c.extraMetadata.version=$neoVersion"
           if ($LASTEXITCODE -ne 0) { throw "Electron installer build failed." }
-          # The package.json version is 0.209.0; stable semantic version embedded at CI runtime.
+          # Release tag supplies semantic version at build time, independently of package.json.
           $expected = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
           if (-not (Test-Path $expected)) { throw "Electron artifact missing: $expected" }
           $hash = (Get-FileHash $expected -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -170,22 +171,15 @@ jobs:
           SETUP_CHECKSUM: ${{ steps.installer.outputs.setup_checksum }}
           RELEASE_TITLE: ${{ steps.notes.outputs.title }}
           RELEASE_NOTES_B64: ${{ steps.notes.outputs.notes_b64 }}
-          STABLE_TAG: ${{ (github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/publish/v0.209') && 'v0.209' || github.ref_name }}
         run: |
           $tag = $env:STABLE_RELEASE_TAG
           $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
-          $neoVersion = ($tag.TrimStart('v') + '.0')
+          $numeric = $tag.Substring(1)
+          $parts = $numeric.Split('.')
+          $neoVersion = if ($parts.Count -eq 2) { "$numeric.0" } else { $numeric }
           $neo = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
           $assets = @($env:ASSET_NAME, $env:CHECKSUM_NAME, $env:SETUP_NAME, $env:SETUP_CHECKSUM, $neo, "$neo.sha256")
           foreach ($asset in $assets) { if (-not (Test-Path $asset)) { throw "Missing release asset: $asset" } }
           gh release create $tag @assets --latest --target $env:GITHUB_SHA --title $env:RELEASE_TITLE --notes $notes
           if ($LASTEXITCODE -ne 0) { throw "Could not publish stable release." }
 
-      - name: Remove one-time publish trigger branch
-        if: ${{ success() && github.ref == 'refs/heads/publish/v0.209' }}
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/git/refs/heads/publish/v0.209"
-          if ($LASTEXITCODE -ne 0) { Write-Warning "Release published, but trigger branch cleanup needs manual follow-up." }

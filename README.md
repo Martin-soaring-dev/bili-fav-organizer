@@ -21,7 +21,7 @@
 
 **核心原则**：归类方案必须人工复核后才执行；执行时先加入目标夹、成功后再从原夹删除；默认收藏夹是「未分拣收件箱」，只出不进。
 
-**第一次使用？** 阅读[图文版快速上手指南](docs/快速上手.md)，或下载 [PDF 版](output/pdf/快速上手.pdf)。指南用当前界面截图演示下载、登录、模型配置、快速与手动整理、本地数据位置和常见问题。
+**第一次使用？** 阅读[图文版快速上手指南](docs/快速上手.md)，或下载 [PDF 版](output/pdf/快速上手.pdf)。指南包含旧版界面截图，可用于学习主要工作流；v0.209 的设置中心、保险库与 Electron Neo 界面以实际程序为准。
 
 **品牌与视觉设计**：查看[完整设计规范](docs/brand/README.md)、[SVG 设计语言](docs/brand/svg-language.md)和[矢量资产](static/brand/)。
 
@@ -50,6 +50,12 @@
 3. 安装完成后从开始菜单（可选桌面快捷方式）启动；卸载在 Windows「应用和功能」里，卸载时会询问是否同时删除个人数据
 
 安装版在应用内更新时改为"下载新安装包并静默运行"，由安装程序完成替换与重启。两种形态的数据目录相同（`%LOCALAPPDATA%\BiliFavOrganizer`），切换安装方式不会丢数据。
+
+### Electron Neo 桌面版（v0.209 起）
+
+1. 打开[最新正式版 Release](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)，下载 `BiliFavOrganizer-neo-Setup-<语义化版本>.exe`（v0.209 对应 `BiliFavOrganizer-neo-Setup-0.209.0.exe`）。
+2. 安装并从开始菜单启动；Electron 负责桌面窗口及后端进程，无需手动打开浏览器或保留控制台。
+3. 从传统版本迁移时先备份个人数据；如已启用加密保险库，请妥善保管密码与恢复码。不要使用传统壳的应用内更新器覆盖 Neo。
 
 ### Windows 便携版
 
@@ -335,15 +341,18 @@ bili-fav-organizer/
 ## 开发
 
 ```bash
-# 测试
-python -m unittest discover -s tests -v
+# 测试（隔离用户数据与凭据、禁止测试访问在线服务）
+python tools/run_isolated_tests.py
 
 # Windows 便携打包（CI 在 tag v* 时自动执行）
 pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 ```
 
-发布产物（每个 Release 共 4 个附件）：`BiliFavOrganizer-Windows-x64-<tag>.zip`（便携版）+ 其 `.sha256`、
-`BiliFavOrganizer-Setup-<tag>.exe`（安装版）+ 其 `.sha256`。CI 在 tag `v*` 时构建并**先跑一遍测试**（不过不发版）。
+稳定版（自 v0.209 起）发布 **3 种 Windows 产物、共 6 个附件**：
+`BiliFavOrganizer-Windows-x64-<tag>.zip`（便携版）、`BiliFavOrganizer-Setup-<tag>.exe`（Inno 安装版）、
+`BiliFavOrganizer-neo-Setup-<semver>.exe`（Electron Neo），各附同名 `.sha256` 校验文件。
+发布工作流 `.github/workflows/release-stable.yml` 仅在推送稳定版 tag（如 `v0.210`）时执行，**先运行隔离回归测试，成功打包三种产物后才创建 Release**；
+预发布版 `v*-beta.*` 由独立的 `release-beta.yml` 处理。推送 tag 前应完成 Windows 安装、迁移、保险库和卸载验收；不要重复创建或覆盖已发布的 tag。
 
 ---
 
