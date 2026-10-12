@@ -11,7 +11,7 @@
 [![Windows](https://img.shields.io/badge/platform-Windows-0078D4)](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#从源码运行开发)
 [![License: PolyForm NC 1.0.0](https://img.shields.io/badge/license-PolyForm_Noncommercial_1.0.0-blue)](#许可)
-[![Windows 打包](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/workflows/release-windows.yml/badge.svg?event=push)](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/workflows/release-windows.yml)
+[![Windows CI](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/workflows/ci.yml)
 
 <p align="center">
   <img src="docs/images/hero.svg" alt="B站收藏夹智能整理" width="680">
