@@ -39,7 +39,7 @@ class LegacyMigrationTests(unittest.TestCase):
         self.assertEqual([], migrated["foreign_key_violations"])
         self.assertEqual(0, migrated["counts"]["folders"])
         self.assertEqual(0, migrated["counts"]["videos"])
-        self.assertEqual(7, max(row["version"] for row in migrated["logical_rows"]["schema_migrations"]))
+        self.assertEqual(8, max(row["version"] for row in migrated["logical_rows"]["schema_migrations"]))
 
     def test_MIG_002_normal_legacy_dataset_migrates(self):
         """Pre: synthetic v0.208 has 10 folders/500 videos. Steps: current import. Expect: counts preserved."""
@@ -206,36 +206,53 @@ class LegacyMigrationTests(unittest.TestCase):
         self.assertIn('"videos": 500', check.stdout)
 
     def test_MIG_017_fresh_install_starts_independently(self):
-        """Pre: isolated profile has no legacy DB/config. Steps: import current app. Expect: new empty schema only."""
+        """A fresh import waits; explicit onboarding creates and seals the empty DB."""
         current = runtime("legacy-empty", self.root, legacy_config=False, copy_legacy_db=False)
         result = probe(current, "snapshot")
-        self.assertTrue(result["database"]["exists"])
-        self.assertEqual(0, result["database"]["counts"]["folders"])
-        self.assertEqual(0, result["database"]["counts"]["videos"])
+        self.assertFalse(result["database"]["exists"])
+        self.assertFalse(current.db_file.exists())
         self.assertFalse(current.encrypted_file.exists())
+
+        onboarded = probe(current, "onboard")
+        self.assertEqual(200, onboarded["onboarding"]["http_status"])
+        self.assertEqual(200, onboarded["completion"]["http_status"])
+        self.assertTrue(current.encrypted_file.is_file())
+        self.assertFalse(current.db_file.exists())
+        self.assertFalse(onboarded["decrypted_snapshot"]["counts"]["folders"])
+        self.assertFalse(onboarded["decrypted_snapshot"]["counts"]["videos"])
+        self.assertTrue(onboarded["vault_locked_after_completion"])
         self.assertTrue(str(current.local_app_data).startswith(str(self.root)))
 
     def test_MIG_018_second_instance_with_active_writer_fails_safely_and_recovers(self):
         """Pre: isolated current DB. Steps: hold one writer while a second instance starts, release and retry. Expect: no loss/corruption."""
         current = runtime("legacy-empty", self.root, copy_legacy_db=False, legacy_config=False)
-        probe(current, "snapshot")
+        onboarded = probe(current, "onboard")
+        self.assertEqual(200, onboarded["completion"]["http_status"])
+        unlocked = probe(current, "unlock")
+        self.assertEqual(200, unlocked["unlock"]["http_status"])
         import subprocess
         import sys
+        holder_env = dict(current.env)
+        holder_env["BFO_PROBE_PASSWORD"] = "Synthetic.Passphrase.42"
         lock_code = (
-            "import json,store,sys; "
+            "import json,os,server,store,sys; "
+            "server.VAULT.load_meta(); "
+            "server.VAULT.unlock_with_password(os.environ['BFO_PROBE_PASSWORD']); "
+            "store._initialize(); "
             "c=store._connect(); c.execute('BEGIN IMMEDIATE'); "
             "c.execute('INSERT OR REPLACE INTO app_state(name,value_json) VALUES(?,?)', "
             "('synthetic_active_writer',json.dumps({'state':'held'}))); "
             "print('LOCK_HELD',flush=True); sys.stdin.readline(); c.commit(); c.close()"
         )
         lock_holder = subprocess.Popen(
-            [sys.executable, "-c", lock_code], cwd=current.app_dir, env=current.env,
+            [sys.executable, "-c", lock_code], cwd=current.app_dir, env=holder_env,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace",
         )
         self.assertEqual("LOCK_HELD", lock_holder.stdout.readline().strip())
         second_code = """\
 import sqlite3
+import os
 import sys
 real_connect = sqlite3.connect
 def fast_connect(*args, **kwargs):
@@ -243,7 +260,10 @@ def fast_connect(*args, **kwargs):
     return real_connect(*args, **kwargs)
 sqlite3.connect = fast_connect
 try:
-    import store
+    import server, store
+    server.VAULT.load_meta()
+    server.VAULT.unlock_with_password(os.environ['BFO_PROBE_PASSWORD'])
+    store._initialize()
     store.save_folders([{'media_id': 'second-instance', 'title': 'second-instance',
                          'media_count': 0, 'attr': 0}])
 except sqlite3.OperationalError as exc:
@@ -255,7 +275,7 @@ except sqlite3.OperationalError as exc:
         try:
             second_process = subprocess.Popen(
                 [sys.executable, "-c", second_code], cwd=current.app_dir,
-                env=current.env, text=True, encoding="utf-8", errors="replace",
+                env=holder_env, text=True, encoding="utf-8", errors="replace",
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             )
             try:
@@ -283,12 +303,12 @@ except sqlite3.OperationalError as exc:
         if safe_busy:
             retry = subprocess.run(
                 [sys.executable, "-c", second_code], cwd=current.app_dir,
-                env=current.env, text=True, encoding="utf-8", errors="replace",
+                env=holder_env, text=True, encoding="utf-8", errors="replace",
                 capture_output=True, timeout=30, check=False,
             )
             self.assertEqual(0, retry.returncode, f"startup retry failed: {retry.stdout}\n{retry.stderr}")
-        first = probe(current, "snapshot")["database"]
-        second_snapshot = probe(current, "snapshot")["database"]
+        first = probe(current, "unlock")["database_after_unlock"]
+        second_snapshot = probe(current, "unlock")["database_after_unlock"]
         folder_ids = {row["media_id"] for row in first["logical_rows"]["folders"]}
         self.assertIn("second-instance", folder_ids)
         self.assertIn("synthetic_active_writer", [row["name"] for row in first["logical_rows"]["app_state"]])

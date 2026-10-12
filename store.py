@@ -13,6 +13,17 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
+from core.database import (
+    DatabaseAlreadyInitializedError,
+    DatabaseLifecycle,
+    DatabaseRecoveryRequiredError,
+    DatabaseState,
+    IntegrityValidationError,
+    validate_database,
+)
+from core.remote_operations import SqliteRemoteOperationRepository
+from core.scheduler import SQLiteTaskStore
+
 HERE = Path(__file__).resolve().parent
 LEGACY_APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else HERE
 LEGACY_DATA_DIR = LEGACY_APP_DIR / "data"
@@ -39,7 +50,7 @@ FOLDER_MERGE_STATE_FILE = LEGACY_DATA_DIR / "folder_merge_state.json"
 FOLDER_MERGE_DRAFT_FILE = LEGACY_DATA_DIR / "folder_merge_draft.json"
 
 _lock = threading.RLock()
-_SCHEMA_VERSION = 7
+_SCHEMA_VERSION = 8
 _DATASET_DEFAULTS = {
     "analysis": {}, "plan": {}, "apply_state": {}, "scan_done": [],
     "scan_selection": [], "folder_merge_plan": [], "folder_merge_draft": [],
@@ -56,6 +67,10 @@ _LEGACY_FILES = {
          FOLDER_MERGE_STATE_FILE))},
 }
 
+_lifecycle_lock = threading.RLock()
+_lifecycle_instance: DatabaseLifecycle | None = None
+_lifecycle_key: tuple | None = None
+
 
 def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -67,8 +82,59 @@ def _read_json(path: Path, default):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _connect():
-    conn = sqlite3.connect(DB_FILE, timeout=30)
+def _lifecycle_evidence_paths() -> tuple[Path, ...]:
+    """Paths that prove this profile may have been initialized previously."""
+    paths = [
+        DATA_DIR / "library.sqlite3.enc",
+        DATA_DIR / "lifecycle.json",
+        DATA_DIR / "database-manifest.json",
+        DATA_DIR / "library.sqlite3.plain-backup",
+        DATA_DIR.parent / "vault.json",
+        DATA_DIR / "backups",
+        LEGACY_DB_FILE,
+        *_LEGACY_FILES.values(),
+    ]
+    try:
+        paths.extend(DATA_DIR.glob("*.migrating"))
+        paths.extend(DATA_DIR.glob("*.candidate"))
+        paths.extend(DATA_DIR.glob("*.initializing"))
+    except OSError:
+        pass
+    return tuple(dict.fromkeys(Path(path) for path in paths))
+
+
+def _lifecycle() -> DatabaseLifecycle:
+    """Get the lifecycle gate for the currently configured profile paths."""
+    global _lifecycle_instance, _lifecycle_key
+    evidence = _lifecycle_evidence_paths()
+    key = (str(DB_FILE), tuple(str(path) for path in evidence))
+    with _lifecycle_lock:
+        if _lifecycle_instance is None or _lifecycle_key != key:
+            _lifecycle_instance = DatabaseLifecycle(DB_FILE, evidence_paths=evidence)
+            _lifecycle_key = key
+            if DB_FILE.is_file():
+                # Startup validation below is still required before business access.
+                _lifecycle_instance.set_state(DatabaseState.OPENING)
+            else:
+                _lifecycle_instance.classify_missing_database()
+        return _lifecycle_instance
+
+
+def database_state() -> str:
+    """Return the current database lifecycle state for diagnostics/UI adapters."""
+    lifecycle = _lifecycle()
+    if not DB_FILE.is_file() and lifecycle.state == DatabaseState.READY:
+        lifecycle.classify_missing_database()
+    return lifecycle.state.value
+
+
+def database_connections() -> tuple[dict, ...]:
+    """Return active connection owners for diagnostics and maintenance gates."""
+    return _lifecycle().active_connections
+
+
+def _connect(*, mode: str = "rw", owner: str = "store"):
+    conn = _lifecycle().connect(mode=mode, owner=owner)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=30000")
@@ -113,10 +179,10 @@ def _migrate_database_location() -> None:
     source = sqlite3.connect(LEGACY_DB_FILE, timeout=30)
     target = sqlite3.connect(temporary, timeout=30)
     try:
+        # Refuse a corrupt/opaque source before SQLite's backup API can turn it
+        # into a new empty destination database.
+        source.execute("PRAGMA integrity_check").fetchall()
         source.backup(target)
-        result = target.execute("PRAGMA quick_check").fetchone()
-        if not result or result[0] != "ok":
-            raise sqlite3.DatabaseError(f"数据库迁移校验失败：{result[0] if result else '无结果'}")
         target.commit()
     except Exception:
         target.close()
@@ -126,7 +192,20 @@ def _migrate_database_location() -> None:
     else:
         target.close()
         source.close()
-        temporary.replace(DB_FILE)
+        try:
+            # The copied file must be structurally sound and recognizable as a
+            # supported BFO database before it can become the active file.
+            validate_database_candidate(temporary)
+            # A hard link is an atomic no-overwrite install. If another instance
+            # won the race, retain that database and discard only our candidate.
+            os.link(temporary, DB_FILE)
+            temporary.unlink()
+        except FileExistsError:
+            temporary.unlink(missing_ok=True)
+            return
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
         print(f"[store] 已将 SQLite 数据库复制到持久目录：{DB_FILE}（项目内原库保留）")
 
 
@@ -169,132 +248,369 @@ def _legacy_bundle():
     return bundle
 
 
-def _initialize():
-    # When a vault snapshot exists, the database must be restored only AFTER
-    # authenticating the DEK. Never copy a legacy DB or create an empty DB here:
-    # that would mask a missing/corrupted encrypted snapshot on unlock.
-    if not DB_FILE.exists() and (DATA_DIR / "library.sqlite3.enc").exists():
-        return
-    _migrate_database_location()
-    existed = DB_FILE.exists()
-    if not existed:
-        backup = _backup_legacy_files()
-        if backup:
-            print(f"[store] 已备份旧数据：{backup}")
-    conn = _connect()
+def _initialize_schema(conn):
+    """Create/upgrade the current schema inside a caller-owned candidate connection."""
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS folders (
+            media_id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '',
+            remote_count INTEGER NOT NULL DEFAULT 0, record_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active', archived_at TEXT,
+            directory_order INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS videos (
+            resource_key TEXT PRIMARY KEY, bvid TEXT, resource_id TEXT NOT NULL DEFAULT '',
+            resource_type INTEGER NOT NULL DEFAULT 2, record_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_videos_bvid ON videos(bvid);
+        CREATE TABLE IF NOT EXISTS folder_items (
+            media_id TEXT NOT NULL, resource_key TEXT NOT NULL,
+            fav_time INTEGER, scan_run_id TEXT,
+            PRIMARY KEY(media_id, resource_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_folder_items_resource ON folder_items(resource_key);
+        CREATE TABLE IF NOT EXISTS analyses (
+            resource_key TEXT PRIMARY KEY, record_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'stale',
+            dependent_ids TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS plans (
+            resource_key TEXT PRIMARY KEY, record_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS app_state (
+            name TEXT PRIMARY KEY, value_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS folder_scan_state (
+            media_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'never',
+            strategy TEXT, expected_count INTEGER, fetched_count INTEGER NOT NULL DEFAULT 0,
+            cursor_page INTEGER, snapshot_started_at TEXT, snapshot_completed_at TEXT,
+            last_error TEXT
+        );
+        CREATE TABLE IF NOT EXISTS scan_stage (
+            scan_run_id TEXT NOT NULL, media_id TEXT NOT NULL,
+            resource_key TEXT NOT NULL, record_json TEXT NOT NULL,
+            PRIMARY KEY(scan_run_id, media_id, resource_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_scan_stage_folder ON scan_stage(media_id, scan_run_id);
+        CREATE TABLE IF NOT EXISTS folder_profiles (
+            media_id TEXT PRIMARY KEY, profile_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS providers (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL,
+            api_key TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS models (
+            id TEXT PRIMARY KEY,
+            provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+            name TEXT NOT NULL, context_tokens INTEGER NOT NULL DEFAULT 32768,
+            max_output_tokens INTEGER NOT NULL DEFAULT 8192,
+            capabilities_json TEXT NOT NULL DEFAULT '{}',
+            thinking_effort TEXT NOT NULL DEFAULT '',
+            test_status TEXT NOT NULL DEFAULT 'untested',
+            test_message TEXT, test_at TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id);
+    """)
+    # Install the write-intent schema before this function opens its migration
+    # transaction. The repository requires a validated connection with no active
+    # transaction and never opens a database path itself.
+    SqliteRemoteOperationRepository.create_schema(conn)
+    # Scheduler DDL belongs to this versioned, lifecycle-owned migration.
+    # The task store itself only verifies schema during ordinary operations.
+    SQLiteTaskStore.create_schema(conn)
+    model_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(models)")}
+    if "context_source" not in model_columns:
+        conn.execute("ALTER TABLE models ADD COLUMN context_source TEXT NOT NULL DEFAULT 'legacy_unknown'")
+    if "output_source" not in model_columns:
+        conn.execute("ALTER TABLE models ADD COLUMN output_source TEXT NOT NULL DEFAULT 'legacy_unknown'")
+    if "capabilities_json" not in model_columns:
+        conn.execute("ALTER TABLE models ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '{}'")
+    folder_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(folders)")}
+    if "status" not in folder_columns:
+        conn.execute("ALTER TABLE folders ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
+    if "archived_at" not in folder_columns:
+        conn.execute("ALTER TABLE folders ADD COLUMN archived_at TEXT")
+    if "directory_order" not in folder_columns:
+        conn.execute("ALTER TABLE folders ADD COLUMN directory_order INTEGER NOT NULL DEFAULT 0")
+    # v6：分析结果的可查询状态位。status='stale' 表示所依赖的画像已变化，需要重算。
+    # dependent_ids 在分析落库时冻结，记录「这条结论当初参考了哪几个夹」，
+    # 之后内容挪动不会追溯性地把它判为过期，避免执行完方案就触发全量重算。
+    analysis_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(analyses)")}
+    if "status" not in analysis_columns:
+        conn.execute("ALTER TABLE analyses ADD COLUMN status TEXT NOT NULL DEFAULT 'stale'")
+    if "dependent_ids" not in analysis_columns:
+        conn.execute("ALTER TABLE analyses ADD COLUMN dependent_ids TEXT NOT NULL DEFAULT '[]'")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_analyses_status ON analyses(status)")
+    row = conn.execute("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").fetchone()
+    if row is None:
+        has_data = any(conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+                       for table in ("folders", "videos", "analyses", "plans", "app_state"))
+        if not has_data:
+            _import_bundle(conn, _legacy_bundle(), legacy=True)
+        row = (0,)
+    current_version = int(row[0])
+    if current_version < 2:
+        conn.execute("UPDATE folders SET status='active' WHERE status IS NULL OR status=''")
+    if current_version < 3:
+        conn.execute("UPDATE folders SET directory_order=(SELECT COUNT(*) FROM folders AS earlier "
+                     "WHERE earlier.rowid < folders.rowid)")
+    if current_version < 4:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id)")
+    for version in range(current_version + 1, _SCHEMA_VERSION + 1):
+        conn.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?,?)",
+                     (version, time.strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+
+
+def _has_locked_vault_evidence() -> bool:
+    return any(path.exists() for path in (
+        DATA_DIR / "library.sqlite3.enc",
+        DATA_DIR.parent / "vault.json",
+    ))
+
+
+def _legacy_json_exists() -> bool:
+    return any(path.is_file() for path in _LEGACY_FILES.values())
+
+
+def _has_non_legacy_initialization_evidence() -> bool:
+    """Identity/recovery evidence that forbids creating a replacement empty DB."""
+    paths = (
+        DATA_DIR / "library.sqlite3.enc",
+        DATA_DIR / "lifecycle.json",
+        DATA_DIR / "database-manifest.json",
+        DATA_DIR / "library.sqlite3.plain-backup",
+        DATA_DIR / "backups",
+        DATA_DIR.parent / "vault.json",
+        LEGACY_DB_FILE,
+    )
+    if any(path.exists() for path in paths):
+        return True
+    return any(any(DATA_DIR.glob(pattern)) for pattern in
+               ("*.migrating", "*.candidate", "*.initializing"))
+
+
+def _write_database_manifest() -> None:
+    """Persist a small external initialized marker so later DB loss is detectable."""
+    manifest = DATA_DIR / "database-manifest.json"
+    temporary = manifest.with_name(f".{manifest.name}.{uuid.uuid4().hex}.tmp")
+    payload = {
+        "format_version": 1,
+        "initialized": True,
+        "database_file": DB_FILE.name,
+        "schema_version": _SCHEMA_VERSION,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    }
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS schema_migrations (
-                version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS folders (
-                media_id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '',
-                remote_count INTEGER NOT NULL DEFAULT 0, record_json TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'active', archived_at TEXT,
-                directory_order INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS videos (
-                resource_key TEXT PRIMARY KEY, bvid TEXT, resource_id TEXT NOT NULL DEFAULT '',
-                resource_type INTEGER NOT NULL DEFAULT 2, record_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_videos_bvid ON videos(bvid);
-            CREATE TABLE IF NOT EXISTS folder_items (
-                media_id TEXT NOT NULL, resource_key TEXT NOT NULL,
-                fav_time INTEGER, scan_run_id TEXT,
-                PRIMARY KEY(media_id, resource_key)
-            );
-            CREATE INDEX IF NOT EXISTS idx_folder_items_resource ON folder_items(resource_key);
-            CREATE TABLE IF NOT EXISTS analyses (
-                resource_key TEXT PRIMARY KEY, record_json TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'stale',
-                dependent_ids TEXT NOT NULL DEFAULT '[]'
-            );
-            CREATE TABLE IF NOT EXISTS plans (
-                resource_key TEXT PRIMARY KEY, record_json TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS app_state (
-                name TEXT PRIMARY KEY, value_json TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS folder_scan_state (
-                media_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'never',
-                strategy TEXT, expected_count INTEGER, fetched_count INTEGER NOT NULL DEFAULT 0,
-                cursor_page INTEGER, snapshot_started_at TEXT, snapshot_completed_at TEXT,
-                last_error TEXT
-            );
-            CREATE TABLE IF NOT EXISTS scan_stage (
-                scan_run_id TEXT NOT NULL, media_id TEXT NOT NULL,
-                resource_key TEXT NOT NULL, record_json TEXT NOT NULL,
-                PRIMARY KEY(scan_run_id, media_id, resource_key)
-            );
-            CREATE INDEX IF NOT EXISTS idx_scan_stage_folder ON scan_stage(media_id, scan_run_id);
-            CREATE TABLE IF NOT EXISTS folder_profiles (
-                media_id TEXT PRIMARY KEY, profile_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS providers (
-                id TEXT PRIMARY KEY, name TEXT NOT NULL, base_url TEXT NOT NULL,
-                api_key TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS models (
-                id TEXT PRIMARY KEY,
-                provider_id TEXT NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
-                name TEXT NOT NULL, context_tokens INTEGER NOT NULL DEFAULT 32768,
-                max_output_tokens INTEGER NOT NULL DEFAULT 8192,
-                capabilities_json TEXT NOT NULL DEFAULT '{}',
-                thinking_effort TEXT NOT NULL DEFAULT '',
-                test_status TEXT NOT NULL DEFAULT 'untested',
-                test_message TEXT, test_at TEXT,
-                created_at TEXT NOT NULL, updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id);
-        """)
-        model_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(models)")}
-        if "context_source" not in model_columns:
-            conn.execute("ALTER TABLE models ADD COLUMN context_source TEXT NOT NULL DEFAULT 'legacy_unknown'")
-        if "output_source" not in model_columns:
-            conn.execute("ALTER TABLE models ADD COLUMN output_source TEXT NOT NULL DEFAULT 'legacy_unknown'")
-        if "capabilities_json" not in model_columns:
-            conn.execute("ALTER TABLE models ADD COLUMN capabilities_json TEXT NOT NULL DEFAULT '{}'")
-        folder_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(folders)")}
-        if "status" not in folder_columns:
-            conn.execute("ALTER TABLE folders ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
-        if "archived_at" not in folder_columns:
-            conn.execute("ALTER TABLE folders ADD COLUMN archived_at TEXT")
-        if "directory_order" not in folder_columns:
-            conn.execute("ALTER TABLE folders ADD COLUMN directory_order INTEGER NOT NULL DEFAULT 0")
-        # v6：分析结果的可查询状态位。status='stale' 表示所依赖的画像已变化，需要重算。
-        # dependent_ids 在分析落库时冻结，记录「这条结论当初参考了哪几个夹」，
-        # 之后内容挪动不会追溯性地把它判为过期，避免执行完方案就触发全量重算。
-        analysis_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(analyses)")}
-        if "status" not in analysis_columns:
-            conn.execute("ALTER TABLE analyses ADD COLUMN status TEXT NOT NULL DEFAULT 'stale'")
-        if "dependent_ids" not in analysis_columns:
-            conn.execute("ALTER TABLE analyses ADD COLUMN dependent_ids TEXT NOT NULL DEFAULT '[]'")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_analyses_status ON analyses(status)")
-        row = conn.execute("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").fetchone()
-        if row is None:
-            has_data = any(conn.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
-                           for table in ("folders", "videos", "analyses", "plans", "app_state"))
-            if not has_data:
-                _import_bundle(conn, _legacy_bundle(), legacy=True)
-            row = (0,)
-        current_version = int(row[0])
-        if current_version < 2:
-            conn.execute("UPDATE folders SET status='active' WHERE status IS NULL OR status=''")
-        if current_version < 3:
-            conn.execute("UPDATE folders SET directory_order=(SELECT COUNT(*) FROM folders AS earlier "
-                         "WHERE earlier.rowid < folders.rowid)")
-        if current_version < 4:
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id)")
-        for version in range(current_version + 1, _SCHEMA_VERSION + 1):
-            conn.execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(?,?)",
-                         (version, time.strftime("%Y-%m-%d %H:%M:%S")))
-        conn.commit()
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        with temporary.open("x", encoding="utf-8") as stream:
+            json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, manifest)
     finally:
-        conn.close()
+        temporary.unlink(missing_ok=True)
+
+
+_REQUIRED_DATABASE_TABLES = frozenset({
+    "schema_migrations", "folders", "videos", "folder_items", "analyses",
+    "plans", "app_state", "folder_scan_state", "scan_stage", "folder_profiles",
+    "providers", "models",
+})
+_VERSIONED_EXTENSION_TABLES = {
+    8: frozenset({
+        "remote_operation_schema_version", "remote_operations", "remote_operation_events",
+        "bfo_scheduler_tasks", "bfo_scheduler_meta",
+    }),
+}
+
+
+def validate_database_candidate(path: str | Path) -> dict:
+    """Validate SQLite integrity plus the supported BFO database schema contract."""
+    validation = validate_database(path)
+    if validation.schema_version is None:
+        raise IntegrityValidationError(
+            "候选文件缺少有效 schema_migrations 身份，拒绝作为 BFO 数据库")
+    if validation.schema_version > _SCHEMA_VERSION:
+        raise IntegrityValidationError(
+            f"候选数据库 Schema {validation.schema_version} 高于当前支持版本 {_SCHEMA_VERSION}")
+    connection = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        tables = {str(row[0]) for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        connection.close()
+    required_tables = set(_REQUIRED_DATABASE_TABLES)
+    for version, extension_tables in _VERSIONED_EXTENSION_TABLES.items():
+        if int(validation.schema_version) >= version:
+            required_tables.update(extension_tables)
+    missing = sorted(required_tables - tables)
+    if missing:
+        raise IntegrityValidationError(
+            "候选数据库缺少必要业务表，拒绝自动补建：" + ", ".join(missing))
+    return {
+        "path": validation.path,
+        "schema_version": validation.schema_version,
+        "integrity_check": list(validation.integrity_check),
+        "foreign_key_violations": list(validation.foreign_key_violations),
+    }
+
+
+def install_database_candidate(path: str | Path) -> dict:
+    """Install a validated SQLite database candidate and preserve the old copy.
+
+    The caller must first stop external writers and use an isolated decryption or
+    import path. After installation, call ``_initialize()`` to apply compatible
+    schema upgrades before exposing database-backed features.
+    """
+    candidate_validation = validate_database_candidate(path)
+    result = _lifecycle().install_candidate(path)
+    _write_database_manifest()
+    return {
+        **candidate_validation,
+        "active_path": result.active_path,
+        "recovery_copy": result.backup_path,
+    }
+
+
+def _initialize_existing_database() -> None:
+    lifecycle = _lifecycle()
+    lifecycle.set_state(DatabaseState.OPENING)
+    if lifecycle.active_connection_count:
+        lifecycle.set_state(DatabaseState.RECOVERY_REQUIRED)
+        raise RuntimeError("数据库仍有活跃连接，不能执行 Schema 初始化或验证")
+    connection = None
+    try:
+        validate_database_candidate(DB_FILE)
+        connection = lifecycle.connect_for_initialization(DB_FILE, create=False)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys=ON")
+        _initialize_schema(connection)
+        connection.commit()
+        connection.close()
+        connection = None
+        validate_database_candidate(DB_FILE)
+        lifecycle.set_state(DatabaseState.READY)
+        _write_database_manifest()
+    except Exception:
+        if connection is not None:
+            connection.close()
+        lifecycle.set_state(DatabaseState.RECOVERY_REQUIRED)
+        raise
+
+
+def initialize_new_database() -> dict:
+    """Explicit first-install operation; ordinary store connections never create files.
+
+    The method refuses to run when the active DB or any legacy/vault/recovery
+    evidence exists. Service code should call this only after the user confirms
+    a genuinely new local database, before creating vault metadata.
+    """
+    lifecycle = _lifecycle()
+    if DB_FILE.exists():
+        raise DatabaseAlreadyInitializedError(f"数据库已存在，拒绝按新库初始化：{DB_FILE}")
+    if _has_non_legacy_initialization_evidence() or _legacy_json_exists():
+        lifecycle.classify_missing_database()
+        raise DatabaseRecoveryRequiredError(
+            "检测到既有数据库、保险库、旧数据或备份，拒绝创建空库；请走迁移或恢复流程")
+    validation = lifecycle.initialize_new_database(_initialize_schema)
+    _write_database_manifest()
+    return {
+        "database_file": validation.path,
+        "schema_version": validation.schema_version,
+        "integrity_check": list(validation.integrity_check),
+    }
+
+
+def _initialize_legacy_json_database() -> None:
+    """Migrate an old JSON-only installation without treating it as a fresh profile."""
+    if _has_locked_vault_evidence() or (DATA_DIR / "database-manifest.json").exists():
+        _lifecycle().classify_missing_database()
+        raise DatabaseRecoveryRequiredError(
+            "旧 JSON 与保险库/初始化身份同时存在；需要人工确认迁移来源")
+    lifecycle = _lifecycle()
+    if _has_non_legacy_initialization_evidence():
+        lifecycle.classify_missing_database()
+        raise DatabaseRecoveryRequiredError("检测到数据库恢复证据，拒绝自动导入旧 JSON")
+    validation = lifecycle.initialize_new_database(
+        _initialize_schema, allow_existing_evidence=True)
+    backup = _backup_legacy_files()
+    _write_database_manifest()
+    if backup:
+        print(f"[store] 已备份旧数据：{backup}")
+    print(f"[store] 已从旧版 JSON 导入并校验 SQLite 数据库：{validation.path}")
+
+
+def _initialize() -> None:
+    """Explicit schema/open operation retained for existing service callers.
+
+    Existing files are validated and upgraded using the historical migration
+    logic. A missing database is created only when there is no evidence of prior
+    initialization; old JSON-only data follows its dedicated migration path.
+    """
+    if DB_FILE.is_file():
+        _initialize_existing_database()
+        return
+    if _has_locked_vault_evidence() or any(path.exists() for path in (
+            DATA_DIR / "database-manifest.json", DATA_DIR / "library.sqlite3.plain-backup",
+            DATA_DIR / "backups")):
+        _lifecycle().classify_missing_database()
+        raise DatabaseRecoveryRequiredError(
+            f"活动数据库缺失但存在保险库或恢复证据：{DB_FILE}")
+    if LEGACY_DB_FILE.is_file():
+        _migrate_database_location()
+        if DB_FILE.is_file():
+            _initialize_existing_database()
+            return
+    if _legacy_json_exists():
+        _initialize_legacy_json_database()
+        return
+    initialize_new_database()
+
+
+def _startup_initialize() -> None:
+    """Open/migrate existing data on import without creating a blank first-run DB."""
+    lifecycle = _lifecycle()
+    try:
+        # An encrypted snapshot is authoritative until vault unlock authenticates
+        # and restores it. Never inspect or upgrade a leftover plaintext copy.
+        if DB_FILE.is_file() and (DATA_DIR / "library.sqlite3.enc").exists():
+            lifecycle.set_state(DatabaseState.LOCKED)
+            return
+        if DB_FILE.is_file():
+            _initialize_existing_database()
+            return
+        if _has_locked_vault_evidence():
+            lifecycle.set_state(DatabaseState.LOCKED)
+            return
+        if any(path.exists() for path in (
+                DATA_DIR / "database-manifest.json", DATA_DIR / "library.sqlite3.plain-backup",
+                DATA_DIR / "backups")):
+            lifecycle.set_state(DatabaseState.RECOVERY_REQUIRED)
+            return
+        if LEGACY_DB_FILE.is_file():
+            _migrate_database_location()
+            if DB_FILE.is_file():
+                _initialize_existing_database()
+                return
+        if _legacy_json_exists():
+            _initialize_legacy_json_database()
+            return
+        lifecycle.classify_missing_database()
+    except Exception as exc:
+        lifecycle.set_state(DatabaseState.RECOVERY_REQUIRED)
+        print(f"[store] 数据库启动校验/迁移未完成，普通访问已关闭：{exc}")
+        # Keep the historical migration failure visible to callers. In
+        # particular, do not continue startup after rejecting a legacy source.
+        if LEGACY_DB_FILE.is_file() and not DB_FILE.is_file():
+            raise
 
 
 def _load_dataset_conn(conn, name: str, default=None):
@@ -1279,4 +1595,4 @@ def backup_database(destination: Path):
             source.close()
 
 
-_initialize()
+_startup_initialize()

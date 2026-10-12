@@ -1,5 +1,6 @@
 """Scan recovery uses synthetic remote responses and a fresh isolated SQLite DB."""
 import os
+import shutil
 import sqlite3
 import sys
 import time
@@ -66,15 +67,16 @@ class ScanTroubleshootingTests(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.addCleanup(self.stack.close)
-        root = TEST_ROOT
-        root.mkdir(exist_ok=True)
-        db = root / f"troubleshooting-{uuid.uuid4().hex}.sqlite3"
-        db.touch()  # Never migrate the developer's real database or legacy JSON.
-        self.stack.callback(lambda: [Path(str(db) + suffix).unlink(missing_ok=True)
-                                     for suffix in ("", "-wal", "-shm")])
-        for name, value in (("DATA_DIR", root), ("DB_FILE", db), ("_LEGACY_FILES", {})):
+        profile = TEST_ROOT / f"troubleshooting-{uuid.uuid4().hex}"
+        data_dir = profile / "data"
+        data_dir.mkdir(parents=True)
+        db = data_dir / "library.sqlite3"
+        self.stack.callback(shutil.rmtree, profile, True)
+        for name, value in (("DATA_DIR", data_dir), ("DB_FILE", db),
+                            ("LEGACY_DB_FILE", profile / "legacy.sqlite3"),
+                            ("_LEGACY_FILES", {})):
             self.stack.enter_context(patch.object(store, name, value))
-        store._initialize()
+        store.initialize_new_database()
         self.stack.enter_context(patch.dict(server.APP, {key: None for key in (
             "session", "scan_run", "analyze_run", "apply_run", "folder_merge_run",
             "folder_merge_ai_run", "folder_profile_run")}))

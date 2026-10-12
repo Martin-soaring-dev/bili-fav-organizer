@@ -51,6 +51,26 @@ import vault as vault_mod
 import bili_api
 import llm_analyzer
 import store
+from core.bili_operation_adapter import BiliOperationAdapter
+from core.remote_operations import (
+    OperationStatus,
+    RemoteOperationCoordinator,
+    SqliteRemoteOperationRepository,
+)
+from core.scheduler import (
+    CancelRequested,
+    CheckpointValidation,
+    PauseReason,
+    PauseRequested,
+    ReconciliationResult,
+    ResumeIntent,
+    ResumePolicy,
+    SQLiteTaskStore,
+    TaskContext,
+    TaskRecord,
+    TaskScheduler,
+    TaskStatus,
+)
 
 HERE = Path(__file__).resolve().parent
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else HERE
@@ -625,6 +645,7 @@ def app_lock_remove(body: AppLockPasswordIn):
 # ---------- Secure Vault（DEK 多 KEK） ----------
 VAULT = vault_mod.Vault(USER_DATA_DIR / "vault.json")
 VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
+VAULT_LOCK_PHASE = {"phase": "idle", "error": "", "updated_at": ""}
 
 
 def _vault_status_payload() -> dict:
@@ -638,7 +659,14 @@ def _vault_status_payload() -> dict:
         "has_recovery_wrap": st.has_recovery_wrap,
         "has_device_wrap": st.has_device_wrap,
         "has_account_wrap": st.has_account_wrap,
+        "database_state": store.database_state(),
+        "lock_phase": dict(VAULT_LOCK_PHASE),
     }
+
+
+def _set_vault_lock_phase(phase: str, error: str = "") -> None:
+    VAULT_LOCK_PHASE.update(phase=str(phase), error=str(error),
+                            updated_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
 
 
 def _vault_encrypt_consistent_db() -> None:
@@ -660,6 +688,55 @@ def _vault_encrypt_consistent_db() -> None:
             VAULT.encrypt_file(temporary, VAULT_DB_ENC)
             if not _dek_selftest().get("ok"):
                 raise vault_mod.VaultError("加密快照完整性验证失败")
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def _vault_encrypt_drained_db() -> None:
+    """Stop new lifecycle connections before snapshotting the database for lock."""
+    if not store.DB_FILE.is_file() or not VAULT.is_unlocked():
+        raise vault_mod.VaultError("明文数据库不存在或加密库未解锁")
+    lifecycle = store._lifecycle()
+    with store._lock:
+        if lifecycle.active_connection_count:
+            raise vault_mod.VaultError(
+                f"仍有 {lifecycle.active_connection_count} 个数据库连接，拒绝锁定")
+        store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(prefix=".vault-lock-snapshot-",
+                                               suffix=".sqlite3", dir=store.DATA_DIR)
+        os.close(fd)
+        temporary = Path(temporary_name)
+        source = None
+        target = None
+        draining = False
+        try:
+            # Keep this lease open while closing the gate; no other request can
+            # enter after DRAINING, and the connection count detects a race.
+            source = store._connect(owner="vault:lock-snapshot")
+            lifecycle.set_state(store.DatabaseState.DRAINING)
+            draining = True
+            if lifecycle.active_connection_count != 1:
+                raise vault_mod.VaultError(
+                    f"锁定期间仍有 {lifecycle.active_connection_count - 1} 个数据库连接")
+            target = sqlite3.connect(temporary)
+            source.backup(target)
+            target.close()
+            target = None
+            source.close()
+            source = None
+            if lifecycle.active_connection_count:
+                raise vault_mod.VaultError("数据库连接尚未全部释放，拒绝删除明文库")
+            VAULT.encrypt_file(temporary, VAULT_DB_ENC)
+            if not _dek_selftest().get("ok"):
+                raise vault_mod.VaultError("加密快照完整性验证失败")
+        except Exception:
+            if target is not None:
+                target.close()
+            if source is not None:
+                source.close()
+            if draining and store.DB_FILE.is_file():
+                lifecycle.set_state(store.DatabaseState.READY)
+            raise
         finally:
             temporary.unlink(missing_ok=True)
 
@@ -688,9 +765,80 @@ def _vault_remove_plaintext() -> None:
 
 def _vault_save_db_encrypted() -> None:
     """Make a verified encrypted snapshot before locking; do not leave a plain DB."""
+    lifecycle = store._lifecycle()
     with store._lock:
-        _vault_encrypt_consistent_db()
-        _vault_remove_plaintext()
+        _vault_encrypt_drained_db()
+        if lifecycle.active_connection_count:
+            lifecycle.set_state(store.DatabaseState.READY)
+            raise vault_mod.VaultError(
+                f"仍有 {lifecycle.active_connection_count} 个数据库连接，拒绝删除明文库")
+        try:
+            _vault_remove_plaintext()
+        except Exception:
+            if store.DB_FILE.is_file():
+                lifecycle.set_state(store.DatabaseState.READY)
+            else:
+                lifecycle.set_state(store.DatabaseState.LOCKED)
+                VAULT.lock()
+            raise
+        lifecycle.set_state(store.DatabaseState.LOCKED)
+
+
+def _resume_vault_paused_tasks(scheduler: TaskScheduler | None = None) -> list[TaskRecord]:
+    """Resume only same-process runners parked by a successful/failed lock attempt."""
+    scheduler = scheduler or _TASK_SCHEDULER
+    if scheduler is None or store.database_state() != store.DatabaseState.READY.value:
+        return []
+    scheduler.reopen_admission()
+    resumed = []
+    for record in scheduler.list_tasks():
+        if (record.task_id not in _LEGACY_TASKS or
+                record.status not in {TaskStatus.PAUSED, TaskStatus.INTERRUPTED} or
+                record.pause_reason != PauseReason.VAULT_LOCK or
+                record.resume_intent != ResumeIntent.AFTER_VAULT_UNLOCK or
+                record.resume_policy != ResumePolicy.AUTO_SAFE or
+                record.reconciliation_required):
+            continue
+        try:
+            resumed.append(scheduler.resume_task(record.task_id))
+        except Exception as exc:
+            log.warning("无法自动恢复保险库暂停任务 %s：%s", record.task_id, exc)
+    return resumed
+
+
+def _resume_after_failed_vault_barrier(scheduler: TaskScheduler | None) -> None:
+    """Finish releasing tasks that reached their safe point after a timeout."""
+    if scheduler is None:
+        return
+
+    def recover():
+        scheduler.wait_for_idle(timeout=120)
+        if (VAULT_LOCK_PHASE.get("phase") == "failed" and
+                store.database_state() == store.DatabaseState.READY.value):
+            _resume_vault_paused_tasks(scheduler)
+
+    threading.Thread(target=recover, name="vault-pause-recovery", daemon=True).start()
+
+
+def _vault_pause_tasks_for_lock(timeout: float = 30.0) -> TaskScheduler:
+    """Close task admission and wait until every worker releases DB resources."""
+    if store.database_state() != store.DatabaseState.READY.value:
+        raise vault_mod.VaultError(
+            f"数据库状态为 {store.database_state()}，无法执行锁定")
+    scheduler = _ensure_task_scheduler()
+    scheduler.close_admission()
+    scheduler.request_pause_all(
+        reason=PauseReason.VAULT_LOCK,
+        resume_intent=ResumeIntent.AFTER_VAULT_UNLOCK,
+    )
+    if not scheduler.wait_for_idle(timeout):
+        raise TimeoutError("后台任务尚未到达安全暂停点，请稍后重试锁定")
+    active = store.database_connections()
+    if active:
+        owners = ", ".join(str(item.get("owner", "unknown")) for item in active[:5])
+        raise vault_mod.VaultError(
+            f"仍有 {len(active)} 个数据库连接未释放：{owners}")
+    return scheduler
 
 
 def _vault_migrate_plain_db_if_needed() -> str | None:
@@ -724,30 +872,43 @@ def _vault_migrate_plain_db_if_needed() -> str | None:
 
 
 def _vault_restore_db_if_needed() -> bool:
-    """Decrypt only authenticated ciphertext; never create a new empty database."""
+    """Decrypt to an isolated candidate, validate, then atomically install it."""
     if not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
         return False
-    # A legacy beta might still have a live plaintext DB. Do not overwrite it:
-    # verify the ciphertext separately, preserving the original as recovery data.
-    if store.DB_FILE.is_file():
-        return False
-    if not _dek_selftest().get("ok"):
-        return False
+    candidate = store.DATA_DIR / f".vault-restore-{uuid.uuid4().hex}.sqlite3"
     try:
+        if store.DB_FILE.is_file():
+            # A process may have stopped after saving the encrypted snapshot but
+            # before deleting its working copy. Preserve and validate that copy only
+            # after the user unlocks; it may contain newer committed data.
+            store._initialize()
+            return False
+        if not _dek_selftest().get("ok"):
+            return False
         with store._lock:
-            VAULT.decrypt_file(VAULT_DB_ENC, store.DB_FILE)
-            import sqlite3
-            with sqlite3.connect(f"file:{store.DB_FILE.as_posix()}?mode=ro",
-                                 uri=True) as connection:
-                check = connection.execute("PRAGMA quick_check").fetchone()
-            if not check or check[0] != "ok":
-                raise vault_mod.VaultError("恢复的数据库完整性检查失败")
+            store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+            VAULT.decrypt_file(VAULT_DB_ENC, candidate)
+            store.validate_database_candidate(candidate)
+            candidate_connection = sqlite3.connect(candidate, timeout=30)
+            try:
+                candidate_connection.row_factory = sqlite3.Row
+                candidate_connection.execute("PRAGMA foreign_keys=ON")
+                store._initialize_schema(candidate_connection)
+                candidate_connection.commit()
+            finally:
+                candidate_connection.close()
+            store.validate_database_candidate(candidate)
+            store.install_database_candidate(candidate)
             store._initialize()
         return True
-    except (OSError, ValueError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
+    except (OSError, ValueError, RuntimeError, vault_mod.VaultError,
+            sqlite3.DatabaseError) as exc:
         log.warning("无法解密数据库：%s", exc)
-        _vault_remove_plaintext()
         return False
+    finally:
+        for path in (candidate, Path(str(candidate) + "-wal"),
+                     Path(str(candidate) + "-shm"), Path(str(candidate) + "-journal")):
+            path.unlink(missing_ok=True)
 
 
 class VaultInitIn(BaseModel):
@@ -778,6 +939,13 @@ def vault_onboarding(body: VaultInitIn):
     if VAULT_DB_ENC.exists():
         return JSONResponse({"ok": False, "error": "已有加密快照，禁止重新初始化保险库"},
                             status_code=409)
+    if not store.DB_FILE.is_file():
+        try:
+            store.initialize_new_database()
+        except (OSError, RuntimeError, sqlite3.DatabaseError) as exc:
+            return JSONResponse({"ok": False,
+                                 "error": f"数据库尚未就绪，不能初始化保险库：{exc}",
+                                 "database_state": store.database_state()}, status_code=409)
     try:
         code = VAULT.initialize(bound_mid=body.bound_mid, password=password)
     except vault_mod.VaultError as exc:
@@ -846,9 +1014,13 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
                              "error": f"解密自检未通过：{test.get('detail')}",
                              "selftest": test}, status_code=403)
     restored = _vault_restore_db_if_needed()
-    if not store.DB_FILE.is_file():
+    if (not store.DB_FILE.is_file() or
+            store.database_state() != store.DatabaseState.READY.value):
         VAULT.lock()
-        return JSONResponse({"ok": False, "error": "加密数据库恢复失败"}, status_code=500)
+        return JSONResponse({"ok": False, "error": "加密数据库恢复失败或校验未通过",
+                             "database_state": store.database_state()}, status_code=500)
+    _resume_vault_paused_tasks()
+    _set_vault_lock_phase("idle")
     _APP_LOCK.update(unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
@@ -875,9 +1047,13 @@ def vault_unlock(body: VaultUnlockIn):
                              "error": f"解密自检未通过：{test.get('detail')}",
                              "selftest": test}, status_code=403)
     restored = _vault_restore_db_if_needed()
-    if not store.DB_FILE.is_file():
+    if (not store.DB_FILE.is_file() or
+            store.database_state() != store.DatabaseState.READY.value):
         VAULT.lock()
-        return JSONResponse({"ok": False, "error": "加密数据库恢复失败"}, status_code=500)
+        return JSONResponse({"ok": False, "error": "加密数据库恢复失败或校验未通过",
+                             "database_state": store.database_state()}, status_code=500)
+    _resume_vault_paused_tasks()
+    _set_vault_lock_phase("idle")
     _APP_LOCK.update(enabled=False, unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
@@ -885,12 +1061,24 @@ def vault_unlock(body: VaultUnlockIn):
 
 @app.post("/api/vault/lock")
 def vault_lock():
+    scheduler = None
     try:
+        _set_vault_lock_phase("pausing_tasks")
+        scheduler = _vault_pause_tasks_for_lock()
+        _set_vault_lock_phase("sealing")
         _vault_save_db_encrypted()
-    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
-        return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
-                            status_code=500)
+    except (OSError, RuntimeError, vault_mod.VaultError,
+            sqlite3.DatabaseError) as exc:
+        if store.DB_FILE.is_file():
+            store._lifecycle().set_state(store.DatabaseState.READY)
+        _resume_vault_paused_tasks(scheduler)
+        _set_vault_lock_phase("failed", str(exc))
+        _resume_after_failed_vault_barrier(scheduler or _TASK_SCHEDULER)
+        status = 409 if isinstance(exc, TimeoutError) else 500
+        return JSONResponse({"ok": False, "error": f"锁定未完成：{exc}",
+                             **_vault_status_payload()}, status_code=status)
     VAULT.lock()
+    _set_vault_lock_phase("locked")
     return {"ok": True, **_vault_status_payload()}
 
 
@@ -899,14 +1087,28 @@ def vault_complete_onboarding():
     if not VAULT.is_unlocked():
         return JSONResponse({"ok": False, "error": "加密库未解锁"}, status_code=403)
     # Do not finalize onboarding or claim success unless a verified snapshot is saved.
+    scheduler = None
     try:
+        _set_vault_lock_phase("pausing_tasks")
+        scheduler = _vault_pause_tasks_for_lock()
+        _set_vault_lock_phase("sealing")
         _vault_save_db_encrypted()
         VAULT.complete_onboarding()
-    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
+    except (OSError, RuntimeError, vault_mod.VaultError,
+            sqlite3.DatabaseError) as exc:
         log.error("初始化后加密数据库失败：%s", exc)
-        return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
-                            status_code=500)
+        if not store.DB_FILE.is_file() and VAULT.is_unlocked():
+            _vault_restore_db_if_needed()
+        if store.DB_FILE.is_file():
+            store._lifecycle().set_state(store.DatabaseState.READY)
+        _resume_vault_paused_tasks(scheduler)
+        _set_vault_lock_phase("failed", str(exc))
+        _resume_after_failed_vault_barrier(scheduler or _TASK_SCHEDULER)
+        status = 409 if isinstance(exc, TimeoutError) else 500
+        return JSONResponse({"ok": False, "error": f"初始化加密数据库失败：{exc}",
+                             **_vault_status_payload()}, status_code=status)
     VAULT.lock()
+    _set_vault_lock_phase("locked")
     return {"ok": True, "locked": True, **_vault_status_payload()}
 
 
@@ -1207,6 +1409,386 @@ def emit(level: str, text: str, **extra):
 # 把事件钩子注入 bili_api，让长等待(412 退避等)提示也能推到前端
 bili_api.EVENT_HOOK = lambda level, text: emit(level, text)
 bili_api.WRITE_LOG_PATH = store.DATA_DIR / "write_operations.jsonl"
+
+
+def _logged_bili_session(raw_session, task_id: str, *, account_id: str | None = None,
+                        retry_operation_ids=None):
+    """Add a durable intent record around B站 writes; the caller closes the lease."""
+    resolved_account = str(account_id or "").strip()
+    if not resolved_account:
+        getter = getattr(raw_session, "get_mid", None)
+        if callable(getter):
+            resolved_account = str(getter() or "").strip()
+    if not resolved_account:
+        try:
+            cookie = get_session_cookie()
+            resolved_account = str(getattr(cookie, "dedeuserid", "") or
+                                   getattr(cookie, "userid", "") or "").strip()
+        except Exception:
+            resolved_account = ""
+    # The production BiliSession always resolves a numeric mid. Keep a stable
+    # sentinel for test doubles that do not implement get_mid().
+    resolved_account = resolved_account or "unknown-local-account"
+    connection = store._connect(owner=f"task:{task_id}:remote-operation-log")
+    try:
+        repository = SqliteRemoteOperationRepository(connection)
+        coordinator = RemoteOperationCoordinator(repository)
+        adapter = BiliOperationAdapter(raw_session, coordinator, task_id=str(task_id),
+                                       account_id=resolved_account)
+        for operation_id in retry_operation_ids or ():
+            adapter.authorize_retry(operation_id)
+        return adapter, connection
+    except Exception:
+        connection.close()
+        raise
+
+
+_APP_TASK_TYPES = (
+    "scan", "analyze", "folder_profile", "folder_merge_suggestions",
+    "apply", "folder_merge",
+)
+_TASK_SCHEDULER_LOCK = threading.RLock()
+_TASK_SCHEDULER: TaskScheduler | None = None
+_TASK_SCHEDULER_KEY: str | None = None
+_LEGACY_TASKS: dict[str, tuple[dict, object]] = {}
+_TASK_CONTEXTS: dict[str, TaskContext] = {}
+
+
+class _LegacyAppTaskWorker:
+    """Bridge an existing resumable business runner into the durable scheduler."""
+
+    def execute(self, context: TaskContext) -> None:
+        task_id = context.task.task_id
+        entry = _LEGACY_TASKS.get(task_id)
+        if entry is None:
+            raise RuntimeError("此任务的进程内工作器已丢失；请从业务页按持久化进度重新发起")
+        state, runner = entry
+        _TASK_CONTEXTS[task_id] = context
+        state["running"] = True
+        try:
+            runner()
+            if state.get("reconciliation_required"):
+                context.mark_reconciliation_required(
+                    str(state.get("reconciliation_reason") or
+                        "B 站写操作结果尚未核对；请先检查远端状态"))
+            error = state.get("error")
+            if error and not state.get("reconciliation_required"):
+                raise RuntimeError(str(error))
+        finally:
+            _TASK_CONTEXTS.pop(task_id, None)
+            try:
+                # A paused task keeps its runner so the same process can resume
+                # from business checkpoints. Uncertain writes also keep the
+                # runner until their remote intent is reconciled.
+                if (context.task.status != TaskStatus.PAUSING and
+                        not state.get("reconciliation_required")):
+                    _LEGACY_TASKS.pop(task_id, None)
+            except Exception:
+                _LEGACY_TASKS.pop(task_id, None)
+
+    def validate_checkpoint(self, context: TaskContext) -> CheckpointValidation:
+        if context.task.task_id not in _LEGACY_TASKS:
+            return CheckpointValidation.reject(
+                "重启后进程内工作器不可恢复；请从业务页重新发起持久化任务")
+        checkpoint = context.task.checkpoint
+        if checkpoint is None and context.task.attempt == 0:
+            return CheckpointValidation.accept()
+        if not isinstance(checkpoint, dict) or checkpoint.get("version") != 1:
+            return CheckpointValidation.reject("任务检查点版本无效")
+        return CheckpointValidation.accept()
+
+    def reconcile(self, context: TaskContext) -> ReconciliationResult:
+        connection = store._connect(owner=f"task:{context.task.task_id}:reconcile")
+        try:
+            repository = SqliteRemoteOperationRepository(connection)
+            operations = repository.list_operations(task_id=context.task.task_id)
+            blocking = [row for row in operations if row.status in {
+                OperationStatus.DISPATCHING,
+                OperationStatus.NEEDS_RECONCILIATION,
+                OperationStatus.MANUAL_REVIEW,
+            }]
+            if blocking:
+                return ReconciliationResult(
+                    False, False,
+                    f"仍有 {len(blocking)} 项远端操作未解决")
+            if not operations:
+                return ReconciliationResult(False, False, "任务没有可核对的远端操作记录")
+            not_applied = [row.operation_id for row in operations
+                           if row.status is OperationStatus.NOT_APPLIED]
+            state, _runner = _LEGACY_TASKS.get(context.task.task_id, ({}, None))
+            authorized = set(state.get("retry_operation_ids", set()))
+            if not_applied and not set(not_applied).issubset(authorized):
+                return ReconciliationResult(
+                    False, False, "未应用操作尚未获得安全重试授权")
+            state["reconciliation_required"] = False
+            state.pop("reconciliation_reason", None)
+            state.pop("error", None)
+            state["stop"] = False
+            if "status" in state:
+                state["status"] = "running"
+            retry_count = len(state.get("unknown_bvids", []))
+            if retry_count:
+                state["done"] = max(0, int(state.get("done", 0)) - retry_count)
+                state["unknown"] = max(0, int(state.get("unknown", 0)) - retry_count)
+                state["unknown_bvids"].clear()
+            return ReconciliationResult(True, True)
+        finally:
+            connection.close()
+
+
+def _ensure_task_scheduler() -> TaskScheduler:
+    """Start one durable scheduler bound to the current READY DB lifecycle."""
+    global _TASK_SCHEDULER, _TASK_SCHEDULER_KEY
+    if store.database_state() != store.DatabaseState.READY.value:
+        raise RuntimeError(f"数据库状态为 {store.database_state()}，不能启动任务调度器")
+    key = str(store.DB_FILE.resolve())
+    with _TASK_SCHEDULER_LOCK:
+        if _TASK_SCHEDULER is not None and _TASK_SCHEDULER_KEY != key:
+            _TASK_SCHEDULER.shutdown(wait=True, timeout=10, pause_running=False)
+            _TASK_SCHEDULER = None
+            _TASK_SCHEDULER_KEY = None
+        if _TASK_SCHEDULER is None:
+            lifecycle = store._lifecycle()
+            task_store = SQLiteTaskStore.from_lifecycle(
+                lifecycle,
+                owner="task-scheduler",
+                owner_lock_path=store.DATA_DIR / ".scheduler-owner.lock",
+            )
+            _TASK_SCHEDULER = TaskScheduler(
+                task_store,
+                workers={task_type: _LegacyAppTaskWorker for task_type in _APP_TASK_TYPES},
+                max_workers=1,
+                owner_id=f"bfo:{uuid.uuid4().hex}",
+            )
+            _TASK_SCHEDULER.start()
+            _TASK_SCHEDULER_KEY = key
+            connection = store._connect(owner="startup:remote-operation-recovery")
+            try:
+                SqliteRemoteOperationRepository(connection).recover_stranded_dispatches()
+            finally:
+                connection.close()
+        return _TASK_SCHEDULER
+
+
+def _submit_app_task(task_type: str, state: dict, runner, *, parameters: dict | None = None):
+    """Persist a task row before allowing its legacy business runner to execute."""
+    task_id = str(state.get("id") or uuid.uuid4().hex)
+    state["id"] = task_id
+    try:
+        scheduler = _ensure_task_scheduler()
+        _LEGACY_TASKS[task_id] = (state, runner)
+        record = scheduler.submit(
+            task_type,
+            parameters=parameters or {},
+            task_schema_version=1,
+            checkpoint_schema_version=1,
+            resume_policy=ResumePolicy.AUTO_SAFE,
+            resource_keys=("local-library",),
+            idempotency_key=f"legacy:{task_type}:{task_id}",
+            task_id=task_id,
+        )
+        return record, scheduler
+    except Exception as exc:
+        _LEGACY_TASKS.pop(task_id, None)
+        state["running"] = False
+        return JSONResponse({"ok": False, "error": f"任务无法排队：{exc}"}, status_code=503)
+
+
+def _task_safe_point(state: dict, checkpoint: dict, progress: dict | None = None) -> None:
+    context = _TASK_CONTEXTS.get(str(state.get("id") or ""))
+    if context is None:
+        return
+    context.safe_point({"version": 1, **checkpoint}, progress=progress or {})
+
+
+def _cancel_legacy_state(state: dict | None) -> bool:
+    if not state:
+        return False
+    state["stop"] = True
+    if "continuous" in state:
+        state["continuous"] = False
+    ANALYZE_WAKE.set()
+    task_id = str(state.get("id") or "")
+    scheduler = _TASK_SCHEDULER
+    if task_id and scheduler is not None:
+        try:
+            scheduler.cancel_task(task_id)
+        except Exception as exc:
+            log.warning("无法取消任务 %s：%s", task_id, exc)
+    return True
+
+
+class RemoteOperationReconcileIn(BaseModel):
+    decision: str
+    preconditions_valid: bool | None = None
+    evidence: str = ""
+
+
+def _task_error_response(exc: Exception) -> JSONResponse:
+    return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+
+
+@app.get("/api/tasks")
+def tasks_list():
+    try:
+        scheduler = _ensure_task_scheduler()
+        return {"tasks": [record.to_public_dict() for record in scheduler.list_tasks()]}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"无法读取任务：{exc}"}, status_code=503)
+
+
+@app.get("/api/tasks/{task_id}")
+def task_get(task_id: str):
+    try:
+        return _ensure_task_scheduler().get_task(task_id).to_public_dict()
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"任务不可用：{exc}"}, status_code=404)
+
+
+@app.post("/api/tasks/{task_id}/pause")
+def task_pause(task_id: str):
+    try:
+        record = _ensure_task_scheduler().pause_task(
+            task_id, reason=PauseReason.USER, resume_intent=ResumeIntent.MANUAL)
+        return {"ok": True, "task": record.to_public_dict()}
+    except Exception as exc:
+        return _task_error_response(exc)
+
+
+@app.post("/api/tasks/{task_id}/cancel")
+def task_cancel(task_id: str):
+    try:
+        entry = _LEGACY_TASKS.get(task_id)
+        if entry:
+            state = entry[0]
+            state["stop"] = True
+            if state.get("continuous") is not None:
+                state["continuous"] = False
+            ANALYZE_WAKE.set()
+        record = _ensure_task_scheduler().cancel_task(task_id)
+        return {"ok": True, "task": record.to_public_dict()}
+    except Exception as exc:
+        return _task_error_response(exc)
+
+
+@app.post("/api/tasks/{task_id}/resume")
+def task_resume(task_id: str):
+    try:
+        if task_id not in _LEGACY_TASKS:
+            return JSONResponse({"ok": False,
+                                 "error": "此任务的进程内工作器已丢失；请从业务页按持久化进度重新发起"},
+                                status_code=409)
+        record = _ensure_task_scheduler().resume_task(task_id)
+        return {"ok": True, "task": record.to_public_dict()}
+    except Exception as exc:
+        return _task_error_response(exc)
+
+
+@app.post("/api/tasks/{task_id}/reconcile")
+def task_reconcile(task_id: str):
+    try:
+        result = _ensure_task_scheduler().reconcile_task(task_id)
+        record = _ensure_task_scheduler().get_task(task_id)
+        return {"ok": result.resolved, "safe_to_resume": result.safe_to_resume,
+                "reason": result.reason, "task": record.to_public_dict()}
+    except Exception as exc:
+        return _task_error_response(exc)
+
+
+def _public_remote_operation(operation) -> dict:
+    return {
+        "operation_id": operation.operation_id,
+        "task_id": operation.task_id,
+        "operation_type": operation.operation_type,
+        "status": operation.status.value,
+        "target": dict(operation.target),
+        "entity_ids": list(operation.entity_ids),
+        "preconditions": dict(operation.preconditions),
+        "postconditions": dict(operation.postconditions),
+        "request_summary": dict(operation.request_summary),
+        "attempt": operation.attempt,
+        "error_code": operation.error_code,
+        "created_at": operation.created_at,
+        "updated_at": operation.updated_at,
+    }
+
+
+@app.get("/api/remote-operations/unresolved")
+def remote_operations_unresolved():
+    connection = None
+    try:
+        _ensure_task_scheduler()
+        connection = store._connect(owner="api:remote-operation-review")
+        repository = SqliteRemoteOperationRepository(connection)
+        operations = repository.list_operations(statuses=[
+            OperationStatus.DISPATCHING,
+            OperationStatus.NEEDS_RECONCILIATION,
+            OperationStatus.NOT_APPLIED,
+            OperationStatus.MANUAL_REVIEW,
+        ])
+        return {"operations": [_public_remote_operation(item) for item in operations]}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def _sanitize_review_evidence(value: str) -> str:
+    text = str(value or "").strip()[:1000]
+    return re.sub(
+        r"(?i)\b(sessdata|bili_jct|dedeuserid|csrf|token|cookie|authorization)\b\s*[:=]\s*\S+",
+        r"\1=[REDACTED]", text)
+
+
+@app.post("/api/remote-operations/{operation_id}/reconcile")
+def remote_operation_reconcile(operation_id: str, body: RemoteOperationReconcileIn):
+    connection = None
+    try:
+        if body.decision not in ("confirmed", "not_applied", "manual_review"):
+            return JSONResponse({"ok": False, "error": "不支持的核对结论"}, status_code=400)
+        _ensure_task_scheduler()
+        connection = store._connect(owner="api:remote-operation-reconcile")
+        repository = SqliteRemoteOperationRepository(connection)
+        current = repository.get(operation_id)
+        if current.status is not OperationStatus.NEEDS_RECONCILIATION:
+            return JSONResponse({"ok": False,
+                                 "error": f"当前状态为 {current.status.value}，不能执行核对"},
+                                status_code=409)
+        evidence = _sanitize_review_evidence(body.evidence)
+        updated = repository.record_reconciliation(
+            operation_id,
+            decision=body.decision,
+            preconditions_valid=body.preconditions_valid,
+            evidence={"user_note": evidence} if evidence else None,
+        )
+        if body.decision == "not_applied":
+            entry = _LEGACY_TASKS.get(updated.task_id)
+            if entry:
+                retry_ids = entry[0].setdefault("retry_operation_ids", [])
+                if operation_id not in retry_ids:
+                    retry_ids.append(operation_id)
+        connection.close()
+        connection = None
+        task_result = None
+        scheduler = _TASK_SCHEDULER
+        if scheduler is not None:
+            try:
+                task = scheduler.get_task(updated.task_id)
+                if task.status is TaskStatus.NEEDS_RECONCILIATION:
+                    task_result = scheduler.reconcile_task(updated.task_id)
+            except Exception as exc:
+                task_result = ReconciliationResult(False, False, str(exc))
+        return {"ok": True, "operation": _public_remote_operation(updated),
+                "task_reconciliation": ({"resolved": task_result.resolved,
+                                         "safe_to_resume": task_result.safe_to_resume,
+                                         "reason": task_result.reason}
+                                        if task_result else None)}
+    except Exception as exc:
+        return _task_error_response(exc)
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 DEFAULT_CONFIG = {
@@ -2739,6 +3321,16 @@ async def local_api_guard(request, call_next):
         if not vst.unlocked:
             return JSONResponse({"ok": False, "code": "app_locked",
                                  "error": "加密库已锁定，请先解锁"}, status_code=403)
+    # A vault unlock alone is not enough: existing identity evidence with a
+    # missing/corrupt working database must stay in recovery and deny business IO.
+    if (path.startswith("/api/")
+            and not path.startswith(_APP_LOCK_OPEN_PATHS + ("/api/vault/",))):
+        db_state = store.database_state()
+        if db_state != store.DatabaseState.READY.value:
+            return JSONResponse({"ok": False, "code": "database_unavailable",
+                                 "database_state": db_state,
+                                 "error": "本地数据库尚未就绪，请完成初始化或恢复后重试"},
+                                status_code=503)
     need_token = (method not in ("GET", "HEAD", "OPTIONS") or
                   path in ("/api/data/export", "/api/cookie"))
     # 解锁引导路径：仍校验 Origin，但不强制页面 token（锁屏/Hello 在启动瞬间可能尚未同步）
@@ -2862,11 +3454,15 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
             return conflict
 
     def run():
+        operation_connection = None
         try:
             cfg = load_config()
-            session = bili_api.BiliSession(get_session_cookie())
-            session.read_interval = max(2, int(cfg.get("scan_interval", 2) or 2))
-            APP["session"] = session
+            raw_session = bili_api.BiliSession(get_session_cookie())
+            raw_session.read_interval = max(2, int(cfg.get("scan_interval", 2) or 2))
+            session, operation_connection = _logged_bili_session(
+                raw_session, run_id,
+                retry_operation_ids=app_state.get("retry_operation_ids", set()))
+            APP["session"] = raw_session
             emit("info", f"开始扫描（请求间隔 ≥{session.read_interval} 秒）", kind="scan_start")
 
             if recovery:
@@ -2880,9 +3476,14 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                     session.write_interval = max(2, float(cfg.get("write_interval", 2) or 2))
                     # Persist before sending: a crash/transport failure must never replay this write.
                     store.update_scan_issue(mid, cleanup_unknown=True, event="正在调用 B 站失效内容清理")
+                    _task_safe_point(app_state, {"phase": "before_cleanup", "folder_id": mid},
+                                     {"phase": "cleaning", "folder_id": mid})
                     try:
                         session.clean_invalid_folder(mid, should_stop=lambda: app_state["stop"])
                     except (bili_api.RateLimitedError, bili_api.BiliApiError) as exc:
+                        if isinstance(exc, bili_api.WriteUncertainError):
+                            app_state["reconciliation_required"] = True
+                            app_state["reconciliation_reason"] = str(exc)
                         if not isinstance(exc, bili_api.WriteUncertainError):
                             store.update_scan_issue(mid, cleanup_unknown=False)
                         raise
@@ -3006,6 +3607,13 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                              total=app_state["total"], fdone=app_state["folder_done"],
                              ftotal=app_state["folder_total"], current=folder["title"],
                              unique=len(staged), strategy=strategy)
+                        _task_safe_point(
+                            app_state,
+                            {"phase": "indexed_ids", "folder_id": mid,
+                             "folder_done": app_state["folder_done"], "done": done},
+                            {"done": done, "total": app_state["total"],
+                             "current": folder["title"], "unique": len(staged)},
+                        )
 
                 if strategy.startswith("paged"):
                     batch = {}
@@ -3033,6 +3641,13 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                                  total=app_state["total"], fdone=app_state["folder_done"],
                                  ftotal=app_state["folder_total"], current=folder["title"],
                                  unique=len(staged), strategy=strategy)
+                            _task_safe_point(
+                                app_state,
+                                {"phase": "paged", "folder_id": mid,
+                                 "page": page_index, "done": done},
+                                {"done": done, "total": app_state["total"],
+                                 "current": folder["title"], "unique": len(staged)},
+                            )
                     if batch:
                         store.save_scan_stage(run_id, mid, batch)
                     if should_stop():
@@ -3084,6 +3699,13 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                      kind="scan_progress", done=done, total=app_state["total"],
                      fdone=app_state["folder_done"], ftotal=app_state["folder_total"],
                      current="", unique=unique_count, strategy=strategy)
+                _task_safe_point(
+                    app_state,
+                    {"folder_done": app_state["folder_done"],
+                     "last_completed_folder": mid, "done": done},
+                    {"done": app_state["folder_done"],
+                     "total": app_state["folder_total"], "current": ""},
+                )
 
             app_state["step"] = "done"
             app_state["done"] = done
@@ -3095,6 +3717,8 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                      kind="scan_end", unique=scoped_unique, done=done)
             else:
                 emit("warn", f"扫描结束但有未完整收藏夹：{app_state['error']}", kind="scan_end")
+        except (PauseRequested, CancelRequested):
+            raise
         except bili_api.RateLimitedError as exc:
             app_state["error"] = f"风控：{exc}"
             emit("err", f"风控：{exc}", kind="scan_end")
@@ -3109,13 +3733,23 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                 mid = body.folder_ids[0]
                 store.update_scan_issue(mid, last_error=app_state["error"].split("\n")[0],
                                         event=app_state["error"].split("\n")[0])
+            if operation_connection is not None:
+                operation_connection.close()
             app_state["running"] = False
             app_state["current"] = ""
             ANALYZE_WAKE.set()
             emit("progress", "", kind="scan_idle")
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "run_id": run_id}
+    submission = _submit_app_task(
+        "scan", app_state, run,
+        parameters={"folder_ids": list(body.folder_ids or []) if body else [],
+                    "mode": body.mode if body else "resume", "recovery": recovery},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "run_id": run_id,
+            "task_id": record.task_id}
 
 @app.get("/api/scan/status")
 def scan_status():
@@ -3125,7 +3759,7 @@ def scan_status():
 @app.post("/api/scan/stop")
 def scan_stop():
     if APP["scan_run"]:
-        APP["scan_run"]["stop"] = True
+        _cancel_legacy_state(APP["scan_run"])
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的扫描"}
 
@@ -3257,7 +3891,7 @@ def folder_organize_suggest():
     llm_cfg = make_llm_config()
     if not llm_cfg.configured:
         return JSONResponse({"ok": False, "error": "LLM 未配置"}, status_code=400)
-    state = {"running": True, "error": None, "count": 0}
+    state = {"id": uuid.uuid4().hex, "running": True, "error": None, "count": 0}
     conflict = _begin_job("folder_merge_ai_run", state, error="AI 合并分析已在运行")
     if conflict:
         return conflict
@@ -3310,6 +3944,8 @@ def folder_organize_suggest():
                         "confidence": saved_profile.get("confidence"),
                     }
                 profiles.append(profile_row)
+            _task_safe_point(state, {"phase": "before_suggestions"},
+                             {"phase": "suggestions", "done": 0, "total": 1})
             raw_groups = llm_analyzer.suggest_folder_merges(llm_cfg, profiles)
             known = {str(f["media_id"]): f for f in folders}
             used = set()
@@ -3347,6 +3983,10 @@ def folder_organize_suggest():
             state["count"] = len(groups)
             emit("ok", f"AI 合并分析完成：生成 {len(groups)} 个候选组",
                  phase="folder_merge_ai", kind="folder_merge_ai_end")
+            _task_safe_point(state, {"draft_saved": True, "count": len(groups)},
+                             {"done": 1, "total": 1})
+        except (PauseRequested, CancelRequested):
+            raise
         except Exception as e:
             state["error"] = str(e)
             emit("err", f"AI 合并分析失败：{e}", phase="folder_merge_ai",
@@ -3354,8 +3994,14 @@ def folder_organize_suggest():
         finally:
             state["running"] = False
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True}
+    submission = _submit_app_task(
+        "folder_merge_suggestions", state, run,
+        parameters={"folder_ids": [str(f["media_id"]) for f in folders]},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id}
 
 
 @app.put("/api/folder-organize/draft")
@@ -3471,14 +4117,14 @@ def folder_organize_start():
            for g in pending):
         return JSONResponse({"ok": False, "error": "合并方案使用的画像版本已变化，请重新生成并提交合并建议"}, status_code=409)
     try:
-        session = bili_api.BiliSession(get_session_cookie())
+        raw_session = bili_api.BiliSession(get_session_cookie())
         cfg = load_config()
-        session.read_interval = int(cfg.get("scan_interval", 2) or 2)
-        session.write_interval = float(cfg.get("folder_merge_interval", 2) or 2)
-        owner_mid = session.get_mid()
+        raw_session.read_interval = int(cfg.get("scan_interval", 2) or 2)
+        raw_session.write_interval = float(cfg.get("folder_merge_interval", 2) or 2)
+        owner_mid = raw_session.get_mid()
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
-    state = {"running": True, "stop": False, "done": 0,
+    state = {"id": uuid.uuid4().hex, "running": True, "stop": False, "done": 0,
              "total": len(pending), "error": None, "status": "running"}
     conflict = _begin_job("folder_merge_run", state, error="收藏夹合并已在运行")
     if conflict:
@@ -3493,7 +4139,13 @@ def folder_organize_start():
             yield items[i:i + size]
 
     def run():
+        operation_connection = None
         try:
+            session, operation_connection = _logged_bili_session(
+                raw_session, state["id"], account_id=owner_mid,
+                retry_operation_ids=state.get("retry_operation_ids", set()))
+            pending[:] = [group for group in pending
+                          if group.get("status") in ("pending", "unknown")]
             # 先把远端目录变化同步到 SQLite，并在所有写请求之前重验画像版本。
             live_folders = session.list_folders()
             store.save_folders(live_folders)
@@ -3514,6 +4166,11 @@ def folder_organize_start():
             emit("info", f"开始收藏夹合并：{len(pending)} 组", phase="folder_merge")
             for group in pending:
                 if state["stop"]: break
+                _task_safe_point(
+                    state,
+                    {"phase": "before_merge_group", "group_done": state["done"]},
+                    {"done": state["done"], "total": len(pending)},
+                )
                 group["status"] = "running"
                 group["results"] = []
                 group_ok = True
@@ -3540,6 +4197,12 @@ def folder_organize_start():
                     hidden_invalid = max(0, count - len(videos))
                     result.update(before=count, movable=len(normal), invalid=len(invalid) + hidden_invalid)
                     try:
+                        _task_safe_point(
+                            state,
+                            {"phase": "before_source_writes", "group_done": state["done"],
+                             "source_id": str(source_id)},
+                            {"done": state["done"], "total": len(pending)},
+                        )
                         for batch in chunks(normal):
                             session.move_batch(str(source_id), target_id, batch, mid=owner_mid,
                                                should_stop=lambda: state["stop"])
@@ -3585,8 +4248,18 @@ def folder_organize_start():
                 emit("ok" if group_ok else "warn",
                      f"合并组完成：{group.get('final_name')}", phase="folder_merge")
                 save()
+                _task_safe_point(
+                    state,
+                    {"group_done": state["done"],
+                     "last_completed_group": str(group.get("target_id", ""))},
+                    {"done": state["done"], "total": len(pending)},
+                )
             state["status"] = "stopped" if state["stop"] else "done"
+        except (PauseRequested, CancelRequested):
+            raise
         except bili_api.WriteUncertainError as e:
+            state["reconciliation_required"] = True
+            state["reconciliation_reason"] = str(e)
             state.update(status="unknown", error=str(e), stop=True)
             for g in plan:
                 if g.get("status") == "running": g["status"] = "unknown"
@@ -3603,18 +4276,27 @@ def folder_organize_start():
             try:
                 folders = session.list_folders(); store.save_folders(folders); APP["folders"] = folders
             except Exception: pass
+            if operation_connection is not None:
+                operation_connection.close()
             emit("ok" if state["status"] == "done" else "warn", "收藏夹合并任务已结束",
                  phase="folder_merge", kind="folder_merge_end")
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(pending)}
+    submission = _submit_app_task(
+        "folder_merge", state, run,
+        parameters={"group_count": len(pending), "owner_mid": owner_mid},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id,
+            "total": len(pending)}
 
 
 @app.post("/api/folder-organize/stop")
 def folder_organize_stop():
     state = APP.get("folder_merge_run")
     if state and state.get("running"):
-        state["stop"] = True
+        _cancel_legacy_state(state)
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的收藏夹合并"}
 
@@ -3980,18 +4662,21 @@ def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
     profile = store.load_folder_profiles().get(str(media_id))
     if not profile or not str(profile.get("summary") or "").strip():
         return JSONResponse({"ok": False, "error": "该收藏夹还没有可上传的画像简介"}, status_code=409)
+    operation_connection = None
     try:
-        session = bili_api.BiliSession(get_session_cookie())
+        raw_session = bili_api.BiliSession(get_session_cookie())
         cfg = load_config()
-        session.read_interval = int(cfg.get("scan_interval", 2) or 2)
-        session.write_interval = float(cfg.get("write_interval", 2) or 2)
-        remote = session.get_folder_info(media_id)
+        raw_session.read_interval = int(cfg.get("scan_interval", 2) or 2)
+        raw_session.write_interval = float(cfg.get("write_interval", 2) or 2)
+        remote = raw_session.get_folder_info(media_id)
         remote_title = str(remote.get("title") or "").strip()
         local_title = str(folder.get("title") or "").strip()
         if not remote_title or remote_title != local_title:
             return JSONResponse({"ok": False,
                                  "error": "B 站收藏夹名称与本地目录不一致；请先刷新收藏夹目录，再检查画像后上传"},
                                 status_code=409)
+        session, operation_connection = _logged_bili_session(
+            raw_session, f"publish-intro:{uuid.uuid4().hex}")
         result = session.update_folder_intro(media_id, remote, body.intro)
         saved_intro = str(result.get("intro", body.intro))
         emit("ok", f"已上传「{local_title}」的收藏夹简介到 B 站（{len(body.intro)} 字）")
@@ -4003,6 +4688,9 @@ def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
                             status_code=502)
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    finally:
+        if operation_connection is not None:
+            operation_connection.close()
 
 
 @app.post("/api/folder-profiles/generate")
@@ -4031,8 +4719,9 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
         return JSONResponse({"ok": False, "error": "LLM 未配置，请先选择供应商与模型"}, status_code=400)
 
     state = {
-        "running": True, "stop": False, "rebuild": bool(body.rebuild),
-        "total": len(requested), "done": 0, "generated": 0,
+        "id": uuid.uuid4().hex, "running": True, "stop": False,
+        "rebuild": bool(body.rebuild), "done": 0,
+        "total": len(requested), "generated": 0,
         "skipped": 0, "failed": 0, "current": "", "error": None,
     }
     conflict = _begin_job("folder_profile_run", state, error="收藏夹画像任务已在运行")
@@ -4043,7 +4732,20 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
         try:
             scans = store.load_folder_scan_states()
             profiles = store.load_folder_profiles()
-            for index, mid in enumerate(requested, 1):
+            completed_before = int(state.get("done", 0) or 0)
+
+            def should_stop_profile():
+                if state["stop"]:
+                    return True
+                context = _TASK_CONTEXTS.get(state["id"])
+                if context is not None:
+                    try:
+                        context.raise_if_control_requested()
+                    except (PauseRequested, CancelRequested):
+                        return True
+                return False
+
+            for index, mid in enumerate(requested[completed_before:], completed_before + 1):
                 if state["stop"]:
                     break
                 folder = active[mid]
@@ -4092,7 +4794,7 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                             progress_callback=lambda stage, done, total: emit(
                                 "info", f"「{folder.get('title')}」{stage} {done}/{total} 批",
                                 phase="folder_profile"),
-                            should_stop=lambda: state["stop"])
+                            should_stop=should_stop_profile)
                         used_sample_count = int(result.pop("sample_count", len(compact)))
                         api_prompt_tokens = int(result.pop("api_prompt_tokens", 0) or 0)
                         api_completion_tokens = int(result.pop("api_completion_tokens", 0) or 0)
@@ -4142,6 +4844,14 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                 emit("progress", "", phase="folder_profile", kind="folder_profile_progress",
                      done=state["done"], total=state["total"], generated=state["generated"],
                      skipped=state["skipped"], failed=state["failed"], current=state["current"])
+                _task_safe_point(
+                    state,
+                    {"folder_done": index, "last_completed_folder": mid},
+                    {"done": index, "total": state["total"],
+                     "generated": state["generated"], "failed": state["failed"]},
+                )
+        except (PauseRequested, CancelRequested):
+            raise
         except Exception as exc:
             state["error"] = str(exc)
             emit("err", f"收藏夹画像任务失败：{exc}", phase="folder_profile")
@@ -4154,8 +4864,15 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                  total=state["total"], generated=state["generated"],
                  skipped=state["skipped"], failed=state["failed"])
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(requested)}
+    submission = _submit_app_task(
+        "folder_profile", state, run,
+        parameters={"folder_ids": list(requested), "rebuild": bool(body.rebuild)},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id,
+            "total": len(requested)}
 
 
 @app.get("/api/folder-profiles/status")
@@ -4167,7 +4884,7 @@ def folder_profiles_status():
 def folder_profiles_stop():
     state = APP.get("folder_profile_run")
     if state and state.get("running"):
-        state["stop"] = True
+        _cancel_legacy_state(state)
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的画像任务"}
 
@@ -4354,7 +5071,8 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
     done_ids0 = _pending_analysis_ids(rebuild_mode, store.analysis_status_map())
     pending0 = sum(1 for v in videos if v.get("bvid")
                    and v["bvid"] not in done_ids0 and not _is_invalid(v))
-    state = {"running": True, "done": 0, "total": len(videos),
+    state = {"id": uuid.uuid4().hex, "running": True, "done": 0,
+             "total": len(videos),
              "pending": pending0,
              "failed": 0, "stop": False, "error": None,
              "concurrency": concurrency, "batch": batch_size,
@@ -4468,9 +5186,21 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                         for b in batches:
                             if state["stop"]: break
                             work(b, ctx)
+                            _task_safe_point(
+                                state,
+                                {"round": state["round"], "done": ctx["done"]},
+                                {"done": ctx["done"], "total": state["total"],
+                                 "pending": state.get("pending", 0)},
+                            )
                     else:
                         with ThreadPoolExecutor(max_workers=concurrency) as ex:
                             list(ex.map(lambda b: work(b, ctx), batches))
+                        _task_safe_point(
+                            state,
+                            {"round": state["round"], "done": ctx["done"]},
+                            {"done": ctx["done"], "total": state["total"],
+                             "pending": state.get("pending", 0)},
+                        )
                     refresh_analysis_statuses(force=True)
                     after_status = store.analysis_status_map()
                     failed_session.update(v["bvid"] for v in pending
@@ -4485,6 +5215,12 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                      inflight=state["inflight"], waiting=True)
                 ANALYZE_WAKE.clear()
                 ANALYZE_WAKE.wait(3)
+                _task_safe_point(
+                    state,
+                    {"round": state["round"], "done": ctx["done"], "waiting": True},
+                    {"done": ctx["done"], "total": state["total"],
+                     "pending": state.get("pending", 0), "waiting": True},
+                )
 
             if state["stop"]:
                 emit("warn", "已停止分析（进度已保存）", phase="analyze",
@@ -4494,6 +5230,8 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                      f"分析结束：完成 {ctx['done']}，失败 {state['failed']}",
                      phase="analyze", kind="analyze_end",
                      done=ctx["done"], total=state["total"])
+        except (PauseRequested, CancelRequested):
+            raise
         except Exception as e:
             state["error"] = str(e)
             emit("err", f"分析出错：{e}", phase="analyze", kind="analyze_end")
@@ -4503,8 +5241,16 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
             state["continuous"] = False
             state["waiting"] = False
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(videos), "pending": pending0}
+    submission = _submit_app_task(
+        "analyze", state, run,
+        parameters={"selected_ids": sorted(selected), "rebuild_mode": rebuild_mode,
+                    "continuous": bool(body.continuous)},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id,
+            "total": len(videos), "pending": pending0}
 
 
 @app.get("/api/analyze/status")
@@ -4517,8 +5263,7 @@ def analyze_status():
 @app.post("/api/analyze/stop")
 def analyze_stop():
     if APP["analyze_run"]:
-        APP["analyze_run"]["stop"] = True
-        ANALYZE_WAKE.set()
+        _cancel_legacy_state(APP["analyze_run"])
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的分析"}
 
@@ -4771,9 +5516,9 @@ def apply_start():
             APP["session"] = bili_api.BiliSession(get_session_cookie())
         except Exception as e:
             return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
-    session = APP["session"]
+    raw_session = APP["session"]
     cfg = load_config()
-    session.write_interval = float(cfg.get("write_interval", 2) or 2)
+    raw_session.write_interval = float(cfg.get("write_interval", 2) or 2)
     batch_size = max(1, min(1000, int(cfg.get("apply_batch", 1000) or 1000)))
     videos = {v["bvid"]: v for v in store.load_videos() if v.get("bvid")}
 
@@ -4816,7 +5561,7 @@ def apply_start():
     already_done = len([1 for it in plan.values() if it.get("status") == "done"])
     held_unknown = len([1 for it in plan.values() if it.get("status") == "unknown"])
 
-    state = {"running": True, "done": 0, "total": total,
+    state = {"id": uuid.uuid4().hex, "running": True, "done": 0, "total": total,
              "ok": 0, "failed": 0, "skip": 0, "deleted": 0,
              "unknown": 0, "stop": False, "error": None, "log": [],
              "batch_size": batch_size, "batch_done": 0, "batch_total": 0}
@@ -4835,6 +5580,7 @@ def apply_start():
             yield items[i:i + batch_size]
 
     def run():
+        operation_connection = None
         def save_progress():
             store.save_plan(plan)
             store.save_videos(videos)
@@ -4859,6 +5605,10 @@ def apply_start():
                 state["ok"] += n
             elif status == "unknown":
                 state["unknown"] += n
+                unknown_ids = state.setdefault("unknown_bvids", [])
+                for bvid, _item, _video in entries:
+                    if str(bvid) not in unknown_ids:
+                        unknown_ids.append(str(bvid))
             elif status == "failed":
                 state["failed"] += n
             save_progress()
@@ -4870,6 +5620,14 @@ def apply_start():
             emit("warn", f"{message}（{len(entries)} 条）", phase="apply")
 
         def run_batch(kind, src, target_id, target_name, entries):
+            _task_safe_point(
+                state,
+                {"phase": "before_batch", "batch_done": state["batch_done"],
+                 "done": state["done"]},
+                {"done": state["done"], "total": total,
+                 "batch_done": state["batch_done"],
+                 "batch_total": state["batch_total"]},
+            )
             if state["stop"]:
                 return False
             aids = [int(video.get("aid", 0) or 0) for _, _, video in entries]
@@ -4891,6 +5649,8 @@ def apply_start():
             except bili_api.WriteUncertainError as e:
                 msg = f"批次 {bn} 结果不确定：{e}"
                 finish_items(entries, "unknown", msg)
+                state["reconciliation_required"] = True
+                state["reconciliation_reason"] = str(e)
                 state["error"] = msg + "。已停止，请人工复核后再继续。"
                 state["stop"] = True
                 emit("err", state["error"], phase="apply", kind="apply_end",
@@ -4921,15 +5681,56 @@ def apply_start():
                                  target_id=target_id, source_id=src)
                 emit("ok", f"批次 {bn}/{bt} 完成：{len(entries)} 条",
                      phase="apply", done=state["done"], total=total)
+                _task_safe_point(
+                    state,
+                    {"phase": "batch_done", "batch_done": bn,
+                     "done": state["done"]},
+                    {"done": state["done"], "total": total,
+                     "batch_done": bn, "batch_total": bt},
+                )
                 return True
             except (requests.RequestException, OSError) as e:
                 state["error"] = f"批次 {bn} 远端已成功但本地落库失败：{e}"
+                state["reconciliation_required"] = True
+                state["reconciliation_reason"] = state["error"]
                 state["stop"] = True
+                for bvid, item, _video in entries:
+                    _mark(item, "unknown", state["error"])
+                    unknown_ids = state.setdefault("unknown_bvids", [])
+                    if str(bvid) not in unknown_ids:
+                        unknown_ids.append(str(bvid))
+                state["ok"] = max(0, state["ok"] - len(entries))
+                state["unknown"] += len(entries)
+                emit("err", state["error"], phase="apply", kind="apply_end",
+                     done=state["done"], total=total)
+                return False
+            except Exception as e:
+                state["error"] = f"批次 {bn} 已确认但本地记账失败：{e}"
+                state["reconciliation_required"] = True
+                state["reconciliation_reason"] = state["error"]
+                state["stop"] = True
+                for bvid, item, _video in entries:
+                    _mark(item, "unknown", state["error"])
+                    unknown_ids = state.setdefault("unknown_bvids", [])
+                    if str(bvid) not in unknown_ids:
+                        unknown_ids.append(str(bvid))
+                state["ok"] = max(0, state["ok"] - len(entries))
+                state["unknown"] += len(entries)
                 emit("err", state["error"], phase="apply", kind="apply_end",
                      done=state["done"], total=total)
                 return False
 
         try:
+            context = _TASK_CONTEXTS.get(state["id"])
+            if context is not None and context.task.attempt > 1:
+                # A reconciled ambiguous batch may be replayed through the
+                # operation adapter, which returns confirmed results or retries
+                # only explicitly authorized NOT_APPLIED intents.
+                pending[:] = [(bvid, item) for bvid, item in pending
+                              if item.get("status") in ("pending", "unknown")]
+            session, operation_connection = _logged_bili_session(
+                raw_session, state["id"],
+                retry_operation_ids=state.get("retry_operation_ids", set()))
             if migrated:
                 emit("info", f"已把历史断点前 {migrated} 条补标为已完成")
             emit("info", f"开始批量执行：待操作 {total} 条，单批上限 {batch_size}"
@@ -5053,6 +5854,11 @@ def apply_start():
                         move_groups.setdefault((src, target_id, target_name), []).append(entry)
 
             save_progress()
+            _task_safe_point(
+                state,
+                {"phase": "prepared", "done": state["done"]},
+                {"done": state["done"], "total": total},
+            )
 
             # 实际请求数：删除 -> 移动到现有夹 -> 新建夹并移动。
             def batch_count(groups):
@@ -5079,6 +5885,11 @@ def apply_start():
                         return
 
             for name, grouped in new_groups.items():
+                _task_safe_point(
+                    state,
+                    {"phase": "before_new_folder_group", "done": state["done"]},
+                    {"done": state["done"], "total": total},
+                )
                 if state["stop"]:
                     return
                 target_id = name_to_id.get(name, "")
@@ -5118,6 +5929,15 @@ def apply_start():
                         f"（其中删除失效 {state['deleted']}），"
                         f"失败 {state['failed']}，跳过 {state['skip']}",
                  phase="apply", kind="apply_end", done=state["done"], total=total)
+        except (PauseRequested, CancelRequested):
+            raise
+        except bili_api.WriteUncertainError as e:
+            state["reconciliation_required"] = True
+            state["reconciliation_reason"] = str(e)
+            state["error"] = f"执行结果不确定：{e}。已停止，请人工复核。"
+            state["stop"] = True
+            emit("err", state["error"], phase="apply", kind="apply_end",
+                 done=state["done"], total=total)
         except bili_api.RateLimitedError as e:
             state["error"] = f"风控触发：{e}。已停止。"
             emit("err", state["error"], phase="apply", kind="apply_end",
@@ -5138,9 +5958,18 @@ def apply_start():
                 if refreshed is not None:
                     emit("ok", f"已自动刷新收藏夹目录：{len(refreshed)} 个",
                          phase="apply", kind="folders_refreshed")
+            if operation_connection is not None:
+                operation_connection.close()
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": total, "batch_size": batch_size,
+    submission = _submit_app_task(
+        "apply", state, run,
+        parameters={"plan_count": len(pending), "batch_size": batch_size},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id,
+            "total": total, "batch_size": batch_size,
             "held_unknown": held_unknown}
 
 
@@ -5155,7 +5984,7 @@ def apply_status():
 @app.post("/api/apply/stop")
 def apply_stop():
     if APP["apply_run"]:
-        APP["apply_run"]["stop"] = True
+        _cancel_legacy_state(APP["apply_run"])
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的执行"}
 

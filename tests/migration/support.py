@@ -189,6 +189,8 @@ def _copy_current_app(app_dir: Path) -> None:
     app_dir.mkdir(parents=True, exist_ok=True)
     for name in ("server.py", "store.py", "vault.py", "bili_api.py", "llm_analyzer.py"):
         shutil.copy2(REPO_ROOT / name, app_dir / name)
+    shutil.copytree(REPO_ROOT / "core", app_dir / "core",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (app_dir / "static").mkdir()
     shutil.copy2(REPO_ROOT / "tests" / "migration" / "runtime_probe.py",
                  app_dir / "migration_probe.py")

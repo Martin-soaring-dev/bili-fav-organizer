@@ -76,11 +76,11 @@ def _config_summary() -> dict:
         secrets_json = json.loads(server.SECRETS_FILE.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         secrets_json = {}
-    if store.DB_FILE.is_file():
+    if store.DB_FILE.is_file() and store.database_state() == "READY":
         try:
             providers = store.list_providers()
             models = store.list_models()
-        except sqlite3.OperationalError:
+        except (sqlite3.OperationalError, RuntimeError):
             providers, models = [], []
     else:
         # A SELECT must not implicitly create a blank working DB while locked.
