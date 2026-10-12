@@ -10,7 +10,9 @@ on:
       - 'tests/test_task_manager.py'
       - 'tests/test_sqlite_task_journal.py'
       - 'tests/test_task_api.py'
-      - 'tests/test_task_bridge.py'
+      - 'tests/test_task_bridge.py tests/test_api_registry.py'
+      - 'tests/test_api_registry.py'
+      - 'bili_fav/api/**'
       - 'server.py'
       - '.github/workflows/modular-architecture-tests.yml'
   workflow_dispatch:
