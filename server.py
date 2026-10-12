@@ -73,7 +73,7 @@ log = logging.getLogger("server")
 
 app = FastAPI(title="B站收藏夹整理")
 # Read-only modular route; legacy scan/analyze/apply execution remains unchanged.
-app.include_router(create_task_router(lambda: APP))
+app.include_router(create_task_router(lambda: APP, lambda: _scan_task_bridge().manager))
 
 MODEL_TEST_TIMEOUT_SECONDS = 45
 
