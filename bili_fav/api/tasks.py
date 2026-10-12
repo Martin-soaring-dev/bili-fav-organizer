@@ -38,7 +38,7 @@ def normalize_legacy_task(kind: str, raw: Mapping | None) -> dict:
     }
 
 
-def create_task_router(snapshot: Callable[[], Mapping]) -> APIRouter:
+def create_task_router(snapshot: Callable[[], Mapping], manager_provider=None) -> APIRouter:
     router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
     @router.get("/legacy")
@@ -56,5 +56,20 @@ def create_task_router(snapshot: Callable[[], Mapping]) -> APIRouter:
         if kind not in LEGACY_KINDS:
             raise HTTPException(status_code=404, detail="Unknown task kind")
         return normalize_legacy_task(kind, snapshot().get(f"{kind}_run"))
+
+
+    @router.get("")
+    def list_managed_tasks():
+        manager = manager_provider() if manager_provider else None
+        return {"tasks": manager.list() if manager is not None else []}
+
+    @router.get("/{task_id}")
+    def get_managed_task(task_id: str):
+        from fastapi import HTTPException
+        manager = manager_provider() if manager_provider else None
+        task = manager.get(task_id) if manager is not None else None
+        if task is None:
+            raise HTTPException(status_code=404, detail="Unknown task")
+        return task
 
     return router
