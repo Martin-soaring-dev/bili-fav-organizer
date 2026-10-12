@@ -50,3 +50,19 @@ def test_interrupted_jobs_are_not_replayed(tmp_path):
         assert "verify external effects" in record["error"]
     finally:
         manager.shutdown()
+
+
+@pytest.mark.parametrize("suffix", [".json", ".sqlite3"])
+def test_manager_restart_keeps_completed_task(tmp_path, suffix):
+    journal = tmp_path / ("tasks" + suffix)
+    manager = TaskManager(journal, max_workers=1)
+    try:
+        task_id = manager.submit("scan", lambda cancel: None)
+    finally:
+        manager.shutdown()
+    assert manager.get(task_id)["state"] == "completed"
+    reopened = TaskManager(journal)
+    try:
+        assert reopened.get(task_id)["state"] == "completed"
+    finally:
+        reopened.shutdown()
