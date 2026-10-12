@@ -23,3 +23,11 @@ def test_router_reads_snapshot_without_mutation():
     assert tasks[0]["done"] == 3
     assert "token" not in str(tasks)
     assert state["scan_run"]["running"] is True
+
+
+def test_individual_legacy_task_and_unknown_kind():
+    app = FastAPI()
+    app.include_router(create_task_router(lambda: {"scan_run": {"running": True}}))
+    client = TestClient(app)
+    assert client.get("/api/tasks/legacy/scan").json()["state"] == "running"
+    assert client.get("/api/tasks/legacy/unknown").status_code == 404
