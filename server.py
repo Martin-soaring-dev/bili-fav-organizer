@@ -52,6 +52,8 @@ import bili_api
 import llm_analyzer
 import store
 
+from bili_fav.api.tasks import create_task_router
+
 HERE = Path(__file__).resolve().parent
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else HERE
 if os.environ.get("LOCALAPPDATA"):
@@ -69,6 +71,8 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 log = logging.getLogger("server")
 
 app = FastAPI(title="B站收藏夹整理")
+# Read-only modular route; legacy scan/analyze/apply execution remains unchanged.
+app.include_router(create_task_router(lambda: APP))
 
 MODEL_TEST_TIMEOUT_SECONDS = 45
 
