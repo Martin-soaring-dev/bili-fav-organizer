@@ -17,6 +17,8 @@ import tempfile
 import time
 import uuid
 
+from .sqlite_journal import SQLiteTaskJournal
+
 
 class TaskConflictError(RuntimeError):
     """A task with the same exclusive resource is already active."""
@@ -45,6 +47,7 @@ class TaskManager:
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1")
         self.path = Path(journal_path)
+        self._sqlite = SQLiteTaskJournal(self.path) if self.path.suffix in ('.sqlite', '.sqlite3', '.db') else None
         self._lock = RLock()
         self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="bilifav-task")
         self._records: dict[str, TaskRecord] = {}
@@ -52,10 +55,14 @@ class TaskManager:
         self._load()
 
     def _load(self) -> None:
-        if not self.path.exists():
-            return
-        raw = json.loads(self.path.read_text(encoding="utf-8"))
-        for item in raw.get("tasks", []):
+        if self._sqlite:
+            self._sqlite.recover_interrupted()
+            items = self._sqlite.load()
+        else:
+            if not self.path.exists():
+                return
+            items = json.loads(self.path.read_text(encoding="utf-8")).get("tasks", [])
+        for item in items:
             record = TaskRecord(**item)
             if record.state in ("queued", "running", "cancelling"):
                 record.state = "interrupted"
@@ -65,6 +72,10 @@ class TaskManager:
         self._save()
 
     def _save(self) -> None:
+        if self._sqlite:
+            for record in self._records.values():
+                self._sqlite.save(asdict(record))
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"schema": 1, "tasks": [asdict(x) for x in self._records.values()]},
                              ensure_ascii=False, indent=2)
