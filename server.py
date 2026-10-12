@@ -53,6 +53,7 @@ import llm_analyzer
 import store
 
 from bili_fav.api.tasks import create_task_router
+from bili_fav.application.task_bridge import LegacyTaskBridge
 
 HERE = Path(__file__).resolve().parent
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else HERE
@@ -2853,6 +2854,19 @@ def scan(body: Optional[ScanIn] = None):
     return _start_scan(body)
 
 
+
+_SCAN_TASK_BRIDGE = None
+_SCAN_TASK_BRIDGE_LOCK = threading.Lock()
+
+
+def _scan_task_bridge():
+    """Initialize task persistence lazily, after the normal vault/API gates."""
+    global _SCAN_TASK_BRIDGE
+    with _SCAN_TASK_BRIDGE_LOCK:
+        if _SCAN_TASK_BRIDGE is None:
+            _SCAN_TASK_BRIDGE = LegacyTaskBridge(USER_DATA_DIR / "task-runtime.sqlite3")
+        return _SCAN_TASK_BRIDGE
+
 def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
     """按文件夹选择批量元数据或分页读取，校验后更新该夹快照。"""
     with _scan_start_lock:
@@ -3118,8 +3132,13 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
             ANALYZE_WAKE.set()
             emit("progress", "", kind="scan_idle")
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "run_id": run_id}
+    try:
+        task_id = _scan_task_bridge().launch("scan", run, resource="scan")
+    except Exception as exc:
+        app_state["running"] = False
+        app_state["error"] = f"任务调度失败：{exc}"
+        return JSONResponse({"ok": False, "error": app_state["error"]}, status_code=503)
+    return {"ok": True, "started": True, "run_id": run_id, "task_id": task_id}
 
 @app.get("/api/scan/status")
 def scan_status():
