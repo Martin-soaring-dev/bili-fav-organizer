@@ -12,6 +12,7 @@ on:
       - 'tests/test_task_api.py'
       - 'tests/test_task_bridge.py'
       - 'tests/test_api_registry.py'
+      - 'tests/test_domain_modules.py'
       - 'bili_fav/api/**'
       - 'server.py'
       - '.github/workflows/modular-architecture-tests.yml'
@@ -37,6 +38,6 @@ jobs:
       - name: Install test dependency
         run: python -m pip install pytest fastapi httpx
       - name: Run isolated task tests
-        run: python -m pytest -q tests/test_task_manager.py tests/test_sqlite_task_journal.py tests/test_task_api.py tests/test_task_bridge.py tests/test_api_registry.py
+        run: python -m pytest -q tests/test_task_manager.py tests/test_sqlite_task_journal.py tests/test_task_api.py tests/test_task_bridge.py tests/test_api_registry.py tests/test_domain_modules.py
       - name: Compile modular backend
         run: python -m compileall -q bili_fav
