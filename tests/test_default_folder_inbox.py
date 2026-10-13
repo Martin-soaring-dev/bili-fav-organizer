@@ -1,5 +1,11 @@
+import sys
 import unittest
+from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from store_profile_isolation import isolated_store_profile
 
 import server
 import store
@@ -73,6 +79,12 @@ class DefaultFolderDestinationGuardTests(unittest.TestCase):
 
 
 class ReadinessInboxTests(unittest.TestCase):
+    def setUp(self):
+        # 建库现在是显式的首次安装操作；就绪度还会读扫描异常，必须有真实数据库。
+        self._stack = ExitStack()
+        self.addCleanup(self._stack.close)
+        isolated_store_profile(self._stack)
+
     def _readiness(self, folders, profiles, scans, counts):
         with patch.object(store, "load_folders", return_value=folders), \
              patch.object(store, "load_folder_profiles", return_value=profiles), \

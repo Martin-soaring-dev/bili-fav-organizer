@@ -63,6 +63,15 @@ def main() -> int:
             "NO_PROXY": "127.0.0.1,localhost",
         })
         env.pop("BILI_FAV_ORGANIZER_DATA_DIR", None)
+        # Sanitizing LOCALAPPDATA also hides an already-downloaded Playwright
+        # browser, which would silently skip every UI regression test. Point
+        # Playwright at the real profile's browsers when they are installed.
+        if not env.get("PLAYWRIGHT_BROWSERS_PATH"):
+            original_local_appdata = os.environ.get("LOCALAPPDATA")
+            browsers = (Path(original_local_appdata) / "ms-playwright"
+                        if original_local_appdata else None)
+            if browsers is not None and browsers.is_dir():
+                env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
         print(f"Isolated checkout: {checkout}", flush=True)
         print(f"Isolated LOCALAPPDATA: {isolated_profile}", flush=True)
         extra_pythonpath = []

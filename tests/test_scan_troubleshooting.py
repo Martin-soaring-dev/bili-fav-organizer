@@ -31,6 +31,20 @@ import server
 import store
 from core.database import DatabaseNotInitializedError, DatabaseRecoveryRequiredError
 from fastapi.testclient import TestClient
+# Imported after the data directory is redirected: the helper imports store itself.
+from store_profile_isolation import stop_task_scheduler
+
+
+# 任务不再处于调度器主动执行中的状态。扫描执行体把 running 置为 False 之后，
+# 调度器才落终态记录，所以只能等 running 是不够的。
+SETTLED_TASK_STATUSES = frozenset({
+    server.TaskStatus.PAUSED,
+    server.TaskStatus.CANCELLED,
+    server.TaskStatus.INTERRUPTED,
+    server.TaskStatus.NEEDS_RECONCILIATION,
+    server.TaskStatus.COMPLETED,
+    server.TaskStatus.FAILED,
+})
 
 
 class FakeSession:
@@ -75,6 +89,10 @@ class ScanTroubleshootingTests(unittest.TestCase):
         data_dir.mkdir(parents=True)
         db = data_dir / "library.sqlite3"
         self.stack.callback(shutil.rmtree, profile, True)
+        # 上一个用例的调度器线程不能在重建 profile 期间插手，否则它会读到
+        # 半初始化的状态；拆目录前也必须先停掉它。
+        self.stack.callback(stop_task_scheduler)
+        stop_task_scheduler()
         for name, value in (("DATA_DIR", data_dir), ("DB_FILE", db),
                             ("LEGACY_DB_FILE", profile / "legacy.sqlite3"),
                             ("_LEGACY_FILES", {})):
@@ -94,14 +112,29 @@ class ScanTroubleshootingTests(unittest.TestCase):
         self.wait_scan(result)
         return result
 
-    def wait_scan(self, result):
+    def wait_task_settled(self, task_id, statuses=None):
+        """等待调度器把任务记录写到终态，返回该记录。
+
+        只等 ``app_state["running"]`` 变 false 会留下竞态：扫描执行体先把 running
+        置 false，调度器随后才写终态；测试先拆掉隔离目录的话，后台线程会在已删除
+        的路径上继续连接数据库。
+        """
+        scheduler = server._TASK_SCHEDULER
+        self.assertIsNotNone(scheduler, "调度器尚未创建，无法确认任务终态")
+        expected = set(SETTLED_TASK_STATUSES if statuses is None else statuses)
+        record = scheduler.wait_for_status(task_id, expected, timeout=20)
+        self.assertIn(record.status, expected, record)
+        return record
+
+    def wait_scan(self, result, statuses=None):
         self.assertIsInstance(result, dict, getattr(result, "body", None))
         self.assertTrue(result["started"])
-        deadline = time.monotonic() + 5
-        while server.APP["scan_run"]["running"] and time.monotonic() < deadline:
-            time.sleep(.01)
+        # 执行体的 finally 先把 running 置回 false，调度器随后才写终态记录，
+        # 所以「记录到终态」本身就蕴含 running 已归位，不必再赌固定秒数轮询。
+        settled = self.wait_task_settled(result["task_id"], statuses)
         self.assertFalse(server.APP["scan_run"]["running"])
         self.assertEqual(result["run_id"], server.APP["scan_run"]["id"])
+        return settled
 
     def recover(self, action="retry", confirmed=False):
         result = server.scan_issue_recover("10", server.ScanRecoveryIn(action=action, confirmed=confirmed))

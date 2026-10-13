@@ -68,13 +68,29 @@ class CandidateInstallResult:
     validation: DatabaseValidation
 
 
-def _sqlite_uri(path: Path, mode: str) -> str:
-    """Build a correctly escaped SQLite URI without relying on cwd semantics."""
-    return f"{path.resolve().as_uri()}?mode={mode}"
+_LONG_PATH_PREFIX = "\\\\?\\"
+
+
+def sqlite_uri(path: Path, mode: str) -> str:
+    r"""Build a correctly escaped SQLite URI without relying on cwd semantics.
+
+    ``Path.as_uri()`` renders an extended-length path (Windows ``\\?\`` prefix)
+    as ``file://%3F/...``, which SQLite rejects with
+    ``invalid uri authority: %3F``. ``resolve()`` can hand back that prefix for a
+    long path and, on Windows, for a path that disappears while
+    ``ntpath.realpath`` is walking it. Using ``abspath`` avoids the filesystem
+    lookup entirely, and the prefix is stripped defensively.
+    """
+    resolved = os.path.abspath(os.fspath(path))
+    if resolved.startswith(_LONG_PATH_PREFIX):
+        rest = resolved[len(_LONG_PATH_PREFIX):]
+        # \\?\UNC\server\share -> \\server\share, \\?\C:\dir -> C:\dir
+        resolved = ("\\\\" + rest[4:]) if rest.upper().startswith("UNC\\") else rest
+    return f"{Path(resolved).as_uri()}?mode={mode}"
 
 
 def _readonly_connection(path: Path) -> sqlite3.Connection:
-    return sqlite3.connect(_sqlite_uri(path, "ro"), uri=True, timeout=30)
+    return sqlite3.connect(sqlite_uri(path, "ro"), uri=True, timeout=30)
 
 
 def validate_database(path: str | Path) -> DatabaseValidation:
@@ -273,7 +289,7 @@ class DatabaseLifecycle:
             }
             try:
                 return sqlite3.connect(
-                    _sqlite_uri(self.path, mode), uri=True, timeout=30,
+                    sqlite_uri(self.path, mode), uri=True, timeout=30,
                     factory=lambda *args, **kwargs: _TrackedConnection(
                         *args, lifecycle=self, lease_id=lease_id, **kwargs))
             except Exception:
@@ -329,7 +345,7 @@ class DatabaseLifecycle:
             }
             try:
                 return sqlite3.connect(
-                    _sqlite_uri(self.path, "rw"), uri=True, timeout=30,
+                    sqlite_uri(self.path, "rw"), uri=True, timeout=30,
                     factory=lambda *args, **kwargs: _TrackedConnection(
                         *args, lifecycle=self, lease_id=lease_id, **kwargs))
             except Exception:
@@ -342,7 +358,7 @@ class DatabaseLifecycle:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         mode = "rwc" if create else "rw"
-        return sqlite3.connect(_sqlite_uri(target, mode), uri=True, timeout=30)
+        return sqlite3.connect(sqlite_uri(target, mode), uri=True, timeout=30)
 
     def initialize_new_database(self, initializer, *,
                                 allow_existing_evidence: bool = False) -> DatabaseValidation:
@@ -438,7 +454,7 @@ class DatabaseLifecycle:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             # Copy through SQLite so a candidate WAL, if present, is included.
             src = _readonly_connection(candidate)
-            dst = sqlite3.connect(_sqlite_uri(staged, "rwc"), uri=True, timeout=30)
+            dst = sqlite3.connect(sqlite_uri(staged, "rwc"), uri=True, timeout=30)
             try:
                 src.backup(dst)
                 dst.commit()
@@ -450,8 +466,8 @@ class DatabaseLifecycle:
             if self.path.is_file():
                 backup = self.path.with_name(
                     f"{self.path.name}.recovery-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}")
-                old = sqlite3.connect(_sqlite_uri(self.path, "rw"), uri=True, timeout=30)
-                saved = sqlite3.connect(_sqlite_uri(backup, "rwc"), uri=True, timeout=30)
+                old = sqlite3.connect(sqlite_uri(self.path, "rw"), uri=True, timeout=30)
+                saved = sqlite3.connect(sqlite_uri(backup, "rwc"), uri=True, timeout=30)
                 try:
                     old.backup(saved)
                     saved.commit()
@@ -462,7 +478,7 @@ class DatabaseLifecycle:
                 backup_verified = True
                 # The backup includes committed WAL contents. Checkpoint before
                 # removing sidecars so the still-active source remains recoverable.
-                old = sqlite3.connect(_sqlite_uri(self.path, "rw"), uri=True, timeout=30)
+                old = sqlite3.connect(sqlite_uri(self.path, "rw"), uri=True, timeout=30)
                 try:
                     row = old.execute("PRAGMA wal_checkpoint(FULL)").fetchone()
                     if row and int(row[0]) != 0:

@@ -19,6 +19,7 @@ from core.database import (
     DatabaseRecoveryRequiredError,
     DatabaseState,
     IntegrityValidationError,
+    sqlite_uri,
     validate_database,
 )
 from core.remote_operations import SqliteRemoteOperationRepository
@@ -103,11 +104,22 @@ def _lifecycle_evidence_paths() -> tuple[Path, ...]:
     return tuple(dict.fromkeys(Path(path) for path in paths))
 
 
+# Candidate files that only exist while an initialization/migration/replacement is
+# in flight. They are still passed to the gate as evidence, but they must not take
+# part in the cache key: initialization itself creates and removes them, so a
+# concurrent caller (the UI polls /api/status) would otherwise cache a second gate
+# for an already-initialized profile - and that orphan gate stays in OPENING
+# because nothing re-runs startup validation on it.
+_TRANSIENT_DATABASE_SUFFIXES = (".initializing", ".migrating", ".candidate")
+
+
 def _lifecycle() -> DatabaseLifecycle:
     """Get the lifecycle gate for the currently configured profile paths."""
     global _lifecycle_instance, _lifecycle_key
     evidence = _lifecycle_evidence_paths()
-    key = (str(DB_FILE), tuple(str(path) for path in evidence))
+    key = (str(DB_FILE),
+           tuple(str(path) for path in evidence
+                 if not str(path).endswith(_TRANSIENT_DATABASE_SUFFIXES)))
     with _lifecycle_lock:
         if _lifecycle_instance is None or _lifecycle_key != key:
             _lifecycle_instance = DatabaseLifecycle(DB_FILE, evidence_paths=evidence)
@@ -441,7 +453,7 @@ def validate_database_candidate(path: str | Path) -> dict:
     if validation.schema_version > _SCHEMA_VERSION:
         raise IntegrityValidationError(
             f"候选数据库 Schema {validation.schema_version} 高于当前支持版本 {_SCHEMA_VERSION}")
-    connection = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
+    connection = sqlite3.connect(sqlite_uri(Path(path), "ro"), uri=True)
     try:
         tables = {str(row[0]) for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}

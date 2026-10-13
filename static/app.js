@@ -2195,6 +2195,28 @@
     }, label);
   }
 
+  // 只有扫描明确成功结束才能进入分析阶段：暂停/取消/中断/风控/失败都会留下
+  // 不完整的扫描结果，继续下去会让后续分析和归类建立在残缺数据上。
+  const SCAN_SUCCESS_STATUSES = ["completed", "completed_with_issues"];
+
+  function scanNotCompleteReason(status, error) {
+    const detail = error ? `：${error}` : "";
+    switch (status) {
+      case "paused":
+        return "扫描已暂停，快速模式停止；请在扫描页继续扫描后再重试";
+      case "cancelled":
+        return "扫描已取消，快速模式停止；已完成的收藏夹会保留，可稍后继续扫描";
+      case "interrupted":
+        return "扫描被中断，快速模式停止；请重新开始扫描";
+      case "rate_limited":
+        return `扫描触发风控，快速模式停止${detail}`;
+      case "failed":
+        return `扫描失败，快速模式停止${detail}`;
+      default:
+        return `扫描未正常完成（状态：${status || "未知"}），快速模式停止${detail}`;
+    }
+  }
+
   async function waitScanDone() {
     await waitUntil(async () => {
       const st = await api("GET", "/api/scan/status");
@@ -2206,8 +2228,12 @@
         showScanIssue();
         return false;
       }
+      const status = String(st.status || "");
       const err = String(st.error || "");
-      if (err.includes("停止")) throw new Error(`扫描已停止：${err}`);
+      // 取消/暂停等终态会带着 error=null，所以不能只看有没有 error。
+      if (!SCAN_SUCCESS_STATUSES.includes(status)) {
+        throw new Error(scanNotCompleteReason(status, err));
+      }
       if (err) throw new Error(`扫描失败：${err}`);
       return true;
     }, "扫描");
@@ -2426,8 +2452,9 @@
       const msg = e && (e.error || e.message || String(e));
       if (String(msg).includes("停止")) {
         setFastStep(fastRun.stepIndex, "fail");
-        $("fast-status").textContent = "已停止";
-        log("快速模式已停止", "warn");
+        // 用户主动停止只显示「已停止」；扫描暂停/取消等终态要说明原因。
+        $("fast-status").textContent = msg === "已停止快速模式" ? "已停止" : msg;
+        log(`快速模式已停止：${msg}`, "warn");
       } else {
         setFastStep(fastRun.stepIndex, "fail");
         $("fast-status").textContent = "失败：" + msg;

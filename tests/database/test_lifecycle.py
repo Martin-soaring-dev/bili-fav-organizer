@@ -28,17 +28,42 @@ class StoreLifecycleTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(prefix="bfo-database-lifecycle-")
         self.root = Path(self._tmp.name)
         self._old = (store.DATA_DIR, store.DB_FILE, store.LEGACY_DB_FILE,
-                     store.LEGACY_DATA_DIR)
+                     store.LEGACY_DATA_DIR, store._LEGACY_FILES)
         store.DATA_DIR = self.root / "data"
         store.DB_FILE = store.DATA_DIR / "library.sqlite3"
         store.LEGACY_DB_FILE = self.root / "legacy" / "library.sqlite3"
         store.LEGACY_DATA_DIR = self.root / "legacy" / "data"
+        # _LEGACY_FILES 是导入时按 LEGACY_DATA_DIR 展开的绝对路径，不跟着换就会
+        # 指向仓库里的旧 JSON，初始化会被正确地判成「有既有数据」而拒绝。
+        store._LEGACY_FILES = {}
         store.DATA_DIR.mkdir(parents=True)
 
     def tearDown(self):
         (store.DATA_DIR, store.DB_FILE, store.LEGACY_DB_FILE,
-         store.LEGACY_DATA_DIR) = self._old
+         store.LEGACY_DATA_DIR, store._LEGACY_FILES) = self._old
         self._tmp.cleanup()
+
+    def test_transient_candidate_file_does_not_orphan_a_ready_gate(self):
+        """初始化窗口内的并发状态读取不能让门闩换成卡在 OPENING 的新实例。
+
+        启动初始化会在 DATA_DIR 里创建再删除 ``*.initializing`` 候选文件。前端会
+        同时轮询 /api/status（读 database_state()），如果缓存键包含这个瞬时文件，
+        并发读取就会缓存第二个门闩；等文件消失，真正的调用方又换到第三个实例，
+        于是数据库明明已经就绪，业务接口却一直 503。
+        """
+        store.initialize_new_database()
+        self.assertEqual("READY", store.database_state())
+
+        transient = store.DATA_DIR / ".library.sqlite3.abc123.initializing"
+        transient.write_bytes(b"")
+        try:
+            self.assertEqual("READY", store.database_state())
+        finally:
+            transient.unlink()
+
+        self.assertEqual("READY", store.database_state())
+        store.save_folders([{"media_id": "10", "title": "仍可写"}])
+        self.assertEqual("仍可写", store.load_folders()[0]["title"])
 
     def test_normal_connection_never_creates_a_missing_database(self):
         self.assertEqual("UNINITIALIZED", store.database_state())

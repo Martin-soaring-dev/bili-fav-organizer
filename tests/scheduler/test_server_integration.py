@@ -89,7 +89,6 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
             env["BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL"] = "1"
             script = r"""
                 import json
-                import time
                 import store
                 store.initialize_new_database()
                 import server
@@ -107,12 +106,14 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
                 server.bili_api.BiliSession = lambda _cookie: FakeSession()
                 result = server.scan(server.ScanIn(folder_ids=["10"], mode="rebuild"))
                 assert result["started"] is True, result
-                deadline = time.monotonic() + 5
-                while time.monotonic() < deadline and server.APP["scan_run"]["running"]:
-                    time.sleep(.01)
+                # 业务 running 先落 false，调度器记录随后才写终态；只等 running
+                # 会在记录还是 RUNNING 时就断言，属于竞态。
+                task = server._TASK_SCHEDULER.wait_for_status(
+                    result["task_id"],
+                    {server.TaskStatus.COMPLETED, server.TaskStatus.FAILED},
+                    timeout=20)
                 assert not server.APP["scan_run"]["running"], server.APP["scan_run"]
                 json.dumps(server.scan_status())
-                task = server._TASK_SCHEDULER.get_task(result["task_id"])
                 assert task.status is server.TaskStatus.COMPLETED, task
                 assert store.load_folder_scan_states()["10"]["status"] == "complete"
                 assert not store.database_connections()

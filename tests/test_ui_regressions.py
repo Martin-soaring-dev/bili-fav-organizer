@@ -1,14 +1,15 @@
 """Beta 阻断项的前端回归：真实 Chromium + 隔离 SQLite，全程不碰真实 B 站。
 
 这些修复（配置请求循环、扫描异常弹窗被事件重新打开、空核对记录被当成已核对、
-任务卡片进度语义与检查点展示）都发生在 static/app.js 的交互里，只跑 Python
-单测证明不了，所以这里起一个真实服务 + 真实浏览器来驱动。
+任务卡片进度语义与检查点展示、快速模式只认扫描成功终态）都发生在 static/app.js
+的交互里，只跑 Python 单测证明不了，所以这里起一个真实服务 + 真实浏览器来驱动。
 
 Playwright 或浏览器不可用时整类跳过：CI 只装 requirements-test.txt，装不上浏览器，
 跳过比让流水线变红更诚实。
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import socket
@@ -21,6 +22,7 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -288,6 +290,107 @@ class BetaUiRegressionTests(unittest.TestCase):
     def scan_status(self, page):
         return page.evaluate(
             "async () => (await fetch('/api/scan/status')).json()")
+
+    def install_fast_mode_stubs(self, page, scan_status, analyze_calls):
+        """接管快速模式链路用到的接口，只把扫描终态留给用例决定。
+
+        终态是这条回归唯一要变的输入，其余接口一律给成功响应，否则用例会先在
+        「刷新目录」之类的步骤上失败，测不到「等待扫描完成」的判断。
+        """
+        preset = {
+            "/api/login/status": {"configured": True, "logged_in": True},
+            "/api/config": {"active_model_id": "m1", "scan_interval": 2,
+                            "write_interval": 2},
+            "/api/status": {"scan": {"running": False}, "analyze": {"running": False},
+                            "apply": {"running": False}},
+            "/api/folder-profiles/status": {"running": False},
+            # 一个可选中的 active 收藏夹：没有可选项时画像步骤会先报错，
+            # 用例就到不了后面的分析阶段。
+            "/api/folder-profiles": {
+                "folders": [{"media_id": "10", "title": "夹", "count": 1,
+                             "local_count": 1, "is_default": False,
+                             "profile_state": "missing"}],
+                "run": {"running": False}},
+            "/api/organization/readiness": {"ready": True, "missing": [],
+                                            "current_count": 1,
+                                            "required_count": 1},
+            "/api/folder-organize": {"ai_run": {"running": False},
+                                     "run": {"running": False}},
+            "/api/folders": {"folders": [{"media_id": "10", "title": "夹", "count": 1}],
+                             "selected_ids": ["10"]},
+            "/api/folders/refresh": {"ok": True},
+            "/api/scan": {"ok": True, "started": True, "run_id": "stub-run",
+                          "task_id": "stub-task"},
+            "/api/scan/issues": {"issues": [], "running": False},
+            "/api/analyze/status": {"running": False, "done": 1, "total": 1},
+        }
+
+        def fulfill(route, payload):
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(payload))
+
+        def handler(route):
+            path = urlparse(route.request.url).path
+            if path == "/api/analyze/start":
+                analyze_calls.append(route.request.url)
+                return fulfill(route, {"ok": True, "total": 0})
+            if path == "/api/scan/status":
+                return fulfill(route, dict(scan_status))
+            return fulfill(route, preset.get(path, {"ok": True}))
+
+        page.route("**/api/**", handler)
+
+    def start_fast_content_mode(self, page):
+        """选「内容整理」并启动：只有它会走到分析阶段。"""
+        self.dismiss_scan_issue_popup(page)
+        page.evaluate("""() => {
+            const el = document.querySelector('input[name="fast-biz"][value="content"]');
+            el.checked = true;
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+        }""")
+        page.click("#fast-run")
+
+    def assert_fast_run_stopped_on_scan(self, scan_status, expected_text):
+        """扫描终态不是成功时：停下、说明原因，且绝不进入分析阶段。"""
+        page = self.open_app()
+        analyze_calls = []
+        self.install_fast_mode_stubs(page, scan_status, analyze_calls)
+        self.start_fast_content_mode(page)
+        page.wait_for_function(
+            "expected => document.getElementById('fast-status').textContent"
+            ".includes(expected)",
+            arg=expected_text, timeout=30000)
+        # 给残留的部分扫描结果留出「被继续处理」的时间窗，然后确认没有发生。
+        page.wait_for_timeout(3000)
+        self.assertEqual([], analyze_calls,
+                         "扫描未成功结束时不得进入分析阶段")
+        self.assertEqual(1, page.locator("#fast-steps .step-fail").count())
+        self.assertEqual([], self.page_errors)
+
+    def test_fast_mode_stops_after_paused_scan_instead_of_analyzing(self):
+        self.assert_fast_run_stopped_on_scan(
+            {"running": False, "status": "paused", "error": None},
+            "扫描已暂停")
+
+    def test_fast_mode_stops_after_cancelled_scan_instead_of_analyzing(self):
+        # 取消终态带 null error：旧实现只看 running/error，会把它当成扫描完成。
+        self.assert_fast_run_stopped_on_scan(
+            {"running": False, "status": "cancelled", "error": None},
+            "扫描已取消")
+
+    def test_fast_mode_still_continues_after_completed_scan(self):
+        page = self.open_app()
+        analyze_calls = []
+        self.install_fast_mode_stubs(
+            page, {"running": False, "status": "completed", "error": None},
+            analyze_calls)
+        self.start_fast_content_mode(page)
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not analyze_calls:
+            page.wait_for_timeout(250)
+        self.assertEqual(1, len(analyze_calls),
+                         "扫描正常完成后仍应继续进入分析阶段")
+        self.assertEqual([], self.page_errors)
 
     def run_scan(self, page, timeout=45):
         page.evaluate(

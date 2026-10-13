@@ -10,12 +10,15 @@ import threading
 import time
 import unittest
 import hashlib
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from store_profile_isolation import isolated_store_profile
+
 os.environ.setdefault("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", "1")
 
 # 只在自己最先导入 server 时隔离数据目录；若别的测试已导入则复用，不改变其行为。
@@ -35,6 +38,27 @@ if "server" not in sys.modules:
 
 import server
 from fastapi.testclient import TestClient
+
+_MODULE_STACK = None
+
+
+def setUpModule():
+    """业务路由要求数据库已就绪；测试期间绑定到临时 profile，模块结束即还原。
+
+    上面的 stub 库只用于阻止启动时迁移仓库内的旧库，它本身不是合法的 BFO 数据库，
+    因此这里必须建一个真正初始化过的库，否则 /api/update/* 会被 503 门闩拦下。
+    """
+    global _MODULE_STACK
+    _MODULE_STACK = ExitStack()
+    isolated_store_profile(_MODULE_STACK)
+
+
+def tearDownModule():
+    global _MODULE_STACK
+    if _MODULE_STACK is not None:
+        _MODULE_STACK.close()
+        _MODULE_STACK = None
+
 
 FAKE_RELEASE = {
     "version": "v9.9.9",

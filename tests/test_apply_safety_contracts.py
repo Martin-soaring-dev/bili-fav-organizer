@@ -1,10 +1,26 @@
 """写路径安全契约：apply 执行器在启动前与执行中的硬约束。"""
 import json
-import time
+import sys
 import unittest
+from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import server
+from store_profile_isolation import isolated_store_profile
+
+# 执行体把 running 置回 False 之后，调度器才落终态记录；只等 running 会读到
+# 还没记账完的中间态（apply 现在真的经过调度器排队执行）。
+SETTLED_TASK_STATUSES = frozenset({
+    server.TaskStatus.PAUSED,
+    server.TaskStatus.CANCELLED,
+    server.TaskStatus.INTERRUPTED,
+    server.TaskStatus.NEEDS_RECONCILIATION,
+    server.TaskStatus.COMPLETED,
+    server.TaskStatus.FAILED,
+})
 
 
 def _payload(result):
@@ -51,8 +67,22 @@ def _video(bvid, aid, title="a", source="10", folder_ids=None):
 
 class ApplySafetyContractTests(unittest.TestCase):
     def setUp(self):
+        self._stack = ExitStack()
+        self.addCleanup(self._stack.close)
+        # apply_start 需要通过 _ensure_task_scheduler 排队任务，那要求数据库 READY。
+        isolated_store_profile(self._stack)
         server.APP["session"] = None
         server.APP["apply_run"] = None
+
+    def wait_settled(self, result):
+        """等执行任务落到终态记录，再断言业务状态。"""
+        scheduler = server._TASK_SCHEDULER
+        self.assertIsNotNone(scheduler, "调度器尚未创建，无法确认任务终态")
+        record = scheduler.wait_for_status(
+            result["task_id"], SETTLED_TASK_STATUSES, timeout=20)
+        self.assertIn(record.status, SETTLED_TASK_STATUSES, record)
+        # 终态记录落库时执行体的 finally 必然已经跑过。
+        self.assertFalse(server.APP["apply_run"]["running"])
 
     def _start(self, plan, videos, fake, *, ready=True, statuses=None,
                profile_contexts=None):
@@ -83,10 +113,7 @@ class ApplySafetyContractTests(unittest.TestCase):
                           return_value={"write_interval": 0, "apply_batch": 1000}):
             result = server.apply_start()
             if isinstance(result, dict) and result.get("started"):
-                deadline = time.time() + 2
-                while (server.APP["apply_run"] and server.APP["apply_run"].get("running")
-                       and time.time() < deadline):
-                    time.sleep(0.01)
+                self.wait_settled(result)
         return result
 
     def test_refuses_start_when_profiles_not_ready(self):
@@ -230,7 +257,10 @@ class ApplySafetyContractTests(unittest.TestCase):
             def move_batch(self, src, target, aids, **kwargs):
                 self.calls.append(("move", str(src), str(target), list(aids)))
                 if str(target) == "20":
-                    raise server.bili_api.BiliApiError("业务失败")
+                    # 「明确业务失败」必须带接口响应码：写操作适配器只把带码的
+                    # 失败记为明确拒绝（REJECTED），其余异常按结果不确定处理，
+                    # 会留下未核对的意图并阻塞同账号的后续写请求。
+                    raise server.bili_api.BiliApiError("B站返回 code=-400：业务失败")
                 return len(aids)
 
         folders = [
@@ -317,13 +347,15 @@ class ApplySafetyContractTests(unittest.TestCase):
              patch.object(server, "_refresh_folder_directory", return_value=None), \
              patch.object(server, "load_config",
                           return_value={"write_interval": 0, "apply_batch": 1000}):
-            server.apply_start()
-            deadline = time.time() + 2
-            while (server.APP["apply_run"] and server.APP["apply_run"].get("running")
-                   and time.time() < deadline):
-                time.sleep(0.01)
+            result = server.apply_start()
+            self.assertIsInstance(result, dict, getattr(result, "body", None))
+            self.wait_settled(result)
         self.assertEqual(fake.calls, [("move", "10", "20", [1])])
-        self.assertEqual(plan["m1"]["status"], "done")
+        # 远端写已确认、只有本地记账失败：现行契约（server.py 批次记账的 OSError/
+        # Exception 分支，可靠性重构引入）把该批标成 unknown 并要求人工核对 ——
+        # 关键是绝不静默按 done 记账，也绝不改写成 failed（远端已生效）。
+        self.assertEqual(plan["m1"]["status"], "unknown")
+        self.assertTrue(server.APP["apply_run"]["reconciliation_required"])
         err = server.APP["apply_run"]["error"] or ""
         self.assertIn("落库失败", err)
 
