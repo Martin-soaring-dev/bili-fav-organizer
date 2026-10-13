@@ -1650,6 +1650,48 @@ def _task_safe_point(state: dict, checkpoint: dict, progress: dict | None = None
     context.safe_point({"version": 1, **checkpoint}, progress=progress or {})
 
 
+# 任务进度里每个计数器都必须带上自己的单位名，界面上同一行才不会时而表示
+# 收藏夹数、时而表示条目数。扫描同时维护「收藏夹」和「条目」两个计数器。
+_TASK_PROGRESS_UNITS = ("folders", "items", "groups", "batches", "steps")
+
+
+def _progress_counters(**units: tuple[int, int]) -> dict:
+    """Build unit-named progress counters, e.g. ``folders=(3, 10)``."""
+    unknown = sorted(set(units) - set(_TASK_PROGRESS_UNITS))
+    if unknown:
+        # 界面只认这些单位名；写错单位会静默渲染不出来，所以这里直接拒绝。
+        raise ValueError(f"未知的任务进度单位：{unknown}")
+    return {
+        name: {"done": max(0, int(pair[0] or 0)), "total": max(0, int(pair[1] or 0))}
+        for name, pair in units.items()
+    }
+
+
+def _sync_cancelled_state(state: dict | None, record) -> None:
+    """把调度器的取消结果同步回业务状态。
+
+    暂停中的扫描工作器早已退出，不会再有人替它收尾；如果不在这里落到实处，
+    任务中心显示「已取消」而 /api/scan/status 仍停在「已暂停」，两处状态就会打架。
+    仍在运行的工作器自己负责终态写入，因此这里只镜像终态记录。
+    """
+    if state is None:
+        return
+    if record is not None and record.status is TaskStatus.NEEDS_RECONCILIATION:
+        reason = str(record.reconciliation_reason or state.get("reconciliation_reason") or "")
+        state["reconciliation_required"] = True
+        if reason:
+            state["reconciliation_reason"] = reason
+        state["status"] = "needs_reconciliation"
+        return
+    if record is not None and record.status is not TaskStatus.CANCELLED:
+        return
+    state["status"] = "cancelled"
+    state["error"] = None
+    if record is not None:
+        # 工作器不可能再被恢复，留着只会让 /api/tasks/{id}/resume 误报可恢复。
+        _LEGACY_TASKS.pop(record.task_id, None)
+
+
 def _cancel_legacy_state(state: dict | None) -> bool:
     if not state:
         return False
@@ -1659,11 +1701,13 @@ def _cancel_legacy_state(state: dict | None) -> bool:
     ANALYZE_WAKE.set()
     task_id = str(state.get("id") or "")
     scheduler = _TASK_SCHEDULER
+    record = None
     if task_id and scheduler is not None:
         try:
-            scheduler.cancel_task(task_id)
+            record = scheduler.cancel_task(task_id)
         except Exception as exc:
             log.warning("无法取消任务 %s：%s", task_id, exc)
+    _sync_cancelled_state(state, record)
     return True
 
 
@@ -1708,13 +1752,14 @@ def task_pause(task_id: str):
 def task_cancel(task_id: str):
     try:
         entry = _LEGACY_TASKS.get(task_id)
-        if entry:
-            state = entry[0]
+        state = entry[0] if entry else None
+        if state is not None:
             state["stop"] = True
             if state.get("continuous") is not None:
                 state["continuous"] = False
             ANALYZE_WAKE.set()
         record = _ensure_task_scheduler().cancel_task(task_id)
+        _sync_cancelled_state(state, record)
         return {"ok": True, "task": record.to_public_dict()}
     except Exception as exc:
         return _task_error_response(exc)
@@ -3563,7 +3608,8 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                     # Persist before sending: a crash/transport failure must never replay this write.
                     store.update_scan_issue(mid, cleanup_unknown=True, event="正在调用 B 站失效内容清理")
                     _task_safe_point(app_state, {"phase": "before_cleanup", "folder_id": mid},
-                                     {"phase": "cleaning", "folder_id": mid})
+                                     {"phase": "cleaning",
+                                      **_progress_counters(steps=(0, 1))})
                     try:
                         session.clean_invalid_folder(mid, should_stop=lambda: app_state["stop"])
                     except (bili_api.RateLimitedError, bili_api.BiliApiError) as exc:
@@ -3696,8 +3742,11 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                             app_state,
                             {"phase": "indexed_ids", "folder_id": mid,
                              "folder_done": app_state["folder_done"], "done": done},
-                            {"done": done, "total": app_state["total"],
-                             "current": folder["title"], "unique": len(staged)},
+                            {"phase": "indexed_ids", "current": folder["title"],
+                             "unique": len(staged),
+                             **_progress_counters(items=(done, app_state["total"]),
+                                                  folders=(app_state["folder_done"],
+                                                           app_state["folder_total"]))},
                         )
 
                 if strategy.startswith("paged"):
@@ -3730,8 +3779,11 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                                 app_state,
                                 {"phase": "paged", "folder_id": mid,
                                  "page": page_index, "done": done},
-                                {"done": done, "total": app_state["total"],
-                                 "current": folder["title"], "unique": len(staged)},
+                                {"phase": "paged", "page": page_index,
+                                 "current": folder["title"], "unique": len(staged),
+                                 **_progress_counters(items=(done, app_state["total"]),
+                                                      folders=(app_state["folder_done"],
+                                                               app_state["folder_total"]))},
                             )
                     if batch:
                         store.save_scan_stage(run_id, mid, batch)
@@ -3778,8 +3830,10 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                     app_state,
                     {"folder_done": app_state["folder_done"],
                      "last_completed_folder": mid, "done": done},
-                    {"done": app_state["folder_done"],
-                     "total": app_state["folder_total"], "current": ""},
+                    {"phase": "folder_complete", "current": "",
+                     **_progress_counters(items=(done, app_state["total"]),
+                                          folders=(app_state["folder_done"],
+                                                   app_state["folder_total"]))},
                 )
 
             app_state["step"] = "done"
@@ -4048,7 +4102,8 @@ def folder_organize_suggest():
                     }
                 profiles.append(profile_row)
             _task_safe_point(state, {"phase": "before_suggestions"},
-                             {"phase": "suggestions", "done": 0, "total": 1})
+                             {"phase": "suggestions",
+                              **_progress_counters(steps=(0, 1))})
             raw_groups = llm_analyzer.suggest_folder_merges(llm_cfg, profiles)
             known = {str(f["media_id"]): f for f in folders}
             used = set()
@@ -4087,7 +4142,8 @@ def folder_organize_suggest():
             emit("ok", f"AI 合并分析完成：生成 {len(groups)} 个候选组",
                  phase="folder_merge_ai", kind="folder_merge_ai_end")
             _task_safe_point(state, {"draft_saved": True, "count": len(groups)},
-                             {"done": 1, "total": 1})
+                             {"phase": "draft_saved", "suggested_groups": len(groups),
+                              **_progress_counters(steps=(1, 1))})
         except (PauseRequested, CancelRequested):
             raise
         except Exception as e:
@@ -4272,7 +4328,8 @@ def folder_organize_start():
                 _task_safe_point(
                     state,
                     {"phase": "before_merge_group", "group_done": state["done"]},
-                    {"done": state["done"], "total": len(pending)},
+                    {"phase": "before_merge_group",
+                     **_progress_counters(groups=(state["done"], len(pending)))},
                 )
                 group["status"] = "running"
                 group["results"] = []
@@ -4304,7 +4361,8 @@ def folder_organize_start():
                             state,
                             {"phase": "before_source_writes", "group_done": state["done"],
                              "source_id": str(source_id)},
-                            {"done": state["done"], "total": len(pending)},
+                            {"phase": "before_source_writes", "source_id": str(source_id),
+                             **_progress_counters(groups=(state["done"], len(pending)))},
                         )
                         for batch in chunks(normal):
                             session.move_batch(str(source_id), target_id, batch, mid=owner_mid,
@@ -4355,7 +4413,8 @@ def folder_organize_start():
                     state,
                     {"group_done": state["done"],
                      "last_completed_group": str(group.get("target_id", ""))},
-                    {"done": state["done"], "total": len(pending)},
+                    {"phase": "group_complete",
+                     **_progress_counters(groups=(state["done"], len(pending)))},
                 )
             state["status"] = "stopped" if state["stop"] else "done"
         except (PauseRequested, CancelRequested):
@@ -4988,8 +5047,9 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                 _task_safe_point(
                     state,
                     {"folder_done": index, "last_completed_folder": mid},
-                    {"done": index, "total": state["total"],
-                     "generated": state["generated"], "failed": state["failed"]},
+                    {"phase": "folder_complete",
+                     "generated": state["generated"], "failed": state["failed"],
+                     **_progress_counters(folders=(index, state["total"]))},
                 )
         except (PauseRequested, CancelRequested):
             raise
@@ -5330,8 +5390,9 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                             _task_safe_point(
                                 state,
                                 {"round": state["round"], "done": ctx["done"]},
-                                {"done": ctx["done"], "total": state["total"],
-                                 "pending": state.get("pending", 0)},
+                                {"phase": "analyze_batch", "round": state["round"],
+                                 "pending": state.get("pending", 0),
+                                 **_progress_counters(items=(ctx["done"], state["total"]))},
                             )
                     else:
                         with ThreadPoolExecutor(max_workers=concurrency) as ex:
@@ -5339,8 +5400,9 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                         _task_safe_point(
                             state,
                             {"round": state["round"], "done": ctx["done"]},
-                            {"done": ctx["done"], "total": state["total"],
-                             "pending": state.get("pending", 0)},
+                            {"phase": "analyze_batch", "round": state["round"],
+                             "pending": state.get("pending", 0),
+                             **_progress_counters(items=(ctx["done"], state["total"]))},
                         )
                     refresh_analysis_statuses(force=True)
                     after_status = store.analysis_status_map()
@@ -5359,8 +5421,9 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                 _task_safe_point(
                     state,
                     {"round": state["round"], "done": ctx["done"], "waiting": True},
-                    {"done": ctx["done"], "total": state["total"],
-                     "pending": state.get("pending", 0), "waiting": True},
+                    {"phase": "waiting_for_scan", "round": state["round"],
+                     "pending": state.get("pending", 0), "waiting": True,
+                     **_progress_counters(items=(ctx["done"], state["total"]))},
                 )
 
             if state["stop"]:
@@ -5765,9 +5828,9 @@ def apply_start():
                 state,
                 {"phase": "before_batch", "batch_done": state["batch_done"],
                  "done": state["done"]},
-                {"done": state["done"], "total": total,
-                 "batch_done": state["batch_done"],
-                 "batch_total": state["batch_total"]},
+                {"phase": "before_batch",
+                 **_progress_counters(items=(state["done"], total),
+                                      batches=(state["batch_done"], state["batch_total"]))},
             )
             if state["stop"]:
                 return False
@@ -5826,8 +5889,9 @@ def apply_start():
                     state,
                     {"phase": "batch_done", "batch_done": bn,
                      "done": state["done"]},
-                    {"done": state["done"], "total": total,
-                     "batch_done": bn, "batch_total": bt},
+                    {"phase": "batch_done",
+                     **_progress_counters(items=(state["done"], total),
+                                          batches=(bn, bt))},
                 )
                 return True
             except (requests.RequestException, OSError) as e:
@@ -5998,7 +6062,7 @@ def apply_start():
             _task_safe_point(
                 state,
                 {"phase": "prepared", "done": state["done"]},
-                {"done": state["done"], "total": total},
+                {"phase": "prepared", **_progress_counters(items=(state["done"], total))},
             )
 
             # 实际请求数：删除 -> 移动到现有夹 -> 新建夹并移动。
@@ -6029,7 +6093,8 @@ def apply_start():
                 _task_safe_point(
                     state,
                     {"phase": "before_new_folder_group", "done": state["done"]},
-                    {"done": state["done"], "total": total},
+                    {"phase": "before_new_folder_group",
+                     **_progress_counters(items=(state["done"], total))},
                 )
                 if state["stop"]:
                     return

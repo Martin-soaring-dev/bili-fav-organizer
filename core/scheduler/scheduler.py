@@ -420,6 +420,9 @@ class TaskScheduler:
                 expected={current.status},
                 status=target,
                 error=(current.error if target == TaskStatus.NEEDS_RECONCILIATION else None),
+                # A cancelled task is not paused any more; the reason must not
+                # survive on the record or the UI keeps showing "用户暂停".
+                pause_reason=None,
                 resume_intent=ResumeIntent.MANUAL,
             )
         elif current.status in {TaskStatus.RUNNING, TaskStatus.PAUSING, TaskStatus.RESUMING}:
@@ -427,6 +430,7 @@ class TaskScheduler:
                 task_id,
                 expected={current.status},
                 status=TaskStatus.CANCELLING,
+                pause_reason=None,
                 resume_intent=ResumeIntent.MANUAL,
             )
             handle = self._active.get(task_id)
@@ -475,6 +479,7 @@ class TaskScheduler:
                 expected={current.status},
                 status=TaskStatus.RESUMING,
                 error=None,
+                pause_reason=None,
                 resume_intent=ResumeIntent.MANUAL,
             )
             self._condition.notify_all()
@@ -844,6 +849,7 @@ class TaskScheduler:
                     attempt=current.attempt + 1,
                     owner_epoch=self._owner_epoch,
                     error=None,
+                    pause_reason=None,
                     emit=False,
                 )
                 handle.record = record
@@ -983,7 +989,10 @@ class TaskScheduler:
             expected={current.status},
             status=target,
             error=error,
-            pause_reason=(current.pause_reason if target == TaskStatus.PAUSED else current.pause_reason),
+            # Only PAUSED keeps a reason; PAUSED is handled by the pending-finish
+            # branch above, so every target that reaches here is a state where a
+            # stale "为什么暂停" would be wrong.
+            pause_reason=None,
             resume_intent=(current.resume_intent if target == TaskStatus.PAUSED
                            else ResumeIntent.MANUAL),
         )

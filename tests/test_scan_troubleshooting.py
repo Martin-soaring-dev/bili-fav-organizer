@@ -3,6 +3,7 @@ import os
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 import unittest
 import uuid
@@ -105,6 +106,194 @@ class ScanTroubleshootingTests(unittest.TestCase):
     def recover(self, action="retry", confirmed=False):
         result = server.scan_issue_recover("10", server.ScanRecoveryIn(action=action, confirmed=confirmed))
         self.wait_scan(result)
+
+    def start_paused_scan(self):
+        """启动扫描并把它停在第一个检查点，返回 (result, task_record)。"""
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_ids(media_id, expected, **kwargs):
+            entered.set()
+            assert release.wait(10), "测试没有放行扫描"
+            return [{"type": 2, "id": "1"}, {"type": 2, "id": "2"}]
+
+        def bulk(media_id, missing, **kwargs):
+            return [{"type": item["type"], "id": item["id"],
+                     "bvid": f"BV{item['id']}", "aid": int(item["id"]),
+                     "title": f"视频 {item['id']}"} for item in missing]
+
+        self.fake.count = 2
+        self.fake.get_folder_resource_ids = blocking_ids
+        self.fake.get_resource_infos_bulk = bulk
+        result = server.scan(server.ScanIn(folder_ids=["10"], mode="rebuild"))
+        self.assertTrue(result["started"], result)
+        self.assertTrue(entered.wait(10), "扫描没有读到资源清单")
+
+        scheduler = server._TASK_SCHEDULER
+        self.assertIsNotNone(scheduler)
+        scheduler.pause_task(result["task_id"])
+        release.set()
+
+        record = scheduler.wait_for_status(
+            result["task_id"], {server.TaskStatus.PAUSED}, timeout=10)
+        self.assertIs(record.status, server.TaskStatus.PAUSED)
+        deadline = time.monotonic() + 10
+        while server.APP["scan_run"]["running"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(server.APP["scan_run"]["running"])
+        return result, record
+
+    def assert_cancelled_everywhere(self, task_id):
+        """任务记录和 /api/scan/status 必须同时落到 cancelled，且 error 为空。"""
+        status = server.scan_status()
+        self.assertEqual("cancelled", status["status"], status)
+        self.assertIsNone(status["error"], status)
+        record = server._TASK_SCHEDULER.get_task(task_id)
+        self.assertIs(record.status, server.TaskStatus.CANCELLED)
+        self.assertIsNone(record.error)
+        self.assertIsNone(record.pause_reason)
+        return record
+
+    def test_paused_scan_cancelled_from_scan_page_keeps_both_states_cancelled(self):
+        result, paused = self.start_paused_scan()
+        self.assertEqual("paused", server.scan_status()["status"])
+
+        self.assertTrue(server.scan_stop()["ok"])
+
+        self.assert_cancelled_everywhere(result["task_id"])
+        # 取消后不能再被当成可恢复任务。
+        self.assertNotIn(result["task_id"], server._LEGACY_TASKS)
+
+    def test_paused_scan_cancelled_from_task_center_keeps_both_states_cancelled(self):
+        result, paused = self.start_paused_scan()
+        emissions = []
+        server._TASK_SCHEDULER.subscribe(emissions.append)
+
+        response = server.task_cancel(result["task_id"])
+        self.assertTrue(response["ok"], response)
+        self.assert_cancelled_everywhere(result["task_id"])
+
+        # 扫描页再补一次取消：状态不变，也不能再发一次取消终态事件。
+        server.scan_stop()
+        self.assert_cancelled_everywhere(result["task_id"])
+        cancel_events = [record for record in emissions
+                         if record.task_id == result["task_id"]
+                         and record.status is server.TaskStatus.CANCELLED]
+        self.assertEqual(1, len(cancel_events))
+
+    def test_task_progress_separates_folder_and_item_counters(self):
+        self.fake.count = 0
+        self.fake.readable = 0
+        result = self.run_scan()
+
+        progress = server._TASK_SCHEDULER.get_task(result["task_id"]).progress
+        # 同一行不再只有含义会变的 done/total：收藏夹和条目各算各的。
+        self.assertEqual({"done": 1, "total": 1}, progress["folders"])
+        self.assertEqual({"done": 0, "total": 0}, progress["items"])
+        self.assertNotIn("done", progress)
+        self.assertNotIn("total", progress)
+
+    def test_scan_resume_skips_complete_folders_and_never_replays_writes(self):
+        calls = []
+
+        class TwoFolderSession(FakeSession):
+            def list_folders(self):
+                calls.append(("directory", ""))
+                return [{"media_id": "10", "title": "完整夹", "count": 1, "attr": 0},
+                        {"media_id": "20", "title": "未完成夹", "count": 2, "attr": 0}]
+
+            def get_folder_resource_ids(self, media_id, expected, **kwargs):
+                calls.append(("ids", str(media_id)))
+                return [{"type": 2, "id": f"{media_id}-{index}"} for index in range(expected)]
+
+            def get_resource_infos_bulk(self, media_id, missing, **kwargs):
+                return [{"type": item["type"], "id": item["id"], "aid": 1,
+                         "bvid": f"BV{item['id']}", "title": "条目"} for item in missing]
+
+            def iter_folder_videos(self, media_id, expected, **kwargs):
+                calls.append(("pages", str(media_id)))
+                yield from ()
+
+            def move_batch(self, *args, **kwargs):
+                calls.append(("move", ""))
+
+            def batch_delete(self, *args, **kwargs):
+                calls.append(("delete", ""))
+
+            def clean_invalid_folder(self, *args, **kwargs):
+                calls.append(("clean", ""))
+
+        store.save_folders(TwoFolderSession().list_folders())
+        store.save_videos({"BVkeep": {"bvid": "BVkeep", "aid": 7, "folder_ids": ["10"]}})
+        store.begin_folder_scan("old-run", "10", 1, "bulk_ids_infos")
+        store.finish_folder_scan("old-run", "10", 1, 1)
+
+        session = TwoFolderSession()
+        session.calls = calls
+        self.stack.enter_context(patch.object(server.bili_api, "BiliSession",
+                                             return_value=session))
+        result = server.scan(server.ScanIn(mode="resume"))
+        self.wait_scan(result)
+
+        self.assertEqual(["20"], [media for kind, media in calls if kind == "ids"])
+        self.assertFalse([call for call in calls if call[0] in ("move", "delete", "clean")])
+        # 未完成夹重读后补全；完整夹的旧快照没有被丢掉。
+        self.assertEqual("complete", store.load_folder_scan_states()["20"]["status"])
+        self.assertIn("BVkeep", store.load_videos_raw())
+
+    def test_interrupted_paged_folder_restarts_from_the_first_page(self):
+        """恢复后的重读从该收藏夹第 1 页开始，不承诺页级续扫。"""
+        reads = []
+        holder = {"entered": threading.Event(), "release": threading.Event()}
+
+        class PagedSession(FakeSession):
+            def get_folder_resource_ids(self, *args, **kwargs):
+                raise server.bili_api.BiliApiError("模拟批量接口失败，回退分页")
+
+            def iter_folder_videos(self, media_id, expected, **kwargs):
+                reads.append(0)
+                for index in range(expected):
+                    if index == 1:
+                        # 第 1 页刚读完、第 2 页还没开始：这里暂停最利于验证页游标。
+                        holder["entered"].set()
+                        assert holder["release"].wait(10), "测试没有放行分页读取"
+                    reads[-1] += 1
+                    yield {"bvid": f"BVpaged{index}", "aid": index + 1, "type": 2,
+                           "title": f"视频 {index}", "source_folder_id": str(media_id)}
+
+        self.fake.count = 4
+        session = PagedSession(count=4)
+        self.stack.enter_context(patch.object(server.bili_api, "BiliSession",
+                                             return_value=session))
+        with patch.object(server.bili_api, "PAGE_SIZE", 2):
+            result = server.scan(server.ScanIn(folder_ids=["10"], mode="rebuild"))
+            self.assertTrue(result["started"], result)
+            self.assertTrue(holder["entered"].wait(10), "分页读取没有开始")
+            scheduler = server._TASK_SCHEDULER
+            scheduler.pause_task(result["task_id"])
+            holder["release"].set()
+            paused = scheduler.wait_for_status(
+                result["task_id"], {server.TaskStatus.PAUSED}, timeout=10)
+            self.assertIs(paused.status, server.TaskStatus.PAUSED)
+            # 暂停发生在第 2 页之后：页级检查点确实被记下来了。
+            self.assertEqual("paged", paused.checkpoint.get("phase"))
+            self.assertEqual(2, paused.checkpoint.get("page"))
+
+            holder["entered"].clear()
+            deadline = time.monotonic() + 10
+            while server.APP["scan_run"]["running"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertFalse(server.APP["scan_run"]["running"])
+
+            scheduler.resume_task(result["task_id"])
+            self.assertTrue(holder["entered"].wait(10), "恢复后没有重新读取")
+            holder["release"].set()
+            completed = scheduler.wait_for_status(
+                result["task_id"], {server.TaskStatus.COMPLETED}, timeout=10)
+            self.assertIs(completed.status, server.TaskStatus.COMPLETED)
+
+        # 两次都从头读完整列：恢复没有沿用上一轮的页游标。
+        self.assertEqual([2, 4], reads)
 
     def test_normal_scan_does_not_create_issue(self):
         self.fake.count = 31

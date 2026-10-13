@@ -105,6 +105,33 @@ class _WaitingWorker:
         context.save_checkpoint({"released": True})
 
 
+class _ResumableWorker:
+    """Pauses at the first safe boundary, then runs until released."""
+
+    def __init__(self):
+        self.started = threading.Event()
+        self.resumed = threading.Event()
+        self.release = threading.Event()
+        self.exited = threading.Event()
+        self.runs = 0
+
+    def validate_checkpoint(self, context):
+        return CheckpointValidation.accept()
+
+    def execute(self, context):
+        self.runs += 1
+        if self.runs == 1:
+            self.started.set()
+            while True:
+                context.save_checkpoint({"runs": self.runs})
+                context.raise_if_control_requested()
+                time.sleep(0.005)
+        self.resumed.set()
+        self.release.wait(2)
+        context.save_checkpoint({"runs": self.runs}, progress={"steps": {"done": 1, "total": 1}})
+        self.exited.set()
+
+
 class SchedulerTests(unittest.TestCase):
     def tearDown(self):
         for scheduler in list(getattr(self, "_schedulers", [])):
@@ -167,6 +194,62 @@ class SchedulerTests(unittest.TestCase):
         with self.assertRaises(InvalidTaskTransitionError):
             scheduler.resume_task(task.task_id)
         self.assertEqual(worker.runs, 1)
+
+    def test_resume_drops_the_stale_pause_reason(self):
+        worker = _ResumableWorker()
+        scheduler = self._scheduler(workers={"scan": worker})
+        scheduler.start()
+        task = scheduler.submit("scan", resume_policy=ResumePolicy.AUTO_SAFE)
+        self.assertTrue(worker.started.wait(2))
+
+        requested = scheduler.pause_task(task.task_id, reason=PauseReason.USER)
+        self.assertEqual(requested.status, TaskStatus.PAUSING)
+        self.assertEqual(requested.pause_reason, PauseReason.USER)
+        paused = scheduler.wait_for_status(task.task_id, {TaskStatus.PAUSED}, timeout=2)
+        # 暂停期间必须显示正确原因，否则用户不知道是谁按下的暂停。
+        self.assertEqual(paused.pause_reason, PauseReason.USER)
+
+        resumed = scheduler.resume_task(task.task_id)
+        self.assertEqual(resumed.status, TaskStatus.RESUMING)
+        self.assertIsNone(resumed.pause_reason)
+        self.assertTrue(worker.resumed.wait(2))
+        running = scheduler.wait_for_status(task.task_id, {TaskStatus.RUNNING}, timeout=2)
+        self.assertEqual(running.status, TaskStatus.RUNNING)
+        # 恢复运行后不能再带着上一次的暂停原因。
+        self.assertIsNone(running.pause_reason)
+        worker.release.set()
+        done = scheduler.wait_for_status(
+            task.task_id, {TaskStatus.COMPLETED}, timeout=3)
+        self.assertEqual(done.status, TaskStatus.COMPLETED)
+        self.assertIsNone(done.pause_reason)
+
+    def test_cancelling_a_paused_task_emits_one_cancel_event_and_clears_the_reason(self):
+        worker = _ResumableWorker()
+        scheduler = self._scheduler(workers={"scan": worker})
+        emissions = []
+        scheduler.subscribe(emissions.append)
+        scheduler.start()
+        task = scheduler.submit("scan", resume_policy=ResumePolicy.AUTO_SAFE)
+        self.assertTrue(worker.started.wait(2))
+        scheduler.pause_task(task.task_id, reason=PauseReason.USER)
+        scheduler.wait_for_status(task.task_id, {TaskStatus.PAUSED}, timeout=2)
+
+        first = scheduler.cancel_task(task.task_id)
+        self.assertEqual(first.status, TaskStatus.CANCELLED)
+        # 重复取消只回读同一行，不能再发一次终态事件。
+        second = scheduler.cancel_task(task.task_id)
+        self.assertEqual(second.status, TaskStatus.CANCELLED)
+
+        final = scheduler.get_task(task.task_id)
+        self.assertEqual(final.status, TaskStatus.CANCELLED)
+        self.assertIsNone(final.error)
+        self.assertIsNone(final.pause_reason)
+        cancel_events = [record for record in emissions
+                         if record.task_id == task.task_id
+                         and record.status is TaskStatus.CANCELLED]
+        # 暂停时发过的事件不算取消事件；取消转换本身只允许有一次终态事件。
+        self.assertEqual(1, len(cancel_events))
+        self.assertEqual(1, worker.runs)
 
     def test_repeated_idempotency_key_returns_original_task(self):
         worker = _WaitingWorker()
