@@ -1,0 +1,38 @@
+name: EA baseline bundle for G0 recovery audit
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ci-ea-recovery-export.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export-ea:
+    if: ${{ github.event.pull_request.head.ref == 'ci/ea-playwright-full-regression-20261019' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout verified EA parent with complete history
+        uses: actions/checkout@v4
+        with:
+          ref: ea4983d2bb9f6d8c0ea54faeddc790a9e096df63
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export Git object bundle without application data
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'ea4983d2bb9f6d8c0ea54faeddc790a9e096df63'
+          git branch ea-parent-export ea4983d2bb9f6d8c0ea54faeddc790a9e096df63
+          git bundle create "$RUNNER_TEMP/ea-parent.bundle" ea-parent-export
+          git bundle verify "$RUNNER_TEMP/ea-parent.bundle"
+          sha256sum "$RUNNER_TEMP/ea-parent.bundle"
+          ls -lh "$RUNNER_TEMP/ea-parent.bundle"
+      - name: Upload short-lived recovery audit input
+        uses: actions/upload-artifact@v4
+        with:
+          name: ea-parent-git-bundle-20261019
+          path: ${{ runner.temp }}/ea-parent.bundle
+          if-no-files-found: error
+          retention-days: 1
