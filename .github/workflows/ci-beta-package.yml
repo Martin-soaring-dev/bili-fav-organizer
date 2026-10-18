@@ -27,6 +27,11 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install -r requirements-test.txt pyinstaller
+      - name: Install Playwright and Chromium for UI regressions
+        run: |
+          python -m pip install playwright==1.56.0
+          python -m playwright install chromium
+
       - name: Run Python regression suite
         run: python tools/run_isolated_tests.py
       - name: Build frozen backend
