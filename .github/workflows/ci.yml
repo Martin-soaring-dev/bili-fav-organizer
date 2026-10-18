@@ -29,6 +29,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-test.txt
 
+      - name: Install Playwright and Chromium for UI regressions
+        run: |
+          python -m pip install playwright==1.56.0
+          python -m playwright install chromium
+
       # 与 requirements.txt 注释里给贡献者的命令保持一致
       - name: Run tests
         run: python tools/run_isolated_tests.py
