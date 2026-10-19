@@ -9,7 +9,13 @@
 
 **Windows 本地交接：**目标分支 `feat/reliability-scheduler-implementation`；[本地 AI 验收提示词](local-ai-windows-acceptance-prompt.md)、代码、测试与本清单在同一交接提交中。准确候选 SHA 以交付消息与远端实际 HEAD 核验为准。旧离线包保留用于溯源，不能向新提交重复应用补丁。
 
-## 最新 Windows Vault 阻断（2026-10-20，第二轮）
+## 最新 Windows 回归：323 项，仅剩 owner 锁竞争失败（第三轮）
+
+用户转交 `f590ae8cbab2a0c58e3bb90c49550b8bdd67134f` 的真实 Windows 结果：323 项，322 PASS、1 FAIL、0 ERROR、0 SKIP，215.0 秒；七项 Chromium UI 全 PASS，migration-only 31/31、Vault API 9/9、atomic IO 3/3 PASS。此前 Vault/夹具/profile 锁阻断已获确认。唯一失败是 `FileOwnerLock.acquire()` 在加锁前读取被另一句柄锁住的 byte 0，导致 PermissionError 逃逸。
+
+本提交删除 Windows owner 锁加锁前的读写，直接非阻塞加锁 byte 0（允许锁定 EOF 以后的范围），保持原 RuntimeError 竞争契约和关闭句柄行为。新增三项回归，预计全量 326 项。**T6/T8 仍为 FAIL/BLOCKED：新候选 Windows 复验未完成**，不能进入 UAT、安装或发布。先读 [第三轮 owner 锁复测指令](windows-scheduler-owner-retest-20261020.md)。以下前两轮及 2026-10-19 表格保留为历史，最新状态以本节为准。
+
+## 历史 Windows Vault 阻断（2026-10-20，第二轮）
 
 `ac9da20` Windows反馈：318项，298 PASS、6 FAIL、14 ERROR、0 SKIP。锁目录和夹具修复已确认；Vault归档仍阻断T6/T8。本提交修复运行锁误归档、原子临时名称额外膨胀，并保留归档失败原始诊断；真实Windows新候选待复验。参见 [第二轮Vault根因及复测步骤](windows-vault-acceptance-retest-20261020.md)。只从远端准确SHA取得代码，不使用旧附件；后续历史表格不能视为新候选放行。
 

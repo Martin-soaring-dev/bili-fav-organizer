@@ -32,11 +32,9 @@ class FileOwnerLock(OwnerLock):
             if os.name == "nt":
                 import msvcrt
 
-                file_obj.seek(0)
-                if file_obj.read(1) == b"":
-                    file_obj.seek(0)
-                    file_obj.write(b"\0")
-                    file_obj.flush()
+                # Windows byte locks may extend past EOF. Lock byte zero
+                # directly, even for a new empty file: reading or initializing
+                # it first can hit another owner's mandatory byte-range lock.
                 file_obj.seek(0)
                 try:
                     msvcrt.locking(file_obj.fileno(), msvcrt.LK_NBLCK, 1)

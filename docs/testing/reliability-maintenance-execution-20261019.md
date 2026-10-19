@@ -99,3 +99,11 @@ GitHub 只读状态复核：仓库默认分支为 `main`；PR #21 当前仍 open
 ## 2026-10-20 第二轮 Windows Vault 反馈
 
 用户转交ac9da20 Windows全量318项：298通过、6失败、14错误、0跳过。已修复错误归档运行锁（Windows字节锁拒绝另句柄读取）、同目录临时名称复制完整archive名导致不必要路径增长，以及失败onboarding探针二次读取manifest掩盖原始500。新增回归修复前失败、修复后通过。本机隔离原子I/O3/3、调度/Vault集成4/4、Vault API9/9、迁移31/31、基础Vault11/11、设备密钥13/13、DEK4/4；真实Windows修复验收待完成，T6/T8继续阻断。详见 [第二轮复测记录](windows-vault-acceptance-retest-20261020.md)。未凭摘要断定全部FileNotFoundError均为路径长度问题，需Windows完整路径复核。
+
+## 第三轮 Windows 323 项反馈与 owner 锁修复
+
+用户反馈 f590ae8：323 项，322 PASS、1 FAIL、0 ERROR、0 SKIP，215.0 秒；七项 Chromium UI 全 PASS。Vault/归档、历史夹具与 LockFileEx 父目录修复均确认。剩余 FAIL 是调度器竞争者在获取 owner 锁前 read(1)，被 Windows 强制字节锁拒读。
+
+本轮删除 Windows 分支加锁前 read/write，直接非阻塞锁 byte 0，允许锁范围越 EOF，保留原竞争 RuntimeError 与清理逻辑。新增三项回归，旧实现两项拒读模拟 ERROR，修复后 3/3 PASS；scheduler 核心20/20 PASS。集成首次3/4（scan末尾瞬时连接断言失败），不改代码重跑4/4；此信号保留并交 Windows 复验，不宣称稳定全绿。开发容器结果不替代 Windows。
+
+准确后继 SHA 以交付消息/远端HEAD为准；同一维护分支正常快进交接。任务清单、原 dashboard 与验收提示词同步更新；T6/T8 继续 FAIL/BLOCKED，预计新全量326项。完整说明及本地 AI 远端指令见 `windows-scheduler-owner-retest-20261020.md`。没有创建 PR、合并、tag 或发布。

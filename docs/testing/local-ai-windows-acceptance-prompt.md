@@ -11,9 +11,9 @@
 
 你负责对当前 BiliFavOrganizer 维护候选进行真实、可复核的 Windows 验收。不要只给建议或测试计划：先检查仓库和隔离条件，然后实际执行所有当前授权、环境可支持的步骤；遇到清单规定的停止门槛时，保留证据并明确标 BLOCKED，不得绕过。
 
-## 最新前置状态（2026-10-20，第二轮Vault）
+## 最新前置状态（第三轮 owner 锁）
 
-ac9da20的Windows反馈为318项，298 PASS、6 FAIL、14 ERROR、零SKIP；首轮锁父目录和夹具已修复，但Vault仍失败。本提交修复运行锁误归档、原子临时名过长风险和探针二次manifest异常掩盖原始错误。先完整读取 `docs/testing/windows-vault-acceptance-retest-20261020.md`，从远端准确新SHA重建干净Windows环境，按其顺序定向复验再全量。T6/T8在真实Windows新候选通过前保持FAIL/BLOCKED；旧报告仅作历史，禁止使用旧离线包。测试总数以实际发现列表为准，必须确认七项Chromium实际执行。
+旧候选 f590ae8 Windows：323 项，322 PASS、1 FAIL、0 ERROR、0 SKIP，七项 Chromium UI 全 PASS。唯一失败是 scheduler owner 锁竞争者在加锁前读取已锁 byte 0。本提交删除这次预读/占位写入，保留非阻塞加锁及竞争拒绝契约；新增三项回归，预计全量326项。先完整读取 `docs/testing/windows-scheduler-owner-retest-20261020.md`，从远端检出交付消息的准确新 SHA，先定向再全量。T6/T8 仍为 FAIL/BLOCKED，旧候选的通过项不能自动沿用为新候选 PASS。只获取远端代码，不使用旧离线包。
 
 ## 一、目标与平台
 
@@ -48,7 +48,7 @@ PowerShell 获取步骤（在新建 disposable Windows 环境中执行，目录�
 | `ci/ea-playwright-full-regression-20261019` / PR #21 | EA/Playwright 的 CI 验证支线 | 不能 |
 | `main` | 后续经审批合并的交付分支 | 本次不切换、不合并、不推送 |
 
-旧 `BFO-Windows-Acceptance-Handoff-20261019.zip` 保留为离线历史交接包，其源码 tree 为 `0155b38d8d7d16456a69a29981b04686343070b2`。本次 GitHub 提交相对该包仅更新交接文档，产品源码与测试代码相同。现在优先使用 GitHub 的准确候选提交；不要把旧包补丁叠加到新提交上。
+旧 `BFO-Windows-Acceptance-Handoff-20261019.zip` 保留为离线历史交接包，其源码 tree 为 `0155b38d8d7d16456a69a29981b04686343070b2`。该包早于三轮 Windows 修复，不能代表当前源码或测试。现在优先使用 GitHub 的准确候选提交；不要把旧包补丁叠加到新提交上。
 
 在仓库根目录完整读取并遵循：
 

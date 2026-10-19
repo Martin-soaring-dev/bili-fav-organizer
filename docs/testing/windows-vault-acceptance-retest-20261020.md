@@ -1,5 +1,8 @@
 # 第二轮 Windows Vault 阻断与复测（2026-10-20）
 
+> 已有第三轮结果：f590ae8 Windows 323 项，322 PASS、1 FAIL、0 ERROR、0 SKIP，七项 UI PASS。本文 Vault 修复已获 Windows 反馈确认；最新剩余 owner 锁竞争缺陷及新候选复验见 [第三轮指令](windows-scheduler-owner-retest-20261020.md)。下文318项结果为历史。
+
+
 ## 最新证据与状态
 
 用户转交 `ac9da2057f4d7adf7640e16b499e50bd5d5fcbd2` 的 Windows 全量摘要：318 项，298 PASS、6 FAIL、14 ERROR、0 SKIP，171.8 秒、非零退出。此前锁父目录和历史夹具问题已获 Windows 反馈确认修复；Vault 归档/锁定路径仍失败，T6/T8 保持 FAIL/BLOCKED。本记录未取得完整原始逐项日志，不能把所有剩余失败都归因于一个问题。
