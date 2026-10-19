@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from core.database import (
+    ActiveConnectionsError,
     DatabaseAlreadyInitializedError,
     DatabaseLifecycle,
     DatabaseRecoveryRequiredError,
@@ -50,7 +51,49 @@ FOLDER_MERGE_PLAN_FILE = LEGACY_DATA_DIR / "folder_merge_plan.json"
 FOLDER_MERGE_STATE_FILE = LEGACY_DATA_DIR / "folder_merge_state.json"
 FOLDER_MERGE_DRAFT_FILE = LEGACY_DATA_DIR / "folder_merge_draft.json"
 
-_lock = threading.RLock()
+class _ProfileAwareRLock:
+    """Acquire a profile shared lease before the process-local store mutex.
+
+    This ordering is the mirror of maintenance code, which takes the profile
+    exclusive lock before entering store operations. It prevents a thread from
+    holding ``_lock`` while blocked behind an exclusive writer that is itself
+    waiting to enter ``_lock``.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._local = threading.local()
+
+    def __enter__(self):
+        depth = int(getattr(self._local, "depth", 0))
+        lease = None
+        if depth == 0:
+            lease = _lifecycle().acquire_profile_read_lease()
+        try:
+            self._lock.acquire()
+        except BaseException:
+            if lease is not None:
+                lease.close()
+            raise
+        self._local.depth = depth + 1
+        if depth == 0:
+            self._local.profile_lease = lease
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        depth = int(getattr(self._local, "depth", 0))
+        if depth <= 0:
+            raise RuntimeError("store 锁的进入/退出次数不匹配")
+        self._local.depth = depth - 1
+        lease = self._local.profile_lease if depth == 1 else None
+        self._lock.release()
+        if depth == 1:
+            del self._local.profile_lease
+            if lease is not None:
+                lease.close()
+
+
+_lock = _ProfileAwareRLock()
 _SCHEMA_VERSION = 8
 _DATASET_DEFAULTS = {
     "analysis": {}, "plan": {}, "apply_state": {}, "scan_done": [],
@@ -122,7 +165,9 @@ def _lifecycle() -> DatabaseLifecycle:
                  if not str(path).endswith(_TRANSIENT_DATABASE_SUFFIXES)))
     with _lifecycle_lock:
         if _lifecycle_instance is None or _lifecycle_key != key:
-            _lifecycle_instance = DatabaseLifecycle(DB_FILE, evidence_paths=evidence)
+            _lifecycle_instance = DatabaseLifecycle(
+                DB_FILE, evidence_paths=evidence,
+                profile_lock_path=DATA_DIR / ".bfo-profile.lock")
             _lifecycle_key = key
             if DB_FILE.is_file():
                 # Startup validation below is still required before business access.
@@ -182,43 +227,56 @@ def _backup_legacy_files() -> str:
     return str(dst)
 
 
+def _remove_sqlite_sidecars(path: str | Path) -> None:
+    """Remove only SQLite sidecars belonging to a private candidate file."""
+    for suffix in ("-wal", "-shm", "-journal"):
+        Path(str(path) + suffix).unlink(missing_ok=True)
+
+
 def _migrate_database_location() -> None:
     """Copy the project-local SQLite database to the durable per-user data folder once."""
+    lifecycle = _lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        _migrate_database_location_under_maintenance()
+
+
+def _migrate_database_location_under_maintenance() -> None:
+    """Copy a legacy source while excluding every cooperating profile writer."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if DB_FILE.exists() or not LEGACY_DB_FILE.exists():
         return
     temporary = DATA_DIR / f".library-{uuid.uuid4().hex}.migrating"
-    source = sqlite3.connect(LEGACY_DB_FILE, timeout=30)
-    target = sqlite3.connect(temporary, timeout=30)
+    source = None
+    target = None
     try:
-        # Refuse a corrupt/opaque source before SQLite's backup API can turn it
-        # into a new empty destination database.
-        source.execute("PRAGMA integrity_check").fetchall()
-        source.backup(target)
-        target.commit()
-    except Exception:
-        target.close()
-        source.close()
-        temporary.unlink(missing_ok=True)
-        raise
-    else:
-        target.close()
-        source.close()
+        source = sqlite3.connect(LEGACY_DB_FILE, timeout=30)
         try:
-            # The copied file must be structurally sound and recognizable as a
-            # supported BFO database before it can become the active file.
-            validate_database_candidate(temporary)
-            # A hard link is an atomic no-overwrite install. If another instance
-            # won the race, retain that database and discard only our candidate.
-            os.link(temporary, DB_FILE)
-            temporary.unlink()
-        except FileExistsError:
-            temporary.unlink(missing_ok=True)
-            return
-        except Exception:
-            temporary.unlink(missing_ok=True)
-            raise
+            target = sqlite3.connect(temporary, timeout=30)
+            try:
+                # Refuse a corrupt/opaque source before SQLite's backup API can turn it
+                # into a new empty destination database.
+                integrity = [str(row[0]) for row in source.execute("PRAGMA integrity_check")]
+                if integrity != ["ok"]:
+                    raise IntegrityValidationError(
+                        "项目内 SQLite 数据库完整性校验失败，拒绝迁移：" + "; ".join(integrity))
+                source.backup(target)
+                target.commit()
+            finally:
+                target.close()
+        finally:
+            source.close()
+        # The copied file must be structurally sound and recognizable as a
+        # supported BFO database before it can become the active file.
+        validate_database_candidate(temporary)
+        # A hard link is an atomic no-overwrite install. If another instance
+        # won the race, retain that database and discard only our candidate.
+        os.link(temporary, DB_FILE)
         print(f"[store] 已将 SQLite 数据库复制到持久目录：{DB_FILE}（项目内原库保留）")
+    except FileExistsError:
+        return
+    finally:
+        _remove_sqlite_sidecars(temporary)
+        temporary.unlink(missing_ok=True)
 
 
 def _resource_key(record: dict, fallback: str = "") -> str:
@@ -436,37 +494,239 @@ _REQUIRED_DATABASE_TABLES = frozenset({
     "plans", "app_state", "folder_scan_state", "scan_stage", "folder_profiles",
     "providers", "models",
 })
+_REQUIRED_DATABASE_COLUMNS = {
+    "schema_migrations": frozenset({"version", "applied_at"}),
+    "folders": frozenset({
+        "media_id", "title", "remote_count", "record_json", "status",
+        "archived_at", "directory_order",
+    }),
+    "videos": frozenset({
+        "resource_key", "bvid", "resource_id", "resource_type", "record_json",
+        "updated_at",
+    }),
+    "folder_items": frozenset({"media_id", "resource_key", "fav_time", "scan_run_id"}),
+    "analyses": frozenset({"resource_key", "record_json", "status", "dependent_ids"}),
+    "plans": frozenset({"resource_key", "record_json"}),
+    "app_state": frozenset({"name", "value_json"}),
+    "folder_scan_state": frozenset({
+        "media_id", "status", "strategy", "expected_count", "fetched_count",
+        "cursor_page", "snapshot_started_at", "snapshot_completed_at", "last_error",
+    }),
+    "scan_stage": frozenset({"scan_run_id", "media_id", "resource_key", "record_json"}),
+    "folder_profiles": frozenset({"media_id", "profile_json", "updated_at"}),
+    "providers": frozenset({
+        "id", "name", "base_url", "api_key", "created_at", "updated_at",
+    }),
+    # context_source/output_source are additions made while upgrading schema 7.
+    "models": frozenset({
+        "id", "provider_id", "name", "context_tokens", "max_output_tokens",
+        "capabilities_json", "thinking_effort", "test_status", "test_message",
+        "test_at", "created_at", "updated_at",
+    }),
+}
 _VERSIONED_EXTENSION_TABLES = {
     8: frozenset({
         "remote_operation_schema_version", "remote_operations", "remote_operation_events",
         "bfo_scheduler_tasks", "bfo_scheduler_meta",
     }),
 }
+_VERSIONED_EXTENSION_COLUMNS = {
+    8: {
+        "models": frozenset({"context_source", "output_source"}),
+        "remote_operation_schema_version": frozenset({"version"}),
+        "remote_operations": frozenset({
+            "operation_id", "intent_json", "task_id", "account_id", "operation_type",
+            "resource_keys_json", "status", "attempt", "version",
+            "remote_response_json", "local_result_json", "reconciliation_json",
+            "error_code", "created_at", "updated_at", "resolved_at",
+        }),
+        "remote_operation_events": frozenset({
+            "event_id", "operation_id", "from_status", "to_status", "event_type",
+            "details_json", "created_at",
+        }),
+        "bfo_scheduler_tasks": frozenset({
+            "task_id", "task_type", "task_schema_version", "checkpoint_schema_version",
+            "status", "parameters_json", "checkpoint_json", "progress_json", "error_json",
+            "resume_policy", "pause_reason", "resume_intent", "attempt", "owner_epoch",
+            "resource_keys_json", "idempotency_key", "reconciliation_required",
+            "reconciliation_reason", "created_at", "updated_at", "revision",
+        }),
+        "bfo_scheduler_meta": frozenset({"key", "value"}),
+    }
+}
+_REQUIRED_DATABASE_PRIMARY_KEYS = {
+    "schema_migrations": ("version",),
+    "folders": ("media_id",),
+    "videos": ("resource_key",),
+    "folder_items": ("media_id", "resource_key"),
+    "analyses": ("resource_key",),
+    "plans": ("resource_key",),
+    "app_state": ("name",),
+    "folder_scan_state": ("media_id",),
+    "scan_stage": ("scan_run_id", "media_id", "resource_key"),
+    "folder_profiles": ("media_id",),
+    "providers": ("id",),
+    "models": ("id",),
+}
+_REQUIRED_DATABASE_FOREIGN_KEYS = {
+    "models": frozenset({("providers", "provider_id", "id", "CASCADE")}),
+}
+_VERSIONED_EXTENSION_PRIMARY_KEYS = {
+    8: {
+        "remote_operations": ("operation_id",),
+        "remote_operation_events": ("event_id",),
+        "bfo_scheduler_tasks": ("task_id",),
+        "bfo_scheduler_meta": ("key",),
+    }
+}
+_VERSIONED_EXTENSION_FOREIGN_KEYS = {
+    8: {
+        "remote_operation_events": frozenset({
+            ("remote_operations", "operation_id", "operation_id", "NO ACTION"),
+        }),
+    }
+}
+_VERSIONED_EXTENSION_UNIQUE_KEYS = {
+    8: {
+        "bfo_scheduler_tasks": frozenset({("idempotency_key",)}),
+    }
+}
 
 
 def validate_database_candidate(path: str | Path) -> dict:
     """Validate SQLite integrity plus the supported BFO database schema contract."""
-    validation = validate_database(path)
+    try:
+        validation = validate_database(path)
+    except (TypeError, ValueError) as exc:
+        raise IntegrityValidationError(f"候选数据库版本标记无效：{exc}") from exc
     if validation.schema_version is None:
         raise IntegrityValidationError(
             "候选文件缺少有效 schema_migrations 身份，拒绝作为 BFO 数据库")
     if validation.schema_version > _SCHEMA_VERSION:
         raise IntegrityValidationError(
             f"候选数据库 Schema {validation.schema_version} 高于当前支持版本 {_SCHEMA_VERSION}")
+    if validation.schema_version < 7:
+        raise IntegrityValidationError(
+            f"候选数据库 Schema {validation.schema_version} 低于已确认支持边界 7；拒绝猜测旧版结构")
     connection = sqlite3.connect(sqlite_uri(Path(path), "ro"), uri=True)
     try:
         tables = {str(row[0]) for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
+        schema_version = int(validation.schema_version)
+        required_tables = set(_REQUIRED_DATABASE_TABLES)
+        required_columns = {name: set(columns)
+                            for name, columns in _REQUIRED_DATABASE_COLUMNS.items()}
+        required_primary_keys = dict(_REQUIRED_DATABASE_PRIMARY_KEYS)
+        required_foreign_keys = {
+            name: set(keys) for name, keys in _REQUIRED_DATABASE_FOREIGN_KEYS.items()
+        }
+        required_unique_keys = {}
+        for version, extension_tables in _VERSIONED_EXTENSION_TABLES.items():
+            if schema_version >= version:
+                required_tables.update(extension_tables)
+                for table, columns in _VERSIONED_EXTENSION_COLUMNS.get(version, {}).items():
+                    required_columns.setdefault(table, set()).update(columns)
+                required_primary_keys.update(
+                    _VERSIONED_EXTENSION_PRIMARY_KEYS.get(version, {}))
+                for table, keys in _VERSIONED_EXTENSION_FOREIGN_KEYS.get(version, {}).items():
+                    required_foreign_keys.setdefault(table, set()).update(keys)
+                for table, keys in _VERSIONED_EXTENSION_UNIQUE_KEYS.get(version, {}).items():
+                    required_unique_keys.setdefault(table, set()).update(keys)
+        missing_tables = sorted(required_tables - tables)
+        if missing_tables:
+            raise IntegrityValidationError(
+                "候选数据库缺少必要业务表，拒绝自动补建：" + ", ".join(missing_tables))
+
+        missing_columns = []
+        primary_key_mismatches = []
+        foreign_key_mismatches = []
+        unique_key_mismatches = []
+        for table in sorted(required_tables):
+            info = list(connection.execute(f'PRAGMA table_info("{table}")'))
+            columns = {str(row[1]) for row in info}
+            for column in sorted(required_columns.get(table, ()) - columns):
+                missing_columns.append(f"{table}.{column}")
+            primary_key = tuple(
+                str(row[1]) for row in sorted(
+                    (row for row in info if int(row[5]) > 0), key=lambda row: int(row[5]))
+            )
+            expected_primary_key = required_primary_keys.get(table)
+            if expected_primary_key and primary_key != expected_primary_key:
+                primary_key_mismatches.append(
+                    f"{table} ({', '.join(primary_key) or '无'} != "
+                    f"{', '.join(expected_primary_key)})")
+            declared_foreign_keys = {
+                (str(row[2]), str(row[3]), str(row[4]), str(row[6]).upper())
+                for row in connection.execute(f'PRAGMA foreign_key_list("{table}")')
+            }
+            for foreign_key in sorted(required_foreign_keys.get(table, ())):
+                if foreign_key not in declared_foreign_keys:
+                    foreign_key_mismatches.append(
+                        f"{table} {foreign_key[1]} -> {foreign_key[0]}.{foreign_key[2]}")
+
+            unique_indexes = set()
+            for index_row in connection.execute(f'PRAGMA index_list("{table}")'):
+                if int(index_row[2]) != 1:
+                    continue
+                index_name = str(index_row[1]).replace('"', '""')
+                index_columns = tuple(str(index[2]) for index in connection.execute(
+                    f'PRAGMA index_info("{index_name}")'))
+                unique_indexes.add(index_columns)
+            for unique_key in sorted(required_unique_keys.get(table, ())):
+                if unique_key not in unique_indexes:
+                    unique_key_mismatches.append(f"{table} ({', '.join(unique_key)})")
+        if missing_columns:
+            raise IntegrityValidationError(
+                "候选数据库缺少必要列，拒绝自动补建：" + ", ".join(missing_columns))
+        if primary_key_mismatches:
+            raise IntegrityValidationError(
+                "候选数据库主键结构不匹配，拒绝自动补建：" + "; ".join(primary_key_mismatches))
+        if foreign_key_mismatches:
+            raise IntegrityValidationError(
+                "候选数据库外键结构不匹配，拒绝自动补建：" + "; ".join(foreign_key_mismatches))
+        if unique_key_mismatches:
+            raise IntegrityValidationError(
+                "候选数据库唯一约束缺失，拒绝自动补建：" + "; ".join(unique_key_mismatches))
+
+        ledger_info = {str(row[1]): row for row in connection.execute(
+            'PRAGMA table_info("schema_migrations")')}
+        if not {"version", "applied_at"}.issubset(ledger_info):
+            raise IntegrityValidationError(
+                "schema_migrations 缺少必要列，拒绝推断迁移版本")
+        if str(ledger_info["version"][2]).strip().upper() != "INTEGER":
+            raise IntegrityValidationError(
+                "schema_migrations.version 类型不是 INTEGER，拒绝推断迁移版本")
+        ledger_rows = list(connection.execute(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version"))
+        if any(type(row[0]) is not int for row in ledger_rows):
+            raise IntegrityValidationError(
+                "schema_migrations 存在非整数版本值，拒绝推断迁移链")
+        ledger_versions = [row[0] for row in ledger_rows]
+        expected_versions = list(range(1, schema_version + 1))
+        if ledger_versions != expected_versions:
+            raise IntegrityValidationError(
+                f"schema_migrations 迁移链不连续：实际 {ledger_versions}，"
+                f"期望 1..{schema_version}")
+        if any(not isinstance(row[1], str) or not row[1].strip() for row in ledger_rows):
+            raise IntegrityValidationError(
+                "schema_migrations 存在空的 applied_at，拒绝推断迁移记录有效")
+        if schema_version >= 8:
+            remote_schema = connection.execute(
+                "SELECT version FROM remote_operation_schema_version").fetchall()
+            remote_schema_type = str(next(
+                row[2] for row in connection.execute(
+                    'PRAGMA table_info("remote_operation_schema_version")')
+                if str(row[1]) == "version")).strip().upper()
+            if (remote_schema_type != "INTEGER" or len(remote_schema) != 1 or
+                    type(remote_schema[0][0]) is not int or remote_schema[0][0] != 1):
+                raise IntegrityValidationError(
+                    "远端操作日志 schema 版本标记缺失或不兼容")
+    except IntegrityValidationError:
+        raise
+    except (sqlite3.DatabaseError, TypeError, ValueError) as exc:
+        raise IntegrityValidationError(f"候选数据库结构校验失败：{exc}") from exc
     finally:
         connection.close()
-    required_tables = set(_REQUIRED_DATABASE_TABLES)
-    for version, extension_tables in _VERSIONED_EXTENSION_TABLES.items():
-        if int(validation.schema_version) >= version:
-            required_tables.update(extension_tables)
-    missing = sorted(required_tables - tables)
-    if missing:
-        raise IntegrityValidationError(
-            "候选数据库缺少必要业务表，拒绝自动补建：" + ", ".join(missing))
     return {
         "path": validation.path,
         "schema_version": validation.schema_version,
@@ -482,9 +742,12 @@ def install_database_candidate(path: str | Path) -> dict:
     import path. After installation, call ``_initialize()`` to apply compatible
     schema upgrades before exposing database-backed features.
     """
-    candidate_validation = validate_database_candidate(path)
-    result = _lifecycle().install_candidate(path)
-    _write_database_manifest()
+    lifecycle = _lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        candidate_validation = validate_database_candidate(path)
+        result = lifecycle.install_candidate(
+            path, validator=validate_database_candidate, maintenance_timeout=30.0)
+        _write_database_manifest()
     return {
         **candidate_validation,
         "active_path": result.active_path,
@@ -492,30 +755,114 @@ def install_database_candidate(path: str | Path) -> dict:
     }
 
 
-def _initialize_existing_database() -> None:
-    lifecycle = _lifecycle()
-    lifecycle.set_state(DatabaseState.OPENING)
-    if lifecycle.active_connection_count:
-        lifecycle.set_state(DatabaseState.RECOVERY_REQUIRED)
-        raise RuntimeError("数据库仍有活跃连接，不能执行 Schema 初始化或验证")
+def _schema_candidate_path() -> Path:
+    """Allocate a unique sibling candidate owned by this schema upgrade."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    candidate = DB_FILE.with_name(f".{DB_FILE.name}.{uuid.uuid4().hex}.migrating")
+    # Exclusive creation makes the subsequent mode=rw open incapable of
+    # replacing or adopting another process's candidate file.
+    candidate.touch(exist_ok=False)
+    return candidate
+
+
+def _discard_schema_candidate(candidate: Path) -> None:
+    """Remove only the candidate and SQLite sidecars created for this upgrade."""
+    _remove_sqlite_sidecars(candidate)
+    candidate.unlink(missing_ok=True)
+
+
+def _copy_database_to_schema_candidate(lifecycle: DatabaseLifecycle,
+                                       candidate: Path) -> None:
+    """Snapshot source data without ever applying schema DDL to the active DB.
+
+    SQLite may open or create its transient WAL/SHM coordination files while
+    reading a WAL-mode source. Those sidecars are not schema edits; all DDL and
+    migration writes are confined to the private candidate.
+    """
+    source = None
+    target = None
+    try:
+        source = sqlite3.connect(sqlite_uri(DB_FILE, "ro"), uri=True, timeout=30)
+        target = lifecycle.connect_for_initialization(candidate, create=False)
+        source.backup(target)
+        target.commit()
+        checkpoint = target.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint and int(checkpoint[0]) != 0:
+            raise ActiveConnectionsError("Schema 候选副本的 WAL checkpoint 未完成")
+    finally:
+        if target is not None:
+            target.close()
+        if source is not None:
+            source.close()
+
+
+def _upgrade_schema_candidate(lifecycle: DatabaseLifecycle, candidate: Path) -> None:
+    """Apply schema changes only to a private copy, then validate its full contract."""
     connection = None
     try:
-        validate_database_candidate(DB_FILE)
-        connection = lifecycle.connect_for_initialization(DB_FILE, create=False)
+        connection = lifecycle.connect_for_initialization(candidate, create=False)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys=ON")
         _initialize_schema(connection)
         connection.commit()
-        connection.close()
-        connection = None
-        validate_database_candidate(DB_FILE)
+        checkpoint = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if checkpoint and int(checkpoint[0]) != 0:
+            raise ActiveConnectionsError("Schema 升级候选库的 WAL checkpoint 未完成")
+    finally:
+        if connection is not None:
+            connection.close()
+
+    validation = validate_database_candidate(candidate)
+    if int(validation["schema_version"]) != _SCHEMA_VERSION:
+        raise IntegrityValidationError(
+            f"候选数据库 Schema 升级未到目标版本："
+            f"{validation['schema_version']} != {_SCHEMA_VERSION}")
+
+
+def _initialize_existing_database() -> None:
+    lifecycle = _lifecycle()
+    try:
+        with lifecycle.maintenance(timeout=30.0):
+            _initialize_existing_database_under_maintenance(lifecycle)
+    except Exception:
+        lifecycle.set_state(DatabaseState.RECOVERY_REQUIRED)
+        raise
+
+
+def _initialize_existing_database_under_maintenance(lifecycle: DatabaseLifecycle) -> None:
+    lifecycle.set_state(DatabaseState.OPENING)
+    if lifecycle.active_connection_count:
+        lifecycle.set_state(DatabaseState.RECOVERY_REQUIRED)
+        raise RuntimeError("数据库仍有活跃连接，不能执行 Schema 初始化或验证")
+    candidate = None
+    try:
+        validation = validate_database_candidate(DB_FILE)
+        source_version = int(validation["schema_version"])
+        if source_version < _SCHEMA_VERSION:
+            # Never run schema DDL against the only copy of an existing user
+            # database. Build and validate a same-directory SQLite backup,
+            # migrate that copy, then let the lifecycle layer atomically install
+            # it while preserving a verified recovery copy of the old database.
+            candidate = _schema_candidate_path()
+            _copy_database_to_schema_candidate(lifecycle, candidate)
+            copied = validate_database_candidate(candidate)
+            if int(copied["schema_version"]) != source_version:
+                raise IntegrityValidationError(
+                    "Schema 候选副本版本与活动源数据库不一致，拒绝迁移")
+            _upgrade_schema_candidate(lifecycle, candidate)
+            install_database_candidate(candidate)
+            installed = validate_database_candidate(DB_FILE)
+            if int(installed["schema_version"]) != _SCHEMA_VERSION:
+                raise IntegrityValidationError(
+                    "安装后的数据库 Schema 版本与目标不一致")
         lifecycle.set_state(DatabaseState.READY)
         _write_database_manifest()
     except Exception:
-        if connection is not None:
-            connection.close()
         lifecycle.set_state(DatabaseState.RECOVERY_REQUIRED)
         raise
+    finally:
+        if candidate is not None:
+            _discard_schema_candidate(candidate)
 
 
 def initialize_new_database() -> dict:
@@ -543,11 +890,17 @@ def initialize_new_database() -> dict:
 
 def _initialize_legacy_json_database() -> None:
     """Migrate an old JSON-only installation without treating it as a fresh profile."""
+    lifecycle = _lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        _initialize_legacy_json_database_under_maintenance(lifecycle)
+
+
+def _initialize_legacy_json_database_under_maintenance(
+        lifecycle: DatabaseLifecycle) -> None:
     if _has_locked_vault_evidence() or (DATA_DIR / "database-manifest.json").exists():
-        _lifecycle().classify_missing_database()
+        lifecycle.classify_missing_database()
         raise DatabaseRecoveryRequiredError(
             "旧 JSON 与保险库/初始化身份同时存在；需要人工确认迁移来源")
-    lifecycle = _lifecycle()
     if _has_non_legacy_initialization_evidence():
         lifecycle.classify_missing_database()
         raise DatabaseRecoveryRequiredError("检测到数据库恢复证据，拒绝自动导入旧 JSON")

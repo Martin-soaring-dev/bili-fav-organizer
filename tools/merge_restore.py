@@ -20,6 +20,11 @@ from collections import Counter
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent.parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
+from core.database.profile_lock import ProfileFileLock
+
 BK = HERE / "data" / "backups" / "bili-data-before-clear-20260923_212602"
 OLD = HERE / "data" / "library.sqlite3"
 LIVE = Path(os.environ["LOCALAPPDATA"]) / "BiliFavOrganizer" / "data" / "library.sqlite3"
@@ -82,6 +87,15 @@ def pick_value(old, new, key):
 
 
 def main():
+    lock = ProfileFileLock(LIVE.parent / ".bfo-profile.lock")
+    # Cooperating current builds use this same profile lock for every normal DB
+    # connection and maintenance operation. Older builds do not; close them
+    # before running this one-off recovery tool.
+    with lock.maintenance(timeout=30.0):
+        _merge_under_profile_lock()
+
+
+def _merge_under_profile_lock():
     s1 = load_json(BK / "videos.json", {})
     s1_an = load_json(BK / "analysis.json", {})
     s1_pl = load_json(BK / "plan.json", {})

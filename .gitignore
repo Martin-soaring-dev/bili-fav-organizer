@@ -78,6 +78,10 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Isolated test runner output
+tests/.test-data/
+/.bfo-isolated-tests-*/
+
 # Node / Electron 壳
 node_modules/
 npm-debug.log*

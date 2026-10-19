@@ -4,8 +4,8 @@
 任务卡片进度语义与检查点展示、快速模式只认扫描成功终态）都发生在 static/app.js
 的交互里，只跑 Python 单测证明不了，所以这里起一个真实服务 + 真实浏览器来驱动。
 
-Playwright 或浏览器不可用时整类跳过：CI 只装 requirements-test.txt，装不上浏览器，
-跳过比让流水线变红更诚实。
+本地缺少 Playwright 或 Chromium 时整类跳过；CI 设置 BFO_REQUIRE_PLAYWRIGHT=1，
+缺少依赖或浏览器会直接失败，避免关键 UI 回归静默跳过。
 """
 from __future__ import annotations
 
@@ -35,6 +35,10 @@ except Exception:  # pragma: no cover - 只在没装 playwright 的环境命中
     PlaywrightTimeoutError = Exception
     sync_playwright = None
     HAS_PLAYWRIGHT = False
+
+if os.environ.get("BFO_REQUIRE_PLAYWRIGHT") == "1" and not HAS_PLAYWRIGHT:
+    raise RuntimeError(
+        "BFO_REQUIRE_PLAYWRIGHT=1, but the Playwright Python package is unavailable")
 
 
 BOOTSTRAP = r'''
@@ -194,9 +198,13 @@ class BetaUiRegressionTests(unittest.TestCase):
         try:
             cls.playwright = sync_playwright().start()
             cls.browser = cls.playwright.chromium.launch()
-        except Exception as exc:  # 浏览器没装/启动不了：跳过而不是失败
+        except Exception as exc:
             cls._teardown_browser()
             cls._shutdown_server()
+            if os.environ.get("BFO_REQUIRE_PLAYWRIGHT") == "1":
+                raise RuntimeError(
+                    "BFO_REQUIRE_PLAYWRIGHT=1, but Chromium failed to start: "
+                    f"{exc}") from exc
             raise unittest.SkipTest(f"无法启动 Chromium：{exc}") from exc
 
     @classmethod

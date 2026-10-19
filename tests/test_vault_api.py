@@ -26,7 +26,7 @@ class VaultApiTests(unittest.TestCase):
         store.DB_FILE = store.DATA_DIR / "library.sqlite3"
         store._initialize()
         server.VAULT = vault_mod.Vault(root / "vault.json")
-        server.VAULT_DB_ENC = root / "library.sqlite3.enc"
+        server.VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
         server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
 
     def tearDown(self):
@@ -106,6 +106,31 @@ class VaultApiTests(unittest.TestCase):
         res = self.client.post("/api/vault/complete-onboarding")
         self.assertEqual(200, res.status_code)
         self.assertTrue(res.json()["onboarding_complete"])
+
+    def test_lock_failure_does_not_promote_recovery_required_database(self):
+        store._lifecycle().set_state(store.DatabaseState.RECOVERY_REQUIRED)
+
+        res = self.client.post("/api/vault/lock")
+
+        self.assertEqual(500, res.status_code)
+        self.assertEqual("RECOVERY_REQUIRED", store.database_state())
+        business = self.client.put("/api/scan/selection", json={"folder_ids": []})
+        self.assertEqual(503, business.status_code)
+        self.assertEqual("database_unavailable", business.json().get("code"))
+
+    def test_complete_onboarding_failure_does_not_promote_recovery_required_database(self):
+        created = self.client.post("/api/vault/onboarding", json={
+            "bound_mid": "1", "password": "secret-pass"})
+        self.assertEqual(200, created.status_code)
+        store._lifecycle().set_state(store.DatabaseState.RECOVERY_REQUIRED)
+
+        res = self.client.post("/api/vault/complete-onboarding")
+
+        self.assertEqual(500, res.status_code)
+        self.assertEqual("RECOVERY_REQUIRED", store.database_state())
+        business = self.client.put("/api/scan/selection", json={"folder_ids": []})
+        self.assertEqual(503, business.status_code)
+        self.assertEqual("database_unavailable", business.json().get("code"))
 
     def test_encrypt_file_roundtrip_via_vault(self):
         self.client.post("/api/vault/onboarding", json={

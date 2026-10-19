@@ -15,7 +15,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 IGNORED_NAMES = {
-    ".git", ".aws", ".codex", ".agents", ".private", ".venv", "venv",
+    ".git", ".aws", ".codex", ".codex-recovery", ".agents", ".private",
+    ".bfo-diag-temp", ".candidate-test-tmp", "Test-BFO-Beta2", ".venv", "venv",
     "node_modules", "dist", "build", "output", "data", ".test-data",
     "__pycache__", ".pytest_cache", ".bfo-test-dependencies",
 }

@@ -309,7 +309,7 @@ class ApplySafetyContractTests(unittest.TestCase):
         self.assertEqual(plan["b"]["status"], "pending")
         self.assertFalse(server.APP["apply_run"]["running"])
 
-    def test_local_persist_failure_keeps_remote_success_as_done(self):
+    def test_local_persist_failure_requires_reconciliation_after_remote_success(self):
         plan = {"m1": {"action": "move_to_existing", "target_folder": "现有夹",
                        "status": "pending"}}
         videos = [_video("m1", 1)]

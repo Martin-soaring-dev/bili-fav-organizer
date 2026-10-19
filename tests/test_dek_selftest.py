@@ -7,6 +7,7 @@
 """
 import tempfile
 import unittest
+import sqlite3
 from pathlib import Path
 
 import server
@@ -25,6 +26,16 @@ class DekSelftestTests(unittest.TestCase):
                      server.VAULT_DB_ENC)
         store.DATA_DIR = root / "data"
         store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self.sqlite_snapshot = root / "valid-snapshot.sqlite3"
+        connection = sqlite3.connect(self.sqlite_snapshot)
+        try:
+            connection.executescript(
+                "CREATE TABLE folders (media_id TEXT PRIMARY KEY);"
+                "CREATE TABLE videos (bvid TEXT PRIMARY KEY);"
+            )
+            connection.commit()
+        finally:
+            connection.close()
         # 加密快照的唯一来源是 server.VAULT_DB_ENC（写入/回读/自检都看它），
         # 所以这里必须连着它一起换，光换 store.DATA_DIR 已经不成立了。
         server.VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
@@ -40,7 +51,7 @@ class DekSelftestTests(unittest.TestCase):
 
     def _write_enc(self, encryptor):
         path = server.VAULT_DB_ENC
-        path.write_bytes(encryptor.encrypt(SQLITE_MAGIC + b"\x00" * 64))
+        path.write_bytes(encryptor.encrypt(self.sqlite_snapshot.read_bytes()))
         return path
 
     def test_decrypt_head_returns_prefix_without_whole_file(self):

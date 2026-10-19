@@ -114,6 +114,74 @@ class VaultDeviceSecretTests(unittest.TestCase):
         finally:
             server.vault_hello_verify = original
 
+    def test_failed_bind_rolls_back_device_secret_and_wrap(self):
+        before_meta = server.VAULT.meta_path.read_bytes()
+        with patch.object(server.VAULT, "bind_device_blob",
+                          side_effect=OSError("synthetic metadata write failure")):
+            body, code = _payload(server.vault_bind_device(
+                server.VaultBindDeviceIn(skip_hello=True)))
+        self.assertEqual(500, code, body)
+        self.assertFalse(server.VAULT.state.has_device_wrap)
+        self.assertFalse(server.DEVICE_SECRET_BLOB.exists())
+        self.assertEqual(before_meta, server.VAULT.meta_path.read_bytes())
+
+    def test_failed_rebind_restores_existing_device_secret_and_wrap(self):
+        body, code = _payload(server.vault_bind_device(
+            server.VaultBindDeviceIn(skip_hello=True)))
+        self.assertEqual(200, code, body)
+        before_meta = server.VAULT.meta_path.read_bytes()
+        before_secret = server.DEVICE_SECRET_BLOB.read_bytes()
+        bind_device_blob = server.VAULT.bind_device_blob
+
+        def write_then_fail(secret):
+            bind_device_blob(secret)
+            raise OSError("synthetic post-write metadata failure")
+
+        with patch.object(server.VAULT, "bind_device_blob",
+                          side_effect=write_then_fail):
+            body, code = _payload(server.vault_bind_device(
+                server.VaultBindDeviceIn(skip_hello=True)))
+
+        self.assertEqual(500, code, body)
+        self.assertTrue(server.VAULT.state.has_device_wrap)
+        self.assertEqual(before_meta, server.VAULT.meta_path.read_bytes())
+        self.assertEqual(before_secret, server.DEVICE_SECRET_BLOB.read_bytes())
+
+    def test_failed_unbind_restores_device_secret_and_wrap(self):
+        body, code = _payload(server.vault_bind_device(
+            server.VaultBindDeviceIn(skip_hello=True)))
+        self.assertEqual(200, code, body)
+        before_meta = server.VAULT.meta_path.read_bytes()
+        before_secret = server.DEVICE_SECRET_BLOB.read_bytes()
+        with patch.object(server.VAULT, "save_meta",
+                          side_effect=OSError("synthetic metadata write failure")):
+            body, code = _payload(server.vault_unbind_device())
+        self.assertEqual(500, code, body)
+        self.assertTrue(server.VAULT.state.has_device_wrap)
+        self.assertEqual(before_meta, server.VAULT.meta_path.read_bytes())
+        self.assertEqual(before_secret, server.DEVICE_SECRET_BLOB.read_bytes())
+
+    def test_password_unlock_failure_after_dek_unlock_clears_new_dek(self):
+        server.VAULT.lock()
+        with patch.object(server, "_vault_migrate_plain_db_if_needed",
+                          side_effect=OSError("synthetic snapshot I/O failure")):
+            body, code = _payload(server.vault_unlock(
+                server.VaultUnlockIn(password="secret12")))
+        self.assertEqual(500, code, body)
+        self.assertFalse(server.VAULT.is_unlocked())
+
+    def test_device_unlock_failure_after_dek_unlock_clears_new_dek(self):
+        body, code = _payload(server.vault_bind_device(
+            server.VaultBindDeviceIn(skip_hello=True)))
+        self.assertEqual(200, code, body)
+        server.VAULT.lock()
+        with patch.object(server, "_vault_migrate_plain_db_if_needed",
+                          side_effect=OSError("synthetic snapshot I/O failure")):
+            body, code = _payload(server.vault_unlock_device(
+                server.VaultUnlockDeviceIn(skip_hello=True)))
+        self.assertEqual(400, code, body)
+        self.assertFalse(server.VAULT.is_unlocked())
+
     def test_app_lock_auto_unlock_toggle_keeps_device_secret(self):
         _payload(server.vault_bind_device(server.VaultBindDeviceIn(skip_hello=True)))
         before = server.DEVICE_SECRET_BLOB.read_bytes()

@@ -75,6 +75,7 @@ python server.py            # 默认 8080，可加 --port 8090
 ```
 
 Windows 也可双击 **`BiliFavOrganizer.bat`**：首次会检查并安装 Python 3.13 与依赖，然后启动服务。
+使用本项目启动入口时，同一用户数据目录一次只运行一个服务进程；切换到其他端口启动前，请先关闭当前服务。Electron 桌面版也会阻止重复启动。
 
 ---
 
@@ -193,6 +194,8 @@ Windows 默认目录：`%LOCALAPPDATA%\BiliFavOrganizer\`（Win+R 输入该路�
 - 程序 ZIP 与数据目录分离；升级 / 移动程序不会清除数据
 - 首次启动会把项目目录中的旧配置 / 旧 SQLite 迁移到用户数据目录（旧库保留可回滚）
 - 可用环境变量 `BILI_FAV_ORGANIZER_DATA_DIR` 覆盖数据目录
+- **保险库锁定范围**：锁定时加密活动 SQLite 快照、旧项目目录中的数据库/JSON、用户数据目录内受管备份，以及活动库的 SQLite sidecar；通过 `data/vault-archives/lock-manifest.enc` 校验归档清单后才删除这些明文副本。解锁只恢复活动数据库，历史 JSON/备份继续以密文归档保留，不会自动重新导入。
+- **保险库不是整机加密**：`config.json`、`secrets.json`、日志和更新诊断文件仍可能以明文存放在保险库目录之外。请使用 Windows 设备加密/BitLocker 等磁盘加密保护这些文件和系统临时目录，不要把应用锁定当作磁盘加密替代品。
 - **换电脑**：本机「设置 → 数据 → 导出项目数据」得到 zip，在新电脑「读取项目数据」导入。这个包是本机数据目录整包、**明文**：含明文数据库、B 站 Cookie 与 API Key，也可能含供应商/模型配置，请按凭据同等级别保管、不要上传网盘。只想带走收藏索引与整理结果而不含密钥时，用 JSON 导出（`/api/data/export`）
 - 清理数据请用页面上的清除功能，不要手删文件
 
@@ -249,7 +252,7 @@ bili-fav-organizer/
 
 **正式版：保险库可靠性修复、旧版数据迁移验证与 Windows 双桌面版本交付。**
 
-- 修复加密数据库快照、锁定后的明文清理、解锁失败保护及重复初始化问题；强化 SQLite 一致性与恢复校验。
+- 修复加密数据库快照、锁定清单、旧版 JSON/数据库和受管备份的加密归档、锁定后的明文清理、解锁失败保护及重复初始化问题；强化 SQLite 一致性与恢复校验。
 - 兼容 v0.208 旧数据库；已使用非空合成数据完成迁移、密码与恢复码解锁及密文损坏保护测试。
 - 同时提供传统 Windows 安装版、Windows 便携版与 Electron Neo 桌面安装版，并发布对应 SHA-256 校验文件。
 - 自动化 Windows CI、打包检查和四轮隔离验收已开展。已知限制：旧版 v0.208 的更新器不会主动提示预发布版；Neo 卸载残留曾有一次未复现的验收报告，建议卸载后检查目录。安装包暂未进行代码签名。
@@ -265,7 +268,7 @@ bili-fav-organizer/
 - 密文存在且明文不存在时延迟 SQLite 初始化，防止启动时创建空数据库掩盖旧数据；解锁后才允许恢复真实业务库。
 - 保险库初始化禁止覆盖既有 DEK；锁定前保存并校验密文，成功后清理明文活动数据库及旧 plain-backup，失败则显式拒绝宣称锁定成功。
 - Electron neo 适配系统标题栏拖动区、控制按钮留白和 Mica 半透明页面底色，并加强冒烟检查的页面加载等待。
-- **已知限制**：Windows Hello 交互与传统/Neo 安装形态的同数据端到端兼容性仍需真实 Windows 机器进一步验收；非正常断电、正在运行的后台任务及其他进程同时访问同一数据目录仍可能产生残留明文或竞态。请勿把应用锁当作完整磁盘加密替代品。
+- **已知限制**：Windows Hello 交互与传统/Neo 安装形态的同数据端到端兼容性仍需真实 Windows 机器进一步验收；应用配置、Cookie 文件、日志和系统临时目录不由保险库覆盖。锁定遇到未完成候选文件、SQLite sidecar 或数据源变化时会拒绝完成并保留文件供恢复；请勿把应用锁当作完整磁盘加密替代品。
 
 ### [v0.209-beta.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.209-beta.1)（2026-10-11 · 预发布）
 
@@ -345,15 +348,14 @@ bili-fav-organizer/
 # 测试（隔离用户数据与凭据、禁止测试访问在线服务）
 python tools/run_isolated_tests.py
 
-# Windows 便携打包（CI 在 tag v* 时自动执行）
+# Windows 便携打包（本地开发）
 pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 ```
 
 稳定版（自 v0.209 起）发布 **3 种 Windows 产物、共 6 个附件**：
 `BiliFavOrganizer-Windows-x64-<tag>.zip`（便携版）、`BiliFavOrganizer-Setup-<tag>.exe`（Inno 安装版）、
 `BiliFavOrganizer-neo-Setup-<semver>.exe`（Electron Neo），各附同名 `.sha256` 校验文件。
-发布工作流 `.github/workflows/release-stable.yml` 仅在推送稳定版 tag（如 `v0.210`）时执行，**先运行隔离回归测试，成功打包三种产物后才创建 Release**；
-预发布版 `v*-beta.*` 由独立的 `release-beta.yml` 处理。推送 tag 前应完成 Windows 安装、迁移、保险库和卸载验收；不要重复创建或覆盖已发布的 tag。
+`.github/workflows/release-beta.yml` 和 `release-stable.yml` 现在只允许从 `main` 手动构建候选包，不创建 tag 或 Release；版本 tag 作为输入，源码提交绑定到该次 `main` dispatch 的 `GITHUB_SHA`。`.github/workflows/publish-release.yml` 用于显式发布已验证构建的同一批附件。推送 tag 不会自动发布；发布前仍须完成 Windows 安装、迁移、保险库和卸载验收，并由维护者批准。
 
 ---
 

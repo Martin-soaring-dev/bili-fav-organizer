@@ -53,6 +53,7 @@ import bili_api
 import llm_analyzer
 import store
 from core.database import DatabaseNotInitializedError
+from core.database.profile_lock import ProfileFileLock, ProfileLockTimeoutError
 from core.bili_operation_adapter import BiliOperationAdapter
 from core.remote_operations import (
     OperationStatus,
@@ -125,6 +126,7 @@ _UPDATE_CANCEL = threading.Event()   # 用户点「停止下载」时置位，�
 _SHUTDOWN = threading.Event()        # 更新替换前置位，用来断开 SSE 长连接
 _UPDATE_STATUS_FILE: Path | None = None
 _UVICORN_SERVER = None
+_SERVER_INSTANCE_LEASE = None
 _PROVIDER_BOOT_LOG = ""                  # import 期初始化日志，留到 main() 里 handler 装好后再打
 _APP_PORT = 8080
 
@@ -142,6 +144,12 @@ def _force_exit_if_alive():
     """
     log.warning("服务未在预期时间内退出，强制结束进程以完成更新替换")
     os._exit(0)
+
+
+def _acquire_server_instance_lease(user_data_dir: Path | None = None):
+    """Allow one cooperating service process per vault/config profile."""
+    root = Path(user_data_dir or USER_DATA_DIR)
+    return ProfileFileLock(root / ".bfo-server-instance.lock").acquire_exclusive(timeout=0)
 
 
 def _cleanup_stale_update_leftovers(app_parent: Path, system_temp: Path,
@@ -544,17 +552,238 @@ def _read_device_secret() -> str:
     raw = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes())
     if raw == b"app-unlock":
         raise OSError("app_unlock.blob 里是应用密码材料，不是加密库设备 secret")
-    DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
-    DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(raw))
-    return raw.decode("utf-8")
+    secret = raw.decode("utf-8")
+    _write_device_secret(secret)
+    return secret
 
 
 def _write_device_secret(secret: str) -> None:
-    DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
-    DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
+    vault_mod.Vault._atomic_bytes(
+        DEVICE_SECRET_BLOB, _dpapi_protect(secret.encode("utf-8")))
+
+
+def _optional_file_bytes(path: Path) -> bytes | None:
+    try:
+        return Path(path).read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _restore_optional_file(path: Path, raw: bytes | None) -> None:
+    path = Path(path)
+    if raw is None:
+        path.unlink(missing_ok=True)
+    else:
+        vault_mod.Vault._atomic_bytes(path, raw)
 
 
 SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+VAULT_LOCK_MANIFEST_VERSION = 1
+VAULT_LOCK_MANIFEST_META_KEY = "lock_manifest_version"
+
+
+def _vault_manifest_paths() -> tuple[Path, Path]:
+    archive_dir = store.DATA_DIR / "vault-archives"
+    return archive_dir, archive_dir / "lock-manifest.enc"
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _vault_verify_sqlite_bytes(raw: bytes) -> None:
+    """Verify a snapshot in a private candidate without changing user data files."""
+    if not raw.startswith(SQLITE_MAGIC):
+        raise vault_mod.VaultError("解密结果不是 SQLite 数据库")
+    store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fd, candidate_name = tempfile.mkstemp(prefix=".vault-verify-", suffix=".sqlite3",
+                                           dir=store.DATA_DIR)
+    candidate = Path(candidate_name)
+    connection = None
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        connection = sqlite3.connect(candidate, timeout=30)
+        # SQLite backup images can retain journal_mode=WAL. A private candidate
+        # needs a local journal while validating, so normalize its mode first.
+        connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        integrity = [str(row[0]) for row in connection.execute("PRAGMA integrity_check")]
+        if integrity != ["ok"]:
+            raise vault_mod.VaultError("SQLite integrity_check 未通过")
+        if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise vault_mod.VaultError("SQLite foreign_key_check 未通过")
+        tables = {str(row[0]) for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"folders", "videos"}.issubset(tables):
+            raise vault_mod.VaultError("解密结果缺少收藏数据表")
+    except sqlite3.DatabaseError as exc:
+        raise vault_mod.VaultError(f"SQLite 快照校验失败：{exc}") from exc
+    finally:
+        if connection is not None:
+            connection.close()
+        for path in (candidate, Path(str(candidate) + "-wal"),
+                     Path(str(candidate) + "-shm"), Path(str(candidate) + "-journal")):
+            path.unlink(missing_ok=True)
+
+
+def _vault_residue_paths() -> list[Path]:
+    """Return interrupted lifecycle candidates; callers must fail closed on any hit."""
+    roots = (store.DATA_DIR, store.LEGACY_DATA_DIR, USER_DATA_DIR)
+    patterns = (
+        ".vault-snapshot-*", ".vault-lock-snapshot-*", ".vault-verify-*",
+        ".vault-restore-*", ".vault-archive-*", ".vault-digest-*",
+        ".library-*.migrating*", ".*.candidate*", ".*.restore*",
+        ".*.failed-candidate*", "*.migrating", "*.candidate",
+        "*.initializing", ".*.tmp",
+    )
+    found: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        if root.is_symlink() or not root.is_dir():
+            found.add(root)
+            continue
+        for pattern in patterns:
+            try:
+                found.update(path for path in root.rglob(pattern) if path.exists())
+            except OSError:
+                found.add(root)
+    return sorted(found, key=lambda path: str(path).casefold())
+
+
+def _vault_assert_no_residue() -> None:
+    residue = _vault_residue_paths()
+    if residue:
+        names = ", ".join(str(path) for path in residue[:5])
+        raise vault_mod.VaultError(f"检测到未完成的临时/候选文件，拒绝继续：{names}")
+
+
+def _vault_cleanup_owned_sqlite_candidate(path: Path) -> None:
+    """Remove only a unique temporary SQLite file created by this operation."""
+    for candidate in (Path(path), Path(str(path) + "-wal"),
+                      Path(str(path) + "-shm"), Path(str(path) + "-journal")):
+        candidate.unlink(missing_ok=True)
+
+
+def _vault_manifest_is_required() -> bool:
+    try:
+        return int(VAULT._meta.get(VAULT_LOCK_MANIFEST_META_KEY) or 0) >= 1
+    except (TypeError, ValueError):
+        return True
+
+
+def _vault_validate_manifest(manifest: dict, *, check_files: bool = True) -> None:
+    if (not isinstance(manifest, dict) or
+            manifest.get("format_version") != VAULT_LOCK_MANIFEST_VERSION or
+            manifest.get("state") not in {"locked", "unlocking", "unlocked"} or
+            not isinstance(manifest.get("entries"), list) or
+            not isinstance(manifest.get("active_snapshot"), dict)):
+        raise vault_mod.VaultError("保险库锁定清单格式无效")
+    active = manifest["active_snapshot"]
+    if (active.get("file") != VAULT_DB_ENC.name or
+            not isinstance(active.get("size"), int) or active["size"] < 0 or
+            not isinstance(active.get("ciphertext_size"), int) or
+            active["ciphertext_size"] < 1 or
+            not re.fullmatch(r"[0-9a-f]{64}", str(active.get("plaintext_sha256") or "")) or
+            not re.fullmatch(r"[0-9a-f]{64}", str(active.get("ciphertext_sha256") or ""))):
+        raise vault_mod.VaultError("保险库活动快照清单无效")
+    archive_dir, manifest_path = _vault_manifest_paths()
+    expected = {manifest_path.name}
+    seen = set()
+    for entry in manifest["entries"]:
+        if not isinstance(entry, dict):
+            raise vault_mod.VaultError("保险库锁定清单条目无效")
+        name = str(entry.get("archive") or "")
+        if (not name.startswith("archive-") or not name.endswith(".enc") or
+                Path(name).name != name or "/" in name or "\\" in name or name in seen or
+                not re.fullmatch(r"[0-9a-f]{64}",
+                                 str(entry.get("plaintext_sha256") or "")) or
+                not re.fullmatch(r"[0-9a-f]{64}",
+                                 str(entry.get("ciphertext_sha256") or "")) or
+                not isinstance(entry.get("size"), int) or entry["size"] < 0 or
+                not isinstance(entry.get("source"), str) or not entry["source"]):
+            raise vault_mod.VaultError("保险库锁定清单归档路径无效")
+        seen.add(name)
+        expected.add(name)
+    if not check_files:
+        return
+    if not archive_dir.is_dir() or archive_dir.is_symlink():
+        raise vault_mod.VaultError("保险库加密归档目录缺失或无效")
+    actual = set()
+    for path in archive_dir.iterdir():
+        if path.is_symlink() or not path.is_file():
+            raise vault_mod.VaultError("保险库归档目录含未知对象，拒绝解锁")
+        actual.add(path.name)
+    if actual != expected:
+        raise vault_mod.VaultError("保险库清单与加密归档文件集不一致")
+    if not VAULT_DB_ENC.is_file() or VAULT_DB_ENC.is_symlink():
+        raise vault_mod.VaultError("保险库活动加密快照缺失")
+    active_ciphertext = VAULT_DB_ENC.read_bytes()
+    active = manifest["active_snapshot"]
+    if (_sha256_bytes(active_ciphertext) != active["ciphertext_sha256"] or
+            len(active_ciphertext) != active["ciphertext_size"]):
+        raise vault_mod.VaultError("保险库活动加密快照与清单不一致")
+    active_plaintext = VAULT.decrypt(active_ciphertext)
+    if (_sha256_bytes(active_plaintext) != active["plaintext_sha256"] or
+            len(active_plaintext) != active["size"]):
+        raise vault_mod.VaultError("保险库活动快照内容与清单不一致")
+    _vault_verify_sqlite_bytes(active_plaintext)
+    for entry in manifest["entries"]:
+        path = archive_dir / entry["archive"]
+        ciphertext = path.read_bytes()
+        if _sha256_bytes(ciphertext) != entry.get("ciphertext_sha256"):
+            raise vault_mod.VaultError("保险库加密归档校验失败")
+        plaintext = VAULT.decrypt(ciphertext)
+        if (_sha256_bytes(plaintext) != entry.get("plaintext_sha256") or
+                len(plaintext) != int(entry.get("size", -1))):
+            raise vault_mod.VaultError("保险库加密归档内容校验失败")
+
+
+def _vault_read_lock_manifest(*, required: bool = False) -> dict | None:
+    archive_dir, path = _vault_manifest_paths()
+    if path.is_symlink() or archive_dir.is_symlink():
+        raise vault_mod.VaultError("保险库清单或归档目录是符号链接，拒绝访问")
+    if not path.is_file():
+        if required or _vault_manifest_is_required():
+            raise vault_mod.VaultError("保险库锁定清单缺失，拒绝解锁")
+        if archive_dir.exists() and any(archive_dir.iterdir()):
+            raise vault_mod.VaultError("保险库清单缺失但存在归档文件，拒绝解锁")
+        return None
+    if not VAULT.is_unlocked():
+        raise vault_mod.VaultError("保险库清单不可读或保险库未解锁")
+    try:
+        decoded = VAULT.decrypt(path.read_bytes())
+        manifest = json.loads(decoded.decode("utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError, vault_mod.VaultError) as exc:
+        raise vault_mod.VaultError("保险库锁定清单认证失败") from exc
+    _vault_validate_manifest(manifest)
+    return manifest
+
+
+def _vault_write_lock_manifest(manifest: dict) -> None:
+    if not VAULT.is_unlocked():
+        raise vault_mod.VaultError("保险库未解锁，无法写入锁定清单")
+    archive_dir, path = _vault_manifest_paths()
+    if archive_dir.is_symlink() or path.is_symlink():
+        raise vault_mod.VaultError("保险库清单或归档目录是符号链接，拒绝写入")
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    _vault_validate_manifest(manifest, check_files=False)
+    raw = json.dumps(manifest, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":")).encode("utf-8")
+    VAULT._atomic_bytes(path, VAULT.encrypt(raw))
+    verified = json.loads(VAULT.decrypt(path.read_bytes()).decode("utf-8"))
+    if verified != manifest:
+        raise vault_mod.VaultError("保险库锁定清单写入后校验失败")
+    _vault_validate_manifest(verified)
+
+
+def _vault_mark_manifest_installed() -> None:
+    VAULT._meta[VAULT_LOCK_MANIFEST_META_KEY] = VAULT_LOCK_MANIFEST_VERSION
+    VAULT.save_meta()
 
 
 def _dek_selftest() -> dict:
@@ -570,8 +799,7 @@ def _dek_selftest() -> dict:
         return {"ok": False, "detail": "encrypted snapshot missing"}
     try:
         raw = VAULT.decrypt(enc.read_bytes())
-        if not raw.startswith(SQLITE_MAGIC):
-            return {"ok": False, "detail": "encrypted snapshot corruption"}
+        _vault_verify_sqlite_bytes(raw)
         return {"ok": True, "detail": "已完整验证加密快照"}
     except (OSError, ValueError, vault_mod.VaultError) as exc:
         log.warning("加密快照认证失败：%s", exc)
@@ -663,6 +891,25 @@ def _serialize_vault_lifecycle(handler):
     return wrapped
 
 
+def _serialize_profile_maintenance(handler):
+    """Keep a profile-wide file/database operation exclusive across processes."""
+    @wraps(handler)
+    def wrapped(*args, **kwargs):
+        with store._lifecycle().maintenance(timeout=30.0):
+            return handler(*args, **kwargs)
+    return wrapped
+
+
+def _serialize_profile_vault_lifecycle(handler):
+    """Serialize vault metadata transitions under the SQLite profile lock."""
+    @wraps(handler)
+    def wrapped(*args, **kwargs):
+        with _VAULT_LIFECYCLE_LOCK:
+            with store._lifecycle().maintenance(timeout=30.0):
+                return handler(*args, **kwargs)
+    return wrapped
+
+
 def _vault_status_payload() -> dict:
     st = VAULT.state
     return {
@@ -685,7 +932,48 @@ def _set_vault_lock_phase(phase: str, error: str = "") -> None:
                                 updated_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
 
 
-def _vault_encrypt_consistent_db() -> None:
+def _vault_install_encrypted_snapshot(temporary: Path) -> dict:
+    """Verify a candidate ciphertext completely before atomically replacing the snapshot."""
+    store.validate_database_candidate(temporary)
+    plaintext = temporary.read_bytes()
+    _vault_verify_sqlite_bytes(plaintext)
+    store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    candidate = store.DATA_DIR / f".vault-snapshot-cipher-{uuid.uuid4().hex}.tmp"
+    previous = VAULT_DB_ENC.read_bytes() if VAULT_DB_ENC.is_file() else None
+    installed = False
+    try:
+        VAULT.encrypt_file(temporary, candidate)
+        encrypted_candidate = candidate.read_bytes()
+        decrypted = VAULT.decrypt(encrypted_candidate)
+        if decrypted != plaintext:
+            raise vault_mod.VaultError("加密候选与 SQLite 快照不一致")
+        _vault_verify_sqlite_bytes(decrypted)
+        os.replace(candidate, VAULT_DB_ENC)
+        installed = True
+        installed_ciphertext = VAULT_DB_ENC.read_bytes()
+        installed_plaintext = VAULT.decrypt(installed_ciphertext)
+        if installed_plaintext != plaintext:
+            raise vault_mod.VaultError("安装后的加密快照校验失败")
+        _vault_verify_sqlite_bytes(installed_plaintext)
+        return {
+            "file": VAULT_DB_ENC.name,
+            "size": len(plaintext),
+            "plaintext_sha256": _sha256_bytes(plaintext),
+            "ciphertext_size": len(installed_ciphertext),
+            "ciphertext_sha256": _sha256_bytes(installed_ciphertext),
+        }
+    except Exception:
+        if installed:
+            if previous is None:
+                VAULT_DB_ENC.unlink(missing_ok=True)
+            else:
+                VAULT._atomic_bytes(VAULT_DB_ENC, previous)
+        raise
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
+def _vault_encrypt_consistent_db() -> dict:
     """Encrypt a consistent SQLite backup rather than copying a live WAL database.
 
     Serialize with store transactions, then atomically replace the ciphertext.
@@ -701,14 +989,12 @@ def _vault_encrypt_consistent_db() -> None:
         temporary = Path(temporary_name)
         try:
             store.backup_database(temporary)
-            VAULT.encrypt_file(temporary, VAULT_DB_ENC)
-            if not _dek_selftest().get("ok"):
-                raise vault_mod.VaultError("加密快照完整性验证失败")
+            return _vault_install_encrypted_snapshot(temporary)
         finally:
-            temporary.unlink(missing_ok=True)
+            _vault_cleanup_owned_sqlite_candidate(temporary)
 
 
-def _vault_encrypt_drained_db() -> None:
+def _vault_encrypt_drained_db() -> dict:
     """Stop new lifecycle connections before snapshotting the database for lock."""
     if not store.DB_FILE.is_file() or not VAULT.is_unlocked():
         raise vault_mod.VaultError("明文数据库不存在或加密库未解锁")
@@ -740,9 +1026,7 @@ def _vault_encrypt_drained_db() -> None:
             source = None
             if lifecycle.active_connection_count:
                 raise vault_mod.VaultError("数据库连接尚未全部释放，拒绝删除明文库")
-            VAULT.encrypt_file(temporary, VAULT_DB_ENC)
-            if not _dek_selftest().get("ok"):
-                raise vault_mod.VaultError("加密快照完整性验证失败")
+            return _vault_install_encrypted_snapshot(temporary)
         except Exception:
             if target is not None:
                 target.close()
@@ -752,42 +1036,190 @@ def _vault_encrypt_drained_db() -> None:
                 lifecycle.set_state(store.DatabaseState.READY)
             raise
         finally:
-            temporary.unlink(missing_ok=True)
+            _vault_cleanup_owned_sqlite_candidate(temporary)
 
 
-def _vault_remove_plaintext() -> None:
-    """Remove plaintext only AFTER a durable and verified encrypted snapshot exists."""
-    for path in (
-        store.DB_FILE,
-        Path(str(store.DB_FILE) + ".plain-backup"),
-        Path(str(store.DB_FILE) + "-wal"),
-        Path(str(store.DB_FILE) + "-shm"),
-        Path(str(store.DB_FILE) + "-journal"),
-    ):
+def _vault_managed_plaintext_sources() -> list[Path]:
+    """Enumerate profile and migration-era plaintext files that lock must seal."""
+    data_dir = store.DATA_DIR
+    legacy_dir = store.LEGACY_DATA_DIR
+    excluded = {VAULT_DB_ENC.resolve(strict=False)}
+    paths: set[Path] = set()
+
+    # The live DB is represented by the consistent encrypted snapshot. Its WAL
+    # sidecars, if any, are separately encrypted because they may contain pages.
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(store.DB_FILE) + suffix)
+        if sidecar.exists():
+            if sidecar.is_symlink():
+                raise vault_mod.VaultError(f"SQLite sidecar 是符号链接：{sidecar}")
+            paths.add(sidecar)
+    plain_backup = Path(str(store.DB_FILE) + ".plain-backup")
+    if plain_backup.exists():
+        if plain_backup.is_symlink():
+            raise vault_mod.VaultError("plain-backup 是符号链接，拒绝锁库")
+        paths.add(plain_backup)
+
+    def add_tree(root: Path) -> None:
+        if not root.exists():
+            return
+        if root.is_symlink() or not root.is_dir():
+            raise vault_mod.VaultError(f"数据源目录不是普通目录：{root}")
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise vault_mod.VaultError(f"检测到符号链接数据源，拒绝锁库：{path}")
+            if path.is_file():
+                if path.is_symlink():
+                    raise vault_mod.VaultError(f"检测到符号链接数据源，拒绝锁库：{path}")
+                paths.add(path)
+
+    # Legacy project-local DB/JSON may survive an upgrade and can be silently
+    # re-imported by older builds, so seal every regular file in that data folder.
+    add_tree(legacy_dir)
+
+    if data_dir.exists():
+        if data_dir.is_symlink() or not data_dir.is_dir():
+            raise vault_mod.VaultError("SQLite 数据目录不是普通目录")
+        for path in data_dir.iterdir():
+            if path == VAULT_DB_ENC or path.resolve(strict=False) in excluded:
+                continue
+            if path.name == "vault-archives":
+                continue
+            # The database manifest is lifecycle metadata (schema/file/updated
+            # time), not a database backup. It stays available to the lifecycle
+            # gate while the DEK is locked and is rewritten on each safe install.
+            if path.name == "database-manifest.json":
+                continue
+            # This file is the stable OS-lock rendezvous point; sealing or
+            # restoring it would split cooperating processes across lock inodes.
+            if path.name == ".bfo-profile.lock":
+                continue
+            if path.name == "backups":
+                if path.is_symlink() or not path.is_dir():
+                    raise vault_mod.VaultError("受管备份目录无效，拒绝锁库")
+                for backup in path.iterdir():
+                    if backup.is_symlink():
+                        raise vault_mod.VaultError("备份目录含符号链接，拒绝锁库")
+                    if backup.is_dir() and not backup.name.startswith(("bili-data-", "pre-sqlite-")):
+                        raise vault_mod.VaultError(f"未知备份目录，拒绝锁库：{backup.name}")
+                    if backup.is_dir():
+                        add_tree(backup)
+                    elif backup.is_file():
+                        paths.add(backup)
+                continue
+            if path.is_symlink():
+                raise vault_mod.VaultError(f"数据目录含符号链接，拒绝锁库：{path.name}")
+            if path.is_file() and path != store.DB_FILE:
+                paths.add(path)
+            elif path.is_dir():
+                raise vault_mod.VaultError(f"数据目录含未识别子目录，拒绝锁库：{path.name}")
+
+    paths.discard(store.DB_FILE)
+    return sorted((path for path in paths if path.exists()), key=lambda item: str(item).casefold())
+
+
+def _vault_archive_sources(existing_entries: list[dict], sources: list[Path]) -> list[dict]:
+    archive_dir, _ = _vault_manifest_paths()
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    entries_by_key = {(item.get("source"), item.get("plaintext_sha256")): dict(item)
+                      for item in existing_entries}
+    for source in sources:
+        source = Path(source)
+        raw = source.read_bytes()
+        plaintext_hash = _sha256_bytes(raw)
+        source_id = str(source.resolve(strict=False))
+        key = (source_id, plaintext_hash)
+        if key in entries_by_key:
+            continue
+        archive_name = "archive-" + _sha256_bytes(
+            (source_id + "\0" + plaintext_hash).encode("utf-8")) + ".enc"
+        archive_path = archive_dir / archive_name
+        if archive_path.exists():
+            # An unreferenced archive is ambiguous. Never adopt or overwrite it.
+            raise vault_mod.VaultError(f"存在未列入清单的加密归档：{archive_name}")
+        VAULT._atomic_bytes(archive_path, VAULT.encrypt(raw))
+        encrypted = archive_path.read_bytes()
+        if VAULT.decrypt(encrypted) != raw:
+            raise vault_mod.VaultError(f"归档回读验证失败：{source.name}")
+        entries_by_key[key] = {
+            "source": source_id,
+            "archive": archive_name,
+            "size": len(raw),
+            "plaintext_sha256": plaintext_hash,
+            "ciphertext_sha256": _sha256_bytes(encrypted),
+        }
+    return sorted(entries_by_key.values(), key=lambda item: item["archive"])
+
+
+def _vault_remove_plaintext(sources: list[Path], expected_hashes: dict[str, str]) -> None:
+    """Remove only the exact files committed to the verified encrypted manifest."""
+    paths = list(sources) + [store.DB_FILE]
+    for path in paths:
+        path = Path(path)
+        if not path.exists():
+            continue
+        identity = str(path.resolve(strict=False))
+        raw_hash = _sha256_bytes(path.read_bytes())
+        if expected_hashes.get(identity) != raw_hash:
+            raise vault_mod.VaultError(f"锁库期间数据源发生变化，保留明文并拒绝成功：{path}")
         for attempt in range(10):
             try:
-                path.unlink(missing_ok=True)
+                path.unlink()
                 break
             except PermissionError:
-                # Windows holds SQLite handles until they are finalized; do not
-                # lie about a successful lock if the file remains open.
                 if attempt == 9:
                     raise
                 gc.collect()
                 time.sleep(0.10)
 
+    # No known SQLite sidecars or interrupted candidate may survive a successful lock.
+    sidecars = [Path(str(store.DB_FILE) + suffix) for suffix in ("-wal", "-shm", "-journal")]
+    residue = [path for path in sidecars if path.exists()]
+    residue.extend(_vault_residue_paths())
+    if residue:
+        raise vault_mod.VaultError("锁定后仍有明文临时文件或 SQLite sidecar，拒绝报告成功")
+
 
 def _vault_save_db_encrypted() -> None:
-    """Make a verified encrypted snapshot before locking; do not leave a plain DB."""
+    """Seal all managed plaintext sources before locking the DEK."""
     lifecycle = store._lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        _vault_save_db_encrypted_under_maintenance(lifecycle)
+
+
+def _vault_save_db_encrypted_under_maintenance(lifecycle) -> None:
     with store._lock:
-        _vault_encrypt_drained_db()
+        _vault_assert_no_residue()
+        previous_manifest = _vault_read_lock_manifest(required=False)
+        old_entries = (previous_manifest or {}).get("entries", [])
+        active_snapshot = _vault_encrypt_drained_db()
         if lifecycle.active_connection_count:
             lifecycle.set_state(store.DatabaseState.READY)
             raise vault_mod.VaultError(
                 f"仍有 {lifecycle.active_connection_count} 个数据库连接，拒绝删除明文库")
         try:
-            _vault_remove_plaintext()
+            sources = _vault_managed_plaintext_sources()
+            active_raw = VAULT.decrypt(VAULT_DB_ENC.read_bytes())
+            if _vault_digest_database_file(store.DB_FILE) != _vault_digest_database_bytes(active_raw):
+                raise vault_mod.VaultError("活动库在锁定快照后发生变化，保留来源并拒绝锁库")
+            # Read-only SQLite access can materialize active-database WAL/SHM
+            # sidecars. Re-enumerate after the comparison so those plaintext
+            # bytes are included in the encrypted inventory before deletion.
+            sources = _vault_managed_plaintext_sources()
+            source_hashes = {str(path.resolve(strict=False)): _sha256_bytes(path.read_bytes())
+                             for path in sources}
+            source_hashes[str(store.DB_FILE.resolve(strict=False))] = _sha256_bytes(store.DB_FILE.read_bytes())
+            entries = _vault_archive_sources(old_entries, sources)
+            manifest = {
+                "format_version": VAULT_LOCK_MANIFEST_VERSION,
+                "state": "locked",
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "active_snapshot": active_snapshot,
+                "entries": entries,
+            }
+            _vault_write_lock_manifest(manifest)
+            _vault_mark_manifest_installed()
+            _vault_remove_plaintext(sources, source_hashes)
         except Exception:
             if store.DB_FILE.is_file():
                 lifecycle.set_state(store.DatabaseState.READY)
@@ -885,9 +1317,25 @@ def _vault_pause_tasks_for_lock(timeout: float = 30.0) -> TaskScheduler:
 
 def _vault_migrate_plain_db_if_needed() -> str | None:
     """Convert a legacy plaintext database to a verified encrypted snapshot."""
+    lifecycle = store._lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        return _vault_migrate_plain_db_under_maintenance()
+
+
+def _vault_migrate_plain_db_under_maintenance() -> str | None:
     src = store.DB_FILE
     enc = VAULT_DB_ENC
     if not src.is_file() or not VAULT.is_unlocked():
+        return None
+    # Once a profile has committed to manifest v1, a missing snapshot is an
+    # integrity/recovery condition. Never recreate it from a possibly stale
+    # plaintext copy and thereby bypass the committed encrypted inventory.
+    if _vault_manifest_is_required() and not enc.is_file():
+        return None
+    _, manifest_path = _vault_manifest_paths()
+    if _vault_manifest_is_required() or manifest_path.exists():
+        # A committed manifest makes the encrypted snapshot authoritative. Do not
+        # replace a missing/corrupt snapshot from a stale plaintext remnant.
         return None
     # A valid encrypted copy takes precedence. A leftover interrupted or corrupt
     # encrypted file may be replaced only when the original plaintext still exists.
@@ -913,24 +1361,135 @@ def _vault_migrate_plain_db_if_needed() -> str | None:
         return None
 
 
+def _vault_sqlite_logical_digest(connection: sqlite3.Connection) -> str:
+    tables = [str(row[0]) for row in connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name")]
+    logical = {}
+    for table in tables:
+        quoted = '"' + table.replace('"', '""') + '"'
+        rows = [tuple(row) for row in connection.execute(f"SELECT * FROM {quoted}")]
+        rows.sort(key=lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True,
+                                             separators=(",", ":"), default=str))
+        logical[table] = rows
+    raw = json.dumps(logical, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":"), default=str).encode("utf-8")
+    return _sha256_bytes(raw)
+
+
+def _vault_digest_database_file(path: Path) -> str:
+    uri = store.sqlite_uri(path, "ro")
+    connection = sqlite3.connect(uri, uri=True, timeout=30)
+    try:
+        return _vault_sqlite_logical_digest(connection)
+    finally:
+        connection.close()
+
+
+def _vault_digest_database_bytes(raw: bytes) -> str:
+    """Compute a logical digest from a private file-backed SQLite snapshot.
+
+    A deserialized DB image may carry ``journal_mode=WAL`` metadata. SQLite's
+    in-memory deserializer can then try to open a WAL sidecar while reading
+    schema/table pages, which fails with ``unable to open database file``.
+    Normalize a uniquely owned candidate to DELETE mode before querying it.
+    """
+    store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".vault-digest-", suffix=".sqlite3",
+                                dir=store.DATA_DIR)
+    candidate = Path(name)
+    connection = None
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        connection = sqlite3.connect(candidate, timeout=30)
+        connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        return _vault_sqlite_logical_digest(connection)
+    finally:
+        if connection is not None:
+            connection.close()
+        _vault_cleanup_owned_sqlite_candidate(candidate)
+
+
+def _vault_manifest_set_state(manifest: dict, state: str) -> dict:
+    updated = dict(manifest)
+    updated["state"] = state
+    updated["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    _vault_write_lock_manifest(updated)
+    _vault_mark_manifest_installed()
+    return updated
+
+
 def _vault_restore_db_if_needed() -> bool:
-    """Decrypt to an isolated candidate, validate, then atomically install it."""
+    """Authenticate manifest, decrypt to a candidate, validate, then atomically install."""
+    lifecycle = store._lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        return _vault_restore_db_under_maintenance(lifecycle)
+
+
+def _vault_restore_db_under_maintenance(lifecycle) -> bool:
     if not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
         return False
     candidate = store.DATA_DIR / f".vault-restore-{uuid.uuid4().hex}.sqlite3"
     try:
-        if store.DB_FILE.is_file():
-            # A process may have stopped after saving the encrypted snapshot but
-            # before deleting its working copy. Preserve and validate that copy only
-            # after the user unlocks; it may contain newer committed data.
-            store._initialize()
-            return False
+        _vault_assert_no_residue()
         if not _dek_selftest().get("ok"):
+            raise vault_mod.VaultError("加密数据库快照未通过完整性校验")
+        manifest = _vault_read_lock_manifest(required=_vault_manifest_is_required())
+        if manifest is None:
+            ciphertext = VAULT_DB_ENC.read_bytes()
+            plaintext = VAULT.decrypt(ciphertext)
+            _vault_verify_sqlite_bytes(plaintext)
+            manifest = {
+                "format_version": VAULT_LOCK_MANIFEST_VERSION,
+                "state": "unlocked",
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "active_snapshot": {
+                    "file": VAULT_DB_ENC.name,
+                    "size": len(plaintext),
+                    "plaintext_sha256": _sha256_bytes(plaintext),
+                    "ciphertext_size": len(ciphertext),
+                    "ciphertext_sha256": _sha256_bytes(ciphertext),
+                },
+                "entries": [],
+            }
+            _vault_write_lock_manifest(manifest)
+            _vault_mark_manifest_installed()
+
+        if manifest["state"] == "locked":
+            sidecars = [Path(str(path) + suffix) for path in
+                        (store.DB_FILE, store.LEGACY_DB_FILE)
+                        for suffix in ("-wal", "-shm", "-journal")]
+            residue = [path for path in sidecars if path.exists()]
+            if residue:
+                names = ", ".join(str(path) for path in residue)
+                raise vault_mod.VaultError(
+                    f"锁定态数据库旁仍有 SQLite sidecar，拒绝恢复：{names}")
+
+        encrypted_plaintext = VAULT.decrypt(VAULT_DB_ENC.read_bytes())
+        _vault_verify_sqlite_bytes(encrypted_plaintext)
+        if store.DB_FILE.is_file():
+            if manifest["state"] in {"locked", "unlocking"}:
+                active_digest = _vault_digest_database_file(store.DB_FILE)
+                snapshot_digest = _vault_digest_database_bytes(encrypted_plaintext)
+                if active_digest != snapshot_digest:
+                    raise vault_mod.VaultError(
+                        "锁定中断后活动库与已封存快照内容不同，保留两者并要求恢复核对")
+            store._initialize()
+            _vault_manifest_set_state(manifest, "unlocked")
             return False
+
+        store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _vault_manifest_set_state(manifest, "unlocking")
         with store._lock:
-            store.DATA_DIR.mkdir(parents=True, exist_ok=True)
             VAULT.decrypt_file(VAULT_DB_ENC, candidate)
             store.validate_database_candidate(candidate)
+            candidate_raw = candidate.read_bytes()
+            _vault_verify_sqlite_bytes(candidate_raw)
+            if candidate_raw != encrypted_plaintext:
+                raise vault_mod.VaultError("解密候选与已验证密文快照不一致")
             candidate_connection = sqlite3.connect(candidate, timeout=30)
             try:
                 candidate_connection.row_factory = sqlite3.Row
@@ -942,10 +1501,15 @@ def _vault_restore_db_if_needed() -> bool:
             store.validate_database_candidate(candidate)
             store.install_database_candidate(candidate)
             store._initialize()
+        _vault_manifest_set_state(manifest, "unlocked")
         return True
     except (OSError, ValueError, RuntimeError, vault_mod.VaultError,
             sqlite3.DatabaseError) as exc:
-        log.warning("无法解密数据库：%s", exc)
+        log.warning("无法解密或验证数据库：%s", exc)
+        try:
+            store._lifecycle().set_state(store.DatabaseState.RECOVERY_REQUIRED)
+        except Exception:
+            log.exception("无法将数据库状态切换为 RECOVERY_REQUIRED")
         return False
     finally:
         for path in (candidate, Path(str(candidate) + "-wal"),
@@ -971,7 +1535,7 @@ def vault_status():
 
 
 @app.post("/api/vault/onboarding")
-@_serialize_vault_lifecycle
+@_serialize_profile_vault_lifecycle
 def vault_onboarding(body: VaultInitIn):
     """新用户：绑定 mid + 设密码，返回一次性恢复码明文。"""
     password = body.password or ""
@@ -1003,18 +1567,27 @@ def vault_onboarding(body: VaultInitIn):
 
 
 @app.post("/api/vault/unbind-device")
-@_serialize_vault_lifecycle
+@_serialize_profile_vault_lifecycle
 def vault_unbind_device():
+    old_meta = json.loads(json.dumps(VAULT._meta))
+    old_meta_bytes = _optional_file_bytes(VAULT.meta_path)
+    old_secret = _optional_file_bytes(DEVICE_SECRET_BLOB)
     try:
         VAULT._pop_wrap("device")
-        VAULT.save_meta()
-    except Exception:
-        pass
-    # 只清加密库自己的设备 secret；app_unlock.blob 是应用密码的材料，不要动
-    try:
         DEVICE_SECRET_BLOB.unlink(missing_ok=True)
-    except OSError:
-        pass
+        VAULT.save_meta()
+    except Exception as exc:
+        VAULT._meta = old_meta
+        try:
+            _restore_optional_file(VAULT.meta_path, old_meta_bytes)
+            _restore_optional_file(DEVICE_SECRET_BLOB, old_secret)
+        except OSError as rollback_exc:
+            log.exception("设备解绑失败且回滚未完成")
+            return JSONResponse(
+                {"ok": False, "error": f"设备解绑失败：{exc}；恢复旧状态也失败：{rollback_exc}"},
+                status_code=500)
+        return JSONResponse({"ok": False, "error": f"设备解绑失败，已恢复原状态：{exc}"},
+                            status_code=500)
     return {"ok": True, **_vault_status_payload()}
 
 
@@ -1032,38 +1605,51 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
         if not hello.get("ok"):
             return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
                                 status_code=403)
+    was_unlocked = VAULT.is_unlocked()
     try:
-        try:
-            secret = _read_device_secret()
-        except OSError:
-            secret = secrets.token_urlsafe(32)
-            _write_device_secret(secret)
-        if not VAULT.state.has_device_wrap:
-            # 新建包装要拿 DEK，而 DEK 此刻锁着 —— 拿不到就明确告诉用户该做什么
-            if not VAULT.is_unlocked():
-                return JSONResponse(
-                    {"ok": False,
-                     "error": "缺少 Hello 设备密钥：请先用应用密码解锁一次，"
-                              "再到「设置 → 安全」重新绑定 Windows Hello"},
-                    status_code=400)
-            VAULT.bind_device_blob(secret)
-        VAULT.unlock_with_secret("device", secret)
-    except (OSError, ValueError, vault_mod.VaultError) as exc:
-        return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"}, status_code=400)
-    # Verify the authenticated snapshot BEFORE recovering or migrating any data.
-    migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
-    test = _dek_selftest()
-    if not test.get("ok"):
-        VAULT.lock()
-        return JSONResponse({"ok": False,
-                             "error": f"解密自检未通过：{test.get('detail')}",
-                             "selftest": test}, status_code=403)
-    restored = _vault_restore_db_if_needed()
-    if (not store.DB_FILE.is_file() or
-            store.database_state() != store.DatabaseState.READY.value):
-        VAULT.lock()
-        return JSONResponse({"ok": False, "error": "加密数据库恢复失败或校验未通过",
-                             "database_state": store.database_state()}, status_code=500)
+        # The vault JSON, device secret, encrypted snapshot and database must
+        # describe one serialized transition across every process using this
+        # profile. Release the barrier before resuming workers below: resumed
+        # tasks need ordinary shared database leases.
+        with store._lifecycle().maintenance(timeout=30.0):
+            try:
+                secret = _read_device_secret()
+            except OSError:
+                secret = secrets.token_urlsafe(32)
+                _write_device_secret(secret)
+            if not VAULT.state.has_device_wrap:
+                # 新建包装要拿 DEK，而 DEK 此刻锁着 —— 拿不到就明确告诉用户该做什么
+                if not VAULT.is_unlocked():
+                    return JSONResponse(
+                        {"ok": False,
+                         "error": "缺少 Hello 设备密钥：请先用应用密码解锁一次，"
+                                  "再到「设置 → 安全」重新绑定 Windows Hello"},
+                        status_code=400)
+                VAULT.bind_device_blob(secret)
+            VAULT.unlock_with_secret("device", secret)
+
+            # Verify the authenticated snapshot BEFORE recovering or migrating any data.
+            migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
+            test = _dek_selftest()
+            if not test.get("ok"):
+                VAULT.lock()
+                store._lifecycle().set_state(store.DatabaseState.RECOVERY_REQUIRED)
+                return JSONResponse({"ok": False,
+                                     "error": f"解密自检未通过：{test.get('detail')}",
+                                     "selftest": test}, status_code=403)
+            restored = _vault_restore_db_if_needed()
+            if (not store.DB_FILE.is_file() or
+                    store.database_state() != store.DatabaseState.READY.value):
+                VAULT.lock()
+                return JSONResponse({"ok": False, "error": "加密数据库恢复失败或校验未通过",
+                                     "database_state": store.database_state()}, status_code=500)
+    except (OSError, ValueError, RuntimeError, vault_mod.VaultError,
+            sqlite3.DatabaseError) as exc:
+        if not was_unlocked and VAULT.is_unlocked():
+            VAULT.lock()
+        status = 409 if isinstance(exc, TimeoutError) else 400
+        return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"},
+                            status_code=status)
     _resume_vault_paused_tasks()
     _set_vault_lock_phase("idle")
     _APP_LOCK.update(unlocked=True)
@@ -1074,30 +1660,43 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
 @app.post("/api/vault/unlock")
 @_serialize_vault_lifecycle
 def vault_unlock(body: VaultUnlockIn):
+    was_unlocked = VAULT.is_unlocked()
     try:
-        if body.recovery_code:
-            VAULT.unlock_with_recovery(body.recovery_code)
-            if body.password:
-                VAULT.set_password(body.password)
-        elif body.password:
-            VAULT.unlock_with_password(body.password)
-        else:
-            return JSONResponse({"ok": False, "error": "请输入应用密码或恢复码"}, status_code=400)
+        # Keep key rotation, authenticated snapshot checks and database restore
+        # inside one cross-process profile transition. Task resumption happens
+        # after releasing the barrier so its normal connections can proceed.
+        with store._lifecycle().maintenance(timeout=30.0):
+            if body.recovery_code:
+                VAULT.unlock_with_recovery(body.recovery_code)
+                if body.password:
+                    VAULT.set_password(body.password)
+            elif body.password:
+                VAULT.unlock_with_password(body.password)
+            else:
+                return JSONResponse({"ok": False, "error": "请输入应用密码或恢复码"}, status_code=400)
+            migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
+            test = _dek_selftest()
+            if not test.get("ok"):
+                VAULT.lock()
+                store._lifecycle().set_state(store.DatabaseState.RECOVERY_REQUIRED)
+                return JSONResponse({"ok": False,
+                                     "error": f"解密自检未通过：{test.get('detail')}",
+                                     "selftest": test}, status_code=403)
+            restored = _vault_restore_db_if_needed()
+            if (not store.DB_FILE.is_file() or
+                    store.database_state() != store.DatabaseState.READY.value):
+                VAULT.lock()
+                return JSONResponse({"ok": False, "error": "加密数据库恢复失败或校验未通过",
+                                     "database_state": store.database_state()}, status_code=500)
     except vault_mod.VaultError as exc:
+        if not was_unlocked and VAULT.is_unlocked():
+            VAULT.lock()
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
-    migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
-    test = _dek_selftest()
-    if not test.get("ok"):
-        VAULT.lock()
-        return JSONResponse({"ok": False,
-                             "error": f"解密自检未通过：{test.get('detail')}",
-                             "selftest": test}, status_code=403)
-    restored = _vault_restore_db_if_needed()
-    if (not store.DB_FILE.is_file() or
-            store.database_state() != store.DatabaseState.READY.value):
-        VAULT.lock()
-        return JSONResponse({"ok": False, "error": "加密数据库恢复失败或校验未通过",
-                             "database_state": store.database_state()}, status_code=500)
+    except (OSError, ValueError, RuntimeError, sqlite3.DatabaseError) as exc:
+        if not was_unlocked and VAULT.is_unlocked():
+            VAULT.lock()
+        status = 409 if isinstance(exc, TimeoutError) else 500
+        return JSONResponse({"ok": False, "error": f"解锁未完成：{exc}"}, status_code=status)
     _resume_vault_paused_tasks()
     _set_vault_lock_phase("idle")
     _APP_LOCK.update(enabled=False, unlocked=True)
@@ -1112,20 +1711,19 @@ def vault_lock():
     try:
         _set_vault_lock_phase("pausing_tasks")
         scheduler = _vault_pause_tasks_for_lock()
-        _set_vault_lock_phase("sealing")
-        _vault_save_db_encrypted()
+        with store._lifecycle().maintenance(timeout=30.0):
+            _set_vault_lock_phase("sealing")
+            _vault_save_db_encrypted()
+            VAULT.lock()
+            _set_vault_lock_phase("locked")
     except (OSError, RuntimeError, vault_mod.VaultError,
             sqlite3.DatabaseError) as exc:
-        if store.DB_FILE.is_file():
-            store._lifecycle().set_state(store.DatabaseState.READY)
         _set_vault_lock_phase("failed", str(exc))
         _resume_vault_paused_tasks(scheduler)
         _resume_after_failed_vault_barrier(scheduler or _TASK_SCHEDULER)
         status = 409 if isinstance(exc, TimeoutError) else 500
         return JSONResponse({"ok": False, "error": f"锁定未完成：{exc}",
                              **_vault_status_payload()}, status_code=status)
-    VAULT.lock()
-    _set_vault_lock_phase("locked")
     return {"ok": True, **_vault_status_payload()}
 
 
@@ -1139,24 +1737,23 @@ def vault_complete_onboarding():
     try:
         _set_vault_lock_phase("pausing_tasks")
         scheduler = _vault_pause_tasks_for_lock()
-        _set_vault_lock_phase("sealing")
-        _vault_save_db_encrypted()
-        VAULT.complete_onboarding()
+        with store._lifecycle().maintenance(timeout=30.0):
+            _set_vault_lock_phase("sealing")
+            _vault_save_db_encrypted()
+            VAULT.complete_onboarding()
+            VAULT.lock()
+            _set_vault_lock_phase("locked")
     except (OSError, RuntimeError, vault_mod.VaultError,
             sqlite3.DatabaseError) as exc:
         log.error("初始化后加密数据库失败：%s", exc)
         if not store.DB_FILE.is_file() and VAULT.is_unlocked():
             _vault_restore_db_if_needed()
-        if store.DB_FILE.is_file():
-            store._lifecycle().set_state(store.DatabaseState.READY)
         _set_vault_lock_phase("failed", str(exc))
         _resume_vault_paused_tasks(scheduler)
         _resume_after_failed_vault_barrier(scheduler or _TASK_SCHEDULER)
         status = 409 if isinstance(exc, TimeoutError) else 500
         return JSONResponse({"ok": False, "error": f"初始化加密数据库失败：{exc}",
                              **_vault_status_payload()}, status_code=status)
-    VAULT.lock()
-    _set_vault_lock_phase("locked")
     return {"ok": True, "locked": True, **_vault_status_payload()}
 
 
@@ -1166,7 +1763,7 @@ class VaultSetPasswordIn(BaseModel):
 
 
 @app.post("/api/vault/set-password")
-@_serialize_vault_lifecycle
+@_serialize_profile_vault_lifecycle
 def vault_set_password(body: VaultSetPasswordIn):
     password = body.password or ""
     if len(password) < 6:
@@ -1186,6 +1783,7 @@ class VaultBindDeviceIn(BaseModel):
 
 
 @app.post("/api/vault/bind-device")
+@_serialize_vault_lifecycle
 def vault_bind_device(body: VaultBindDeviceIn | None = None):
     """绑定 Windows/DPAPI 设备包装（须先有应用密码并解锁）。
 
@@ -1203,10 +1801,37 @@ def vault_bind_device(body: VaultBindDeviceIn | None = None):
                                 status_code=403)
     secret = secrets.token_urlsafe(32)
     try:
-        VAULT.bind_device_blob(secret)
-        _write_device_secret(secret)
-    except (vault_mod.VaultError, OSError) as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        with store._lifecycle().maintenance(timeout=30.0):
+            # Recheck after Hello; another process may have locked or reconfigured
+            # this profile while the user was approving the system prompt.
+            if not VAULT.state.password_set:
+                return JSONResponse({"ok": False, "error": "请先设置应用密码"}, status_code=400)
+            if not VAULT.is_unlocked():
+                return JSONResponse({"ok": False, "error": "请先解锁加密库"}, status_code=403)
+            old_meta = json.loads(json.dumps(VAULT._meta))
+            old_meta_bytes = _optional_file_bytes(VAULT.meta_path)
+            old_secret = _optional_file_bytes(DEVICE_SECRET_BLOB)
+            try:
+                # Store the DPAPI material first; only publish a wrap after its
+                # matching local secret is durably installed.
+                _write_device_secret(secret)
+                VAULT.bind_device_blob(secret)
+            except Exception as exc:
+                VAULT._meta = old_meta
+                try:
+                    _restore_optional_file(VAULT.meta_path, old_meta_bytes)
+                    _restore_optional_file(DEVICE_SECRET_BLOB, old_secret)
+                except OSError as rollback_exc:
+                    log.exception("设备绑定失败且回滚未完成")
+                    return JSONResponse(
+                        {"ok": False,
+                         "error": f"设备绑定失败：{exc}；恢复旧状态也失败：{rollback_exc}"},
+                        status_code=500)
+                return JSONResponse({"ok": False, "error": f"设备绑定失败，已恢复原状态：{exc}"},
+                                    status_code=500)
+    except (vault_mod.VaultError, OSError, RuntimeError) as exc:
+        status = 409 if isinstance(exc, TimeoutError) else 500
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=status)
     return {"ok": True, **_vault_status_payload()}
 
 
@@ -3175,6 +3800,7 @@ def terminal_exec(body: TermExecIn):
 
 
 @app.get("/api/data/export-zip")
+@_serialize_profile_maintenance
 def data_export_zip():
     """导出整个数据目录为 zip（排除 runtime / backups / shell）。
 
@@ -3195,6 +3821,8 @@ def data_export_zip():
             base = HERE
         for p in base.rglob("*"):
             if not p.is_file():
+                continue
+            if p.name == ".bfo-profile.lock":
                 continue
             rel = p.relative_to(base)
             if any(part in ("runtime", "backups", "shell") for part in rel.parts):
@@ -3238,6 +3866,7 @@ class ZipImportIn(BaseModel):
 
 
 @app.post("/api/data/import-zip")
+@_serialize_profile_maintenance
 def data_import_zip(body: ZipImportIn):
     """导入完整数据目录 zip；明文旧库自动迁移加密。"""
     import base64
@@ -3264,6 +3893,9 @@ def data_import_zip(body: ZipImportIn):
             # shell/ 是 Electron 壳自己的 userData，别让旧包往里写
             if any(part in ("runtime", "shell") for part in rel.parts):
                 continue
+            # The profile lock file is a stable synchronization point, not user data.
+            if rel.name == ".bfo-profile.lock":
+                continue
             dest = USER_DATA_DIR / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(zf.read(name))
@@ -3289,6 +3921,7 @@ def data_export():
 
 
 @app.post("/api/data/import")
+@_serialize_profile_maintenance
 def data_import(body: DataIn):
     """导入项目数据（覆盖当前数据）。导入前自动备份当前数据。"""
     if not body.bundle:
@@ -3303,6 +3936,7 @@ def data_import(body: DataIn):
 
 
 @app.post("/api/data/clear")
+@_serialize_profile_maintenance
 def data_clear(body: DataIn):
     """清除指定范围的数据。scope: scan / analysis / plan / all。清除前**自动备份**。"""
     valid = {"scan", "analysis", "plan", "folder_merge", "folder_profile", "all"}
@@ -5875,7 +6509,7 @@ def apply_start():
                 # 网络/IO：记账后继续，避免一次抖动卡死整次执行。
                 fail_entries(entries, f"批次 {bn} 网络/IO 异常：{e}")
                 return True
-            # 远端已成功 → 记账；落库失败保持 done 并停，绝不改写成 failed
+            # 远端已成功但本地记账失败 → 标记结果未知并要求核对，避免错误宣称 done/failed
             try:
                 if kind == "delete":
                     finish_items(entries, "done", success_msg, source_id=src)
@@ -6915,7 +7549,7 @@ def _watch_parent_pipe() -> None:
 
 
 def main():
-    global _UVICORN_SERVER, _APP_PORT
+    global _UVICORN_SERVER, _APP_PORT, _SERVER_INSTANCE_LEASE
     parser = argparse.ArgumentParser(description="B站收藏夹整理")
     parser.add_argument("--port", type=int, default=8080,
                         help="监听端口；0 表示由系统分配（托管模式）")
@@ -6926,6 +7560,17 @@ def main():
     parser.add_argument("--handshake", action="store_true",
                         help="就绪后在 stdout 打印一行 BFO_READY（供托管方读取端口）")
     args = parser.parse_args()
+
+    # Electron enforces its own single-instance lock. Keep the same guarantee
+    # for the documented browser/server.py entry point, including custom ports;
+    # Vault DEKs and metadata are process-local and cannot safely be shared by
+    # two service processes using one user profile.
+    try:
+        _SERVER_INSTANCE_LEASE = _acquire_server_instance_lease()
+    except ProfileLockTimeoutError:
+        print("同一用户数据目录已有服务实例运行；请先关闭它再启动第二个实例。",
+              file=sys.stderr, flush=True)
+        return 2
     _APP_PORT = args.port
 
     log_path = Path(args.log_file)
@@ -7008,8 +7653,13 @@ def main():
                          daemon=True, name="bind-port").start()
     if os.environ.get("BFO_PARENT_PIPE") == "1":
         threading.Thread(target=_watch_parent_pipe, daemon=True, name="parent-pipe").start()
-    _UVICORN_SERVER.run()
+    try:
+        _UVICORN_SERVER.run()
+    finally:
+        if _SERVER_INSTANCE_LEASE is not None:
+            _SERVER_INSTANCE_LEASE.close()
+            _SERVER_INSTANCE_LEASE = None
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -22,7 +22,11 @@ INDEX = ROOT / "static" / "index.html"
 STYLE = ROOT / "static" / "style.css"
 APP_JS = ROOT / "static" / "app.js"
 SPEC = ROOT / "BiliFavOrganizer.spec"
-WORKFLOW = ROOT / ".github" / "workflows" / "release-stable.yml"
+BUILD_WORKFLOWS = (
+    ROOT / ".github" / "workflows" / "release-beta.yml",
+    ROOT / ".github" / "workflows" / "release-stable.yml",
+)
+PUBLISH_WORKFLOW = ROOT / ".github" / "workflows" / "publish-release.yml"
 MANUAL = ROOT / "packaging" / "使用说明.txt"
 README = ROOT / "README.md"
 SERVER = ROOT / "server.py"
@@ -100,16 +104,46 @@ class ExecutableAttributionTests(unittest.TestCase):
         self.assertIn('StringStruct("LegalCopyright", COPYRIGHT)', spec)
         self.assertIn("version=VERSION_INFO", spec)
 
-    def test_release_workflow_embeds_build_info_and_ships_license_and_notice(self):
-        flow = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("'BUILD_COMMIT = \"\"'", flow)
-        self.assertIn("'BUILD_DATE = \"\"'", flow)
-        self.assertIn('Copy-Item "LICENSE"', flow)
-        self.assertIn('Copy-Item "NOTICE"', flow)
-        self.assertIn('BiliFavOrganizer-neo-Setup-$neoVersion.exe', flow)
-        self.assertIn('gh release create $tag @assets', flow)
+    def test_release_candidate_workflows_embed_build_info_and_ship_license_and_notice(self):
+        for path in BUILD_WORKFLOWS:
+            with self.subTest(workflow=path.name):
+                flow = path.read_text(encoding="utf-8")
+                self.assertIn("workflow_dispatch:", flow)
+                self.assertIn("if: ${{ github.ref == 'refs/heads/main' }}", flow)
+                self.assertIn("contents: read", flow)
+                self.assertIn("'BUILD_VERSION = \"dev\"'", flow)
+                self.assertIn("'BUILD_COMMIT = \"\"'", flow)
+                self.assertIn("'BUILD_DATE = \"\"'", flow)
+                self.assertIn('Copy-Item "LICENSE"', flow)
+                self.assertIn('Copy-Item "NOTICE"', flow)
+                self.assertIn('BiliFavOrganizer-neo-Setup-$neoVersion.exe', flow)
+                self.assertIn("python tools/release_candidate.py create-manifest", flow)
+                self.assertIn(
+                    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+                    flow,
+                )
+                self.assertNotIn("gh release create", flow,
+                                 "candidate build workflows must not publish a Release")
+                self.assertNotIn("contents: write", flow,
+                                 "candidate build workflows must remain read-only")
+                # workflow_dispatch runs on main, so the embedded version must come
+                # from the requested tag input rather than github.ref_name (= main).
+                self.assertIn("RELEASE_VERSION: ${{ inputs.tag }}", flow)
+
+    def test_release_publisher_uses_verified_candidate_assets(self):
+        flow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("source_run_id:", flow)
+        self.assertIn("environment: release-approval", flow)
+        self.assertIn(
+            "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+            flow,
+        )
+        self.assertIn("python tools/release_candidate.py verify-manifest", flow)
+        self.assertIn("gh release create", flow)
+        self.assertIn("--target $env:SOURCE_SHA", flow)
+        self.assertNotIn("release-windows.yml", flow)
         self.assertFalse((ROOT / ".github" / "workflows" / "release-windows.yml").exists(),
-                         "retired 4-asset publisher must not compete with the unified stable release")
+                         "retired 4-asset publisher must not compete with the verified publisher")
 
 
 class LicenseFileTests(unittest.TestCase):

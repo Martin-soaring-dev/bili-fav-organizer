@@ -42,17 +42,18 @@ class FailureRecoveryTests(unittest.TestCase):
         self.assertTrue(data["target_exists_after_retry"])
         self.assertEqual(data["source_after_failure"]["sha256"], data["target_after_retry"]["sha256"])
 
-    def test_MIG_014_interrupted_encrypted_write_can_retry_without_data_loss(self):
-        """Pre: synthetic plain DB and unlocked vault. Steps: write partial enc then retry. Expect: retry replaces partial file."""
+    def test_MIG_014_interrupted_encrypted_write_never_commits_partial_candidate(self):
+        """Pre: synthetic plain DB and unlocked vault. Steps: interrupt candidate write, retry. Expect: source survives, partial ciphertext stays uncommitted, retry succeeds."""
         current = runtime("legacy-normal", self.root)
         before = probe(current, "snapshot")["database"]
         result = probe(current, "partial-encryption-write")
-        self.assertTrue(result["partial_file_exists"])
+        self.assertFalse(result["partial_file_exists"])
+        self.assertEqual([], result["candidate_files_after_failure"])
         self.assertIsNone(result["first_attempt"])
         self.assertEqual(before["sha256"], result["source_db_after_failure"]["sha256"])
         self.assertTrue(result["encrypted_file_after_retry"])
         self.assertEqual("已继承本地数据并完成加密", result["retry_attempt"])
-        self.assertNotEqual(b"synthetic-partial-encrypted-file", current.encrypted_file.read_bytes())
+        self.assertTrue(probe(current, "selftest")["selftest"]["ok"])
 
     def test_MIG_014_corrupt_legacy_database_fails_without_replacing_source(self):
         """Pre: isolated legacy DB copy. Steps: damage only its header and launch. Expect: diagnostic failure, no target or temp overwrite."""
@@ -77,7 +78,7 @@ class FailureRecoveryTests(unittest.TestCase):
         self.assertEqual(409, result["onboarding"]["http_status"])
         self.assertFalse(result["onboarding"]["body"]["ok"])
         unlocked = probe(current, "unlock")
-        self.assertEqual(200, unlocked["unlock"]["http_status"])
+        self.assertEqual(200, unlocked["unlock"]["http_status"], unlocked)
         self.assertEqual(core_sha256(first["decrypted_snapshot"]),
                          core_sha256(unlocked["database_after_unlock"]))
 

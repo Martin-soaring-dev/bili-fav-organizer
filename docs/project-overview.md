@@ -170,7 +170,7 @@ SQLite（WAL 模式），表结构：
 | `providers` / `models` | LLM 供应商与模型配置（含 API Key） | `id` |
 | `app_state` | 各类任务状态 JSON（扫描选择/执行状态/合并草稿…） | `name` |
 
-Schema 版本迁移：`schema_migrations` 表 + 启动时幂等升级（当前 v7）。
+Schema 版本迁移：`schema_migrations` 表 + 启动时幂等升级（当前 v8；v0.209 数据库为 v7）。
 
 ### 4.5 前端 `static/`
 
@@ -258,7 +258,7 @@ tests/
 | `test_batch_executor` 2 ERROR | mock 画像就绪 / 分析 current / 收藏夹成员关系；`bad` 改为过期关系失败，避免被全局目标画像门禁整单拦下 |
 | `test_folder_organize_plan` 2 问题 | mock 画像就绪与 profile contexts；`target in sources` 仍为 400 |
 | 缺执行器契约 | 新增 `test_apply_safety_contracts.py`（门禁拒绝启动、unknown 不重发、风控停、业务失败整批 failed） |
-| 缺 store/LLM 预算 | 新增 `test_store_and_llm_budget.py`（schema v7 幂等、stale 保留 dependent_ids、拆批与 length 截断不采纳） |
+| 缺 store/LLM 预算 | 新增 `test_store_and_llm_budget.py`（schema 幂等、stale 保留 dependent_ids、拆批与 length 截断不采纳） |
 
 ---
 
@@ -350,7 +350,7 @@ BiliFavOrganizer.bat
 |------|------|
 | 核心四阶段流程 | ✅ 完整可用 |
 | 收藏夹画像 + 合并整理 | ✅ 已实现 |
-| SQLite 迁移 + 持久索引 | ✅ 已实施（schema v7） |
+| SQLite 迁移 + 持久索引 | ✅ 已实施（schema v8） |
 | 默认夹收件箱规则 | ✅ 有测试保护 |
 | 写路径契约测试 | ✅ apply 门禁 / unknown / 风控 |
 | Windows 便携 + 安装包发布 | ✅ CI 自动化 |

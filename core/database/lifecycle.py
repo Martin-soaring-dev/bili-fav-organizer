@@ -13,9 +13,12 @@ import sqlite3
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
+
+from core.database.profile_lock import ProfileFileLock, ProfileLockLease
 
 
 class DatabaseState(str, enum.Enum):
@@ -69,6 +72,13 @@ class CandidateInstallResult:
 
 
 _LONG_PATH_PREFIX = "\\\\?\\"
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
+
+
+def _remove_sqlite_sidecars(path: Path) -> None:
+    """Remove transient SQLite files associated with an already-closed DB."""
+    for suffix in _SQLITE_SIDECAR_SUFFIXES:
+        Path(str(path) + suffix).unlink(missing_ok=True)
 
 
 def sqlite_uri(path: Path, mode: str) -> str:
@@ -114,10 +124,13 @@ def validate_database(path: str | Path) -> DatabaseValidation:
         tables = {str(row[0]) for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
         if "schema_migrations" in tables:
-            row = connection.execute(
-                "SELECT MAX(version) FROM schema_migrations").fetchone()
-            if row and row[0] is not None:
-                schema_version = int(row[0])
+            versions = [row[0] for row in connection.execute(
+                "SELECT version FROM schema_migrations")]
+            if any(type(version) is not int for version in versions):
+                raise IntegrityValidationError(
+                    "schema_migrations 存在非整数版本值，拒绝验证候选数据库")
+            if versions:
+                schema_version = max(versions)
         return DatabaseValidation(str(db_path), integrity, foreign, schema_version)
     except IntegrityValidationError:
         raise
@@ -184,9 +197,12 @@ class _TrackedConnection(sqlite3.Connection):
 
     def __del__(self):  # pragma: no cover - fallback for callers that forget close()
         try:
-            self._release_lease()
+            self.close()
         except Exception:
-            pass
+            try:
+                self._release_lease()
+            except Exception:
+                pass
 
 
 class DatabaseLifecycle:
@@ -197,9 +213,13 @@ class DatabaseLifecycle:
     ``mode=rwc`` only for a caller that has already passed first-install checks.
     """
 
-    def __init__(self, path: str | Path, *, evidence_paths: Iterable[str | Path] = ()):
+    def __init__(self, path: str | Path, *, evidence_paths: Iterable[str | Path] = (),
+                 profile_lock_path: str | Path | None = None):
         self.path = Path(path)
         self.evidence_paths = tuple(Path(item) for item in evidence_paths)
+        self.profile_lock_path = (Path(profile_lock_path) if profile_lock_path is not None
+                                  else self.path.parent / ".bfo-profile.lock")
+        self._profile_lock = ProfileFileLock(self.profile_lock_path)
         self._condition = threading.Condition(threading.RLock())
         self._state = DatabaseState.UNINITIALIZED
         self._leases: dict[str, dict] = {}
@@ -270,32 +290,59 @@ class DatabaseLifecycle:
         return DatabaseNotInitializedError(
             f"数据库尚未初始化：{self.path}；需要显式执行首次初始化")
 
-    def connect(self, *, mode: str = "rw", owner: str = "store") -> sqlite3.Connection:
+    def connect(self, *, mode: str = "rw", owner: str = "store",
+                profile_lock_timeout: float | None = None) -> sqlite3.Connection:
         """Open a normal connection that is incapable of creating a database."""
         if mode not in ("ro", "rw"):
             raise ValueError("普通数据库连接 mode 只能是 'ro' 或 'rw'")
-        with self._condition:
-            if self._state != DatabaseState.READY:
+        profile_lease = self._profile_lock.acquire_shared(timeout=profile_lock_timeout)
+        lease_id = uuid.uuid4().hex
+        try:
+            with self._condition:
+                if self._state != DatabaseState.READY:
+                    if not self.path.is_file():
+                        raise self._missing_error()
+                    raise DatabaseLifecycleError(
+                        f"数据库当前不允许普通访问（状态：{self._state.value}）")
                 if not self.path.is_file():
                     raise self._missing_error()
-                raise DatabaseLifecycleError(
-                    f"数据库当前不允许普通访问（状态：{self._state.value}）")
-            if not self.path.is_file():
-                raise self._missing_error()
-            lease_id = uuid.uuid4().hex
-            self._leases[lease_id] = {
-                "owner": str(owner), "mode": mode, "opened_at": time.time(),
-                "in_transaction": False,
-            }
-            try:
-                return sqlite3.connect(
-                    sqlite_uri(self.path, mode), uri=True, timeout=30,
-                    factory=lambda *args, **kwargs: _TrackedConnection(
-                        *args, lifecycle=self, lease_id=lease_id, **kwargs))
-            except Exception:
-                self._leases.pop(lease_id, None)
-                self._condition.notify_all()
-                raise
+                self._leases[lease_id] = {
+                    "owner": str(owner), "mode": mode, "opened_at": time.time(),
+                    "in_transaction": False, "profile_lease": profile_lease,
+                }
+                try:
+                    return sqlite3.connect(
+                        sqlite_uri(self.path, mode), uri=True, timeout=30,
+                        factory=lambda *args, **kwargs: _TrackedConnection(
+                            *args, lifecycle=self, lease_id=lease_id, **kwargs))
+                except Exception:
+                    self._leases.pop(lease_id, None)
+                    self._condition.notify_all()
+                    raise
+        except Exception:
+            profile_lease.close()
+            raise
+
+    @contextmanager
+    def maintenance(self, timeout: float | None = None):
+        """Hold this profile's reentrant cross-process maintenance lock.
+
+        Callers must use the same ``profile_lock_path`` for schema snapshots,
+        vault lock/unlock, backup/restore and other operations that need one
+        stable profile view. Normal connections in every cooperating process
+        hold a shared lease until close.
+        """
+        with self._profile_lock.maintenance(timeout=timeout):
+            yield
+
+    def acquire_profile_read_lease(self, timeout: float | None = None):
+        """Acquire the shared profile lease without opening a SQLite connection.
+
+        Store-level mutexes use this before taking their in-process lock so a
+        maintenance writer never waits on a mutex owner that is blocked on this
+        same cross-process gate.
+        """
+        return self._profile_lock.acquire_shared(timeout=timeout)
 
     def begin_drain(self, timeout: float | None = None) -> None:
         """Close normal access, then wait for already-open connections to leave.
@@ -329,28 +376,36 @@ class DatabaseLifecycle:
 
     def connect_for_drain(self, *, owner: str = "maintenance") -> sqlite3.Connection:
         """Open the sole tracked maintenance connection after normal access drains."""
+        # Keep the process-wide maintenance lock for the full lifetime of this
+        # connection. A caller that already owns maintenance gets a reentrant
+        # lease; direct callers still receive cross-process protection.
+        profile_lease = self._profile_lock.acquire_exclusive()
         with self._condition:
-            if self._state != DatabaseState.DRAINING:
-                raise DatabaseLifecycleError(
-                    f"数据库不处于排空状态（{self._state.value}），不能打开维护连接")
-            if self._leases:
-                raise ActiveConnectionsError(
-                    f"排空后仍有 {len(self._leases)} 个数据库连接，不能打开维护连接")
-            if not self.path.is_file():
-                raise self._missing_error()
-            lease_id = uuid.uuid4().hex
-            self._leases[lease_id] = {
-                "owner": str(owner), "mode": "rw", "opened_at": time.time(),
-                "in_transaction": False,
-            }
             try:
-                return sqlite3.connect(
-                    sqlite_uri(self.path, "rw"), uri=True, timeout=30,
-                    factory=lambda *args, **kwargs: _TrackedConnection(
-                        *args, lifecycle=self, lease_id=lease_id, **kwargs))
+                if self._state != DatabaseState.DRAINING:
+                    raise DatabaseLifecycleError(
+                        f"数据库不处于排空状态（{self._state.value}），不能打开维护连接")
+                if self._leases:
+                    raise ActiveConnectionsError(
+                        f"排空后仍有 {len(self._leases)} 个数据库连接，不能打开维护连接")
+                if not self.path.is_file():
+                    raise self._missing_error()
+                lease_id = uuid.uuid4().hex
+                self._leases[lease_id] = {
+                    "owner": str(owner), "mode": "rw", "opened_at": time.time(),
+                    "in_transaction": False, "profile_lease": profile_lease,
+                }
+                try:
+                    return sqlite3.connect(
+                        sqlite_uri(self.path, "rw"), uri=True, timeout=30,
+                        factory=lambda *args, **kwargs: _TrackedConnection(
+                            *args, lifecycle=self, lease_id=lease_id, **kwargs))
+                except Exception:
+                    self._leases.pop(lease_id, None)
+                    self._condition.notify_all()
+                    raise
             except Exception:
-                self._leases.pop(lease_id, None)
-                self._condition.notify_all()
+                profile_lease.close()
                 raise
 
     def connect_for_initialization(self, path: str | Path, *, create: bool) -> sqlite3.Connection:
@@ -363,6 +418,15 @@ class DatabaseLifecycle:
     def initialize_new_database(self, initializer, *,
                                 allow_existing_evidence: bool = False) -> DatabaseValidation:
         """Create a new DB on a sibling candidate and install it after validation."""
+        with self._condition:
+            if self._leases:
+                raise ActiveConnectionsError("数据库仍有活跃连接，不能开始首次初始化")
+        with self.maintenance():
+            return self._initialize_new_database_under_maintenance(
+                initializer, allow_existing_evidence=allow_existing_evidence)
+
+    def _initialize_new_database_under_maintenance(
+            self, initializer, *, allow_existing_evidence: bool) -> DatabaseValidation:
         with self._condition:
             if self.path.exists():
                 self.set_state(DatabaseState.READY)
@@ -427,17 +491,29 @@ class DatabaseLifecycle:
             for suffix in ("-wal", "-shm", "-journal"):
                 Path(str(candidate) + suffix).unlink(missing_ok=True)
 
-    def install_candidate(self, candidate_path: str | Path) -> CandidateInstallResult:
+    def install_candidate(self, candidate_path: str | Path, *,
+                          validator: Callable[[str | Path], object] | None = None,
+                          maintenance_timeout: float | None = None
+                          ) -> CandidateInstallResult:
         """Verify a SQLite candidate, preserve the old DB, then atomically switch.
 
-        Callers must stop external writers before this maintenance operation. The
-        gate rejects replacement when this process still owns open connections.
-        The prior DB is kept as a verified sibling recovery copy.
+        All profile readers and writers must use the same profile lock path. The
+        gate rejects replacement when this lifecycle still owns open connections;
+        the cross-process exclusive lease drains other cooperating processes.
+        The prior DB is kept as a verified sibling recovery copy. ``validator``
+        lets the schema owner enforce its application-level contract on the
+        candidate, staged copy, recovery copy and installed database. SQLite
+        integrity checks always run regardless of the callback.
         """
         candidate = Path(candidate_path)
         if candidate.resolve() == self.path.resolve():
             raise ValueError("候选数据库必须与活动数据库路径不同")
-        validate_database(candidate)
+        def validate(path: Path) -> DatabaseValidation:
+            result = validate_database(path)
+            if validator is not None:
+                validator(path)
+            return result
+
         with self._condition:
             if self._leases:
                 raise ActiveConnectionsError(
@@ -445,6 +521,23 @@ class DatabaseLifecycle:
             previous_state = self._state
             self._state = DatabaseState.DRAINING
 
+        try:
+            with self.maintenance(timeout=maintenance_timeout):
+                return self._install_candidate_under_maintenance(candidate, validate)
+        except Exception:
+            # Lock acquisition can time out before the replacement body changes
+            # state. Restore the exact prior gate state; no replacement happened.
+            with self._condition:
+                if self._state == DatabaseState.DRAINING:
+                    self._state = previous_state
+                    self._condition.notify_all()
+            raise
+
+    def _install_candidate_under_maintenance(
+            self, candidate: Path,
+            validate: Callable[[Path], DatabaseValidation]) -> CandidateInstallResult:
+        """Install and roll back while the exclusive profile lease is held."""
+        validate(candidate)
         staged = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.candidate")
         backup = None
         backup_verified = False
@@ -461,7 +554,7 @@ class DatabaseLifecycle:
             finally:
                 dst.close()
                 src.close()
-            staged_validation = validate_database(staged)
+            staged_validation = validate(staged)
 
             if self.path.is_file():
                 backup = self.path.with_name(
@@ -474,7 +567,20 @@ class DatabaseLifecycle:
                 finally:
                     saved.close()
                     old.close()
-                validate_database(backup)
+                validate(backup)
+                # The validated recovery copy may itself retain WAL mode.
+                # Checkpoint its committed contents before removing sidecars,
+                # otherwise deleting a non-empty WAL would discard recovery
+                # data even though the main file passed validation.
+                saved = sqlite3.connect(sqlite_uri(backup, "rw"), uri=True, timeout=30)
+                try:
+                    row = saved.execute("PRAGMA wal_checkpoint(FULL)").fetchone()
+                    if row and int(row[0]) != 0:
+                        raise ActiveConnectionsError(
+                            "WAL checkpoint 未能完成，拒绝保留不完整的恢复副本")
+                finally:
+                    saved.close()
+                _remove_sqlite_sidecars(backup)
                 backup_verified = True
                 # The backup includes committed WAL contents. Checkpoint before
                 # removing sidecars so the still-active source remains recoverable.
@@ -485,14 +591,14 @@ class DatabaseLifecycle:
                         raise ActiveConnectionsError("WAL checkpoint 未能完成，拒绝替换数据库")
                 finally:
                     old.close()
-                for suffix in ("-wal", "-shm", "-journal"):
+                for suffix in _SQLITE_SIDECAR_SUFFIXES:
                     sidecar = Path(str(self.path) + suffix)
                     if sidecar.exists():
                         sidecar.unlink()
 
             os.replace(staged, self.path)
             candidate_installed = True
-            installed_validation = validate_database(self.path)
+            installed_validation = validate(self.path)
             if installed_validation.schema_version != staged_validation.schema_version:
                 raise IntegrityValidationError("候选库切换后 Schema 版本与验证结果不符")
             with self._condition:
@@ -504,22 +610,44 @@ class DatabaseLifecycle:
             # A failed candidate must not take the last known good DB with it.
             rollback_ok = False
             if backup_verified and backup and backup.is_file():
+                failed = None
+                restore = None
                 try:
-                    if self.path.is_file():
+                    active_sidecars = [Path(str(self.path) + suffix)
+                                       for suffix in _SQLITE_SIDECAR_SUFFIXES]
+                    if self.path.exists() or any(path.exists() for path in active_sidecars):
                         failed = self.path.with_name(
                             f"{self.path.name}.failed-candidate-{uuid.uuid4().hex[:8]}")
-                        os.replace(self.path, failed)
+                        if self.path.exists():
+                            os.replace(self.path, failed)
+                        # SQLite sidecars belong to the failed active image and
+                        # must not be left beside the restored known-good DB.
+                        for sidecar in active_sidecars:
+                            if sidecar.exists():
+                                os.replace(sidecar, Path(str(failed) +
+                                                          sidecar.name[len(self.path.name):]))
                     restore = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.restore")
-                    try:
-                        shutil.copy2(backup, restore)
-                        validate_database(restore)
-                        os.replace(restore, self.path)
-                        rollback_ok = True
-                    finally:
-                        restore.unlink(missing_ok=True)
+                    shutil.copy2(backup, restore)
+                    validate(restore)
+                    _remove_sqlite_sidecars(restore)
+                    os.replace(restore, self.path)
+                    if failed is not None:
+                        _remove_sqlite_sidecars(failed)
+                        failed.unlink(missing_ok=True)
+                    rollback_ok = True
                 except Exception as rollback_error:
                     if hasattr(original_error, "add_note"):
                         original_error.add_note(f"活动库回滚也失败：{rollback_error}")
+                finally:
+                    if restore is not None:
+                        try:
+                            restore.unlink(missing_ok=True)
+                            _remove_sqlite_sidecars(restore)
+                        except Exception as cleanup_error:
+                            rollback_ok = False
+                            if hasattr(original_error, "add_note"):
+                                original_error.add_note(
+                                    f"回滚候选清理也失败：{cleanup_error}")
             with self._condition:
                 if rollback_ok or (had_active_database and not candidate_installed and
                                    self.path.is_file()):
@@ -530,13 +658,19 @@ class DatabaseLifecycle:
             raise
         finally:
             staged.unlink(missing_ok=True)
+            for suffix in ("-wal", "-shm", "-journal"):
+                Path(str(staged) + suffix).unlink(missing_ok=True)
 
     def _release(self, lease_id: str | None) -> None:
         if lease_id is None:
             return
         with self._condition:
-            self._leases.pop(lease_id, None)
+            lease = self._leases.pop(lease_id, None)
             self._condition.notify_all()
+        if lease is not None:
+            profile_lease = lease.get("profile_lease")
+            if isinstance(profile_lease, ProfileLockLease):
+                profile_lease.close()
 
     def _mark_transaction(self, lease_id: str | None, active: bool) -> None:
         if lease_id is None:
