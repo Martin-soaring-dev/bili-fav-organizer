@@ -390,11 +390,67 @@ class SchemaMigrationTests(unittest.TestCase):
         self._assert_rejected_without_source_change("外键结构")
 
     def test_schema_below_confirmed_supported_range_is_rejected_without_source_change(self):
-        # v0.208 and v0.209 are confirmed schema 7; schema 6 is below the
-        # currently established support boundary and must not be auto-upgraded.
-        self._create_schema_database(self.db_file, schema_version=6)
+        # The supported floor is schema 5 (v0.200 was the first release that
+        # shipped a ledger, at version 5). Anything below it has no verifiable
+        # historical source and must not be guessed at or auto-upgraded.
+        self._create_schema_database(self.db_file, schema_version=4)
 
         self._assert_rejected_without_source_change("支持|schema|版本")
+
+    def _historical_fixture_rows(self, path: Path) -> dict:
+        """Business rows that exist unchanged in schema 5, 6, 7 and 8."""
+        connection = sqlite3.connect(store.sqlite_uri(path, "ro"), uri=True)
+        try:
+            return {
+                "folders": connection.execute(
+                    "SELECT media_id,title,remote_count,record_json FROM folders "
+                    "ORDER BY media_id").fetchall(),
+                "videos": connection.execute(
+                    "SELECT resource_key,bvid,resource_id,record_json FROM videos "
+                    "ORDER BY resource_key").fetchall(),
+                "folder_items": connection.execute(
+                    "SELECT media_id,resource_key,fav_time FROM folder_items "
+                    "ORDER BY media_id,resource_key").fetchall(),
+                "plans": connection.execute(
+                    "SELECT resource_key,record_json FROM plans ORDER BY resource_key").fetchall(),
+            }
+        finally:
+            connection.close()
+
+    def _assert_historical_schema_migrates(self, fixture_name: str, expected_version: int,
+                                           expected_sha256: str) -> None:
+        fixture = Path(__file__).parent / "fixtures" / fixture_name
+        self.assertTrue(fixture.is_file())
+        self.assertEqual(expected_sha256, self._sha256(fixture),
+                         "historical fixture must match its documented synthetic source")
+        self.db_file.write_bytes(fixture.read_bytes())
+        before = self._historical_fixture_rows(self.db_file)
+        self.assertEqual(
+            expected_version,
+            store.validate_database_candidate(self.db_file)["schema_version"])
+
+        store._initialize_existing_database()
+
+        self.assertEqual(DatabaseState.READY, store._lifecycle().state)
+        self.assertEqual(store._SCHEMA_VERSION,
+                         store.validate_database_candidate(self.db_file)["schema_version"])
+        self.assertEqual(before, self._historical_fixture_rows(self.db_file))
+        with closing(sqlite3.connect(self.db_file)) as connection:
+            self.assertEqual("ok", connection.execute("PRAGMA integrity_check").fetchone()[0])
+            self.assertEqual([], connection.execute("PRAGMA foreign_key_check").fetchall())
+            self.assertIsNotNone(connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='bfo_scheduler_tasks'").fetchone())
+
+    def test_historical_v0200_schema5_database_migrates_without_logical_data_loss(self):
+        self._assert_historical_schema_migrates(
+            "v0200_schema5.sqlite3", 5,
+            "2613f5b9315af1b36c60a0c311d76b1ea3ebed5ac7fc9ea190bd8cf325cb95d5")
+
+    def test_historical_v0203_schema6_database_migrates_without_logical_data_loss(self):
+        self._assert_historical_schema_migrates(
+            "v0203_schema6.sqlite3", 6,
+            "2a5a31ac3b9d248a19f7f049af3a076dc8614e51647d14bebb438d3b70a53a9d")
 
     def test_committed_uncheckpointed_wal_rows_survive_migration_and_repeat_init_is_idempotent(self):
         self._create_schema_database(self.db_file, schema_version=7)

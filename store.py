@@ -95,6 +95,9 @@ class _ProfileAwareRLock:
 
 _lock = _ProfileAwareRLock()
 _SCHEMA_VERSION = 8
+# Oldest schema the app migrates forward. v0.200 shipped schema 5, so 5 is the
+# floor; anything older has no verifiable historical source and stays refused.
+_MIN_SUPPORTED_SCHEMA = 5
 _DATASET_DEFAULTS = {
     "analysis": {}, "plan": {}, "apply_state": {}, "scan_done": [],
     "scan_selection": [], "folder_merge_plan": [], "folder_merge_draft": [],
@@ -505,7 +508,7 @@ _REQUIRED_DATABASE_COLUMNS = {
         "updated_at",
     }),
     "folder_items": frozenset({"media_id", "resource_key", "fav_time", "scan_run_id"}),
-    "analyses": frozenset({"resource_key", "record_json", "status", "dependent_ids"}),
+    "analyses": frozenset({"resource_key", "record_json"}),
     "plans": frozenset({"resource_key", "record_json"}),
     "app_state": frozenset({"name", "value_json"}),
     "folder_scan_state": frozenset({
@@ -520,7 +523,7 @@ _REQUIRED_DATABASE_COLUMNS = {
     # context_source/output_source are additions made while upgrading schema 7.
     "models": frozenset({
         "id", "provider_id", "name", "context_tokens", "max_output_tokens",
-        "capabilities_json", "thinking_effort", "test_status", "test_message",
+        "thinking_effort", "test_status", "test_message",
         "test_at", "created_at", "updated_at",
     }),
 }
@@ -531,6 +534,12 @@ _VERSIONED_EXTENSION_TABLES = {
     }),
 }
 _VERSIONED_EXTENSION_COLUMNS = {
+    6: {
+        "analyses": frozenset({"status", "dependent_ids"}),
+    },
+    7: {
+        "models": frozenset({"capabilities_json"}),
+    },
     8: {
         "models": frozenset({"context_source", "output_source"}),
         "remote_operation_schema_version": frozenset({"version"}),
@@ -605,9 +614,10 @@ def validate_database_candidate(path: str | Path) -> dict:
     if validation.schema_version > _SCHEMA_VERSION:
         raise IntegrityValidationError(
             f"候选数据库 Schema {validation.schema_version} 高于当前支持版本 {_SCHEMA_VERSION}")
-    if validation.schema_version < 7:
+    if validation.schema_version < _MIN_SUPPORTED_SCHEMA:
         raise IntegrityValidationError(
-            f"候选数据库 Schema {validation.schema_version} 低于已确认支持边界 7；拒绝猜测旧版结构")
+            f"候选数据库 Schema {validation.schema_version} 低于已确认支持边界"
+            f" {_MIN_SUPPORTED_SCHEMA}；拒绝猜测旧版结构")
     connection = sqlite3.connect(sqlite_uri(Path(path), "ro"), uri=True)
     try:
         tables = {str(row[0]) for row in connection.execute(
