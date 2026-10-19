@@ -11,9 +11,9 @@
 
 你负责对当前 BiliFavOrganizer 维护候选进行真实、可复核的 Windows 验收。不要只给建议或测试计划：先检查仓库和隔离条件，然后实际执行所有当前授权、环境可支持的步骤；遇到清单规定的停止门槛时，保留证据并明确标 BLOCKED，不得绕过。
 
-## 最新前置状态（2026-10-20）
+## 最新前置状态（2026-10-20，第二轮Vault）
 
-旧候选65ba02e的Windows全量测试失败（306项，261 PASS、6 FAIL、39 ERROR、零SKIP）。本提交修复Windows锁父目录创建/WinError和未跟踪的历史SQLite合成夹具。先完整读取 `docs/testing/windows-acceptance-blockers-20261020.md`，从远端准确修复SHA重建干净Windows测试环境，按其顺序先定向复验，再全量。T6/T8在真实Windows复验通过前保持FAIL/BLOCKED；历史本机PASS记录不构成新候选Windows验收。只从GitHub获取本提交，不使用旧离线包。
+ac9da20的Windows反馈为318项，298 PASS、6 FAIL、14 ERROR、零SKIP；首轮锁父目录和夹具已修复，但Vault仍失败。本提交修复运行锁误归档、原子临时名过长风险和探针二次manifest异常掩盖原始错误。先完整读取 `docs/testing/windows-vault-acceptance-retest-20261020.md`，从远端准确新SHA重建干净Windows环境，按其顺序定向复验再全量。T6/T8在真实Windows新候选通过前保持FAIL/BLOCKED；旧报告仅作历史，禁止使用旧离线包。测试总数以实际发现列表为准，必须确认七项Chromium实际执行。
 
 ## 一、目标与平台
 

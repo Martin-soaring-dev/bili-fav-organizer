@@ -1115,7 +1115,18 @@ def _vault_managed_plaintext_sources() -> list[Path]:
                 raise vault_mod.VaultError(f"数据目录含未识别子目录，拒绝锁库：{path.name}")
 
     paths.discard(store.DB_FILE)
-    return sorted((path for path in paths if path.exists()), key=lambda item: str(item).casefold())
+    # These files are kernel-lock rendezvous points, not business data. Windows
+    # byte-range locks reject reads through a second handle; replacing/removing
+    # a lock file would also split ownership across different file identities.
+    runtime_locks = {
+        (root / name).resolve(strict=False)
+        for root in (data_dir, legacy_dir)
+        for name in (".bfo-profile.lock", ".scheduler-owner.lock")
+    }
+    runtime_locks.add((USER_DATA_DIR / ".bfo-server-instance.lock").resolve(strict=False))
+    return sorted((path for path in paths
+                   if path.exists() and path.resolve(strict=False) not in runtime_locks),
+                  key=lambda item: str(item).casefold())
 
 
 def _vault_archive_sources(existing_entries: list[dict], sources: list[Path]) -> list[dict]:
@@ -1718,6 +1729,7 @@ def vault_lock():
             _set_vault_lock_phase("locked")
     except (OSError, RuntimeError, vault_mod.VaultError,
             sqlite3.DatabaseError) as exc:
+        log.exception("锁定加密数据库失败")
         _set_vault_lock_phase("failed", str(exc))
         _resume_vault_paused_tasks(scheduler)
         _resume_after_failed_vault_barrier(scheduler or _TASK_SCHEDULER)
@@ -1745,7 +1757,7 @@ def vault_complete_onboarding():
             _set_vault_lock_phase("locked")
     except (OSError, RuntimeError, vault_mod.VaultError,
             sqlite3.DatabaseError) as exc:
-        log.error("初始化后加密数据库失败：%s", exc)
+        log.exception("初始化后加密数据库失败")
         if not store.DB_FILE.is_file() and VAULT.is_unlocked():
             _vault_restore_db_if_needed()
         _set_vault_lock_phase("failed", str(exc))

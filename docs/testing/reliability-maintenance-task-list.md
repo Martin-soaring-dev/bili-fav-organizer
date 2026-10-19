@@ -9,7 +9,11 @@
 
 **Windows 本地交接：**目标分支 `feat/reliability-scheduler-implementation`；[本地 AI 验收提示词](local-ai-windows-acceptance-prompt.md)、代码、测试与本清单在同一交接提交中。准确候选 SHA 以交付消息与远端实际 HEAD 核验为准。旧离线包保留用于溯源，不能向新提交重复应用补丁。
 
-## 最新 Windows 阻断（2026-10-20）
+## 最新 Windows Vault 阻断（2026-10-20，第二轮）
+
+`ac9da20` Windows反馈：318项，298 PASS、6 FAIL、14 ERROR、0 SKIP。锁目录和夹具修复已确认；Vault归档仍阻断T6/T8。本提交修复运行锁误归档、原子临时名称额外膨胀，并保留归档失败原始诊断；真实Windows新候选待复验。参见 [第二轮Vault根因及复测步骤](windows-vault-acceptance-retest-20261020.md)。只从远端准确SHA取得代码，不使用旧附件；后续历史表格不能视为新候选放行。
+
+## 首轮 Windows 阻断（2026-10-20，历史）
 
 用户转交的 Windows 报告：旧候选 `65ba02e` 共306项，261 PASS、6 FAIL、39 ERROR、0 SKIP。**T6/T8 对旧候选为 FAIL/BLOCKED**。空profile父目录未创建及历史SQLite夹具未入Git已定位并在本提交修复，真实Windows复验仍待完成；下文2026-10-19记录保留为历史，不是最新放行结论。详见 [阻断根因与逐条复测指令](windows-acceptance-blockers-20261020.md)。本地AI只从目标远端分支取得交付消息指定的新SHA，不应用旧离线包。
 

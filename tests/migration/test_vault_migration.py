@@ -302,7 +302,11 @@ class VaultMigrationTests(unittest.TestCase):
         try:
             while not marker.is_file() and worker.is_alive() and time.monotonic() < deadline:
                 time.sleep(0.01)
-            self.assertTrue(marker.is_file(), "vault sealing did not reach plaintext removal")
+            self.assertTrue(marker.is_file(), {
+                "error": "vault sealing did not reach plaintext removal",
+                "completion": result.get("completion"),
+                "probe_errors": [str(error) for error in errors],
+            })
 
             contender = DatabaseLifecycle(
                 current.db_file,

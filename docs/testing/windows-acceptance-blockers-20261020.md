@@ -1,5 +1,7 @@
 # Windows 验收阻断与复测（2026-10-20）
 
+**后续状态：**ac9da20已得到Windows第二轮反馈（318项、6 FAIL/14 ERROR）；最新修复和复测要求见 [第二轮Vault记录](windows-vault-acceptance-retest-20261020.md)，下文首轮记录保留为历史。
+
 ## 当前判定
 
 旧候选 `65ba02e2ff0ea32c3fc27f450567f49bb56560a8` 的用户转交 Windows 报告：306 项，261 PASS、6 FAIL、39 ERROR、0 SKIP，70.8 秒、非零退出。T6/T8 对该候选为 **FAIL / BLOCKED**，不能继续进入安装/UAT/发布放行。本记录依据转交摘要，尚无完整原始逐项日志，不把所有失败都归为同一根因。

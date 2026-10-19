@@ -59,12 +59,14 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
                         break
                     time.sleep(.005)
                 locked = server.vault_lock()
+                assert isinstance(locked, dict), getattr(locked, "body", locked)
                 assert locked["ok"] is True, locked
                 assert store.database_state() == store.DatabaseState.LOCKED.value
                 assert not store.DB_FILE.exists()
                 assert not store.database_connections()
                 unlocked = server.vault_unlock(
                     server.VaultUnlockIn(password="safe-password"))
+                assert isinstance(unlocked, dict), getattr(unlocked, "body", unlocked)
                 assert unlocked["ok"] is True, unlocked
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
@@ -120,6 +122,77 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
             """
             self._run_subprocess(env, script)
 
+    def test_vault_seals_business_files_without_reading_or_replacing_runtime_locks(self):
+        with tempfile.TemporaryDirectory(prefix="bfo-vault-owner-") as temp_dir:
+            root = Path(temp_dir)
+            env = os.environ.copy()
+            env["LOCALAPPDATA"] = str(root / "profile")
+            env["HOME"] = str(root / "home")
+            env["BILI_FAV_ORGANIZER_DATA_DIR"] = str(root / "profile" / "data")
+            env["BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL"] = "1"
+            self._run_subprocess(env, r"""
+                from pathlib import Path
+                from unittest import mock
+                import store
+                store.initialize_new_database()
+                import server
+                from core.scheduler.ownership import FileOwnerLock
+
+                server.VAULT.initialize(bound_mid="12345", password="safe-password")
+                scheduler = server._ensure_task_scheduler()
+                owner = store.DATA_DIR / ".scheduler-owner.lock"
+                inode = owner.stat().st_ino
+                store.LEGACY_DATA_DIR.mkdir(parents=True, exist_ok=True)
+                legacy_locks = [store.LEGACY_DATA_DIR / name for name in
+                                (".bfo-profile.lock", ".scheduler-owner.lock")]
+                for lock in legacy_locks:
+                    lock.write_bytes(b"runtime control file")
+                # An arbitrary business file ending in .lock still needs sealing.
+                business = store.DATA_DIR / "business-document.lock"
+                business.write_bytes(b"synthetic business data")
+                legacy_business = store.LEGACY_DATA_DIR / "folders.json"
+                legacy_business.write_bytes(b"[]")
+                runtime_paths = {path.resolve() for path in [owner, *legacy_locks]}
+                read_attempts = []
+                original_read = Path.read_bytes
+
+                def windows_locked_read(path):
+                    if path.resolve() in runtime_paths:
+                        read_attempts.append(str(path))
+                        raise PermissionError(13, "runtime byte range is locked", str(path))
+                    return original_read(path)
+
+                with mock.patch.object(Path, "read_bytes", windows_locked_read):
+                    locked = server.vault_lock()
+                    assert isinstance(locked, dict), getattr(locked, "body", locked)
+                    assert locked["ok"] is True, locked
+                    assert not business.exists()
+                    assert not legacy_business.exists()
+                    assert owner.stat().st_ino == inode
+                    assert all(path.is_file() for path in legacy_locks)
+                    contender = FileOwnerLock(owner)
+                    try:
+                        contender.acquire()
+                    except RuntimeError:
+                        pass
+                    else:
+                        contender.release()
+                        raise AssertionError("vault lock released scheduler ownership")
+                    unlocked = server.vault_unlock(
+                        server.VaultUnlockIn(password="safe-password"))
+                    assert isinstance(unlocked, dict), getattr(unlocked, "body", unlocked)
+                    assert unlocked["ok"] is True, unlocked
+                    assert owner.stat().st_ino == inode
+                    manifest = server._vault_read_lock_manifest(required=True)
+                    archived_sources = {Path(item["source"]).resolve()
+                                        for item in manifest["entries"]}
+                    assert business.resolve() in archived_sources
+                    assert legacy_business.resolve() in archived_sources
+                    assert not (runtime_paths & archived_sources)
+                assert not read_attempts, read_attempts
+                scheduler.shutdown(wait=True, timeout=5, pause_running=False)
+            """)
+
     def test_unlock_starts_scheduler_and_recovers_stale_task_rows(self):
         with tempfile.TemporaryDirectory(prefix="bfo-scheduler-unlock-recovery-") as temp_dir:
             root = Path(temp_dir)
@@ -151,6 +224,7 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
 
                 unlocked = server.vault_unlock(
                     server.VaultUnlockIn(password="safe-password"))
+                assert isinstance(unlocked, dict), getattr(unlocked, "body", unlocked)
                 assert unlocked["ok"] is True, unlocked
                 assert server._TASK_SCHEDULER is not None
                 recovered = server._TASK_SCHEDULER.get_task(stale.task_id)

@@ -95,3 +95,7 @@ GitHub 只读状态复核：仓库默认分支为 `main`；PR #21 当前仍 open
 ## 2026-10-20 Windows 失败反馈与修复
 
 转交Windows结果为旧候选65ba02e的306项：261通过、6失败、39错误、零跳过。T6/T8保持FAIL/BLOCKED。已修复Windows锁父目录创建，保留WinError原生错误信息，并将被忽略的已知合成schema7夹具正式纳入Git。新增回归修复前失败、修复后5/5；schema16/16、lifecycle22/22、server实例锁2/2及migration-only30/30通过，均是本机隔离开发诊断，不能代替Windows复验。详见 [Windows阻断与复测](windows-acceptance-blockers-20261020.md)。后续只从远端准确修复SHA执行，保留旧失败证据，不沿用旧候选通过结论。
+
+## 2026-10-20 第二轮 Windows Vault 反馈
+
+用户转交ac9da20 Windows全量318项：298通过、6失败、14错误、0跳过。已修复错误归档运行锁（Windows字节锁拒绝另句柄读取）、同目录临时名称复制完整archive名导致不必要路径增长，以及失败onboarding探针二次读取manifest掩盖原始500。新增回归修复前失败、修复后通过。本机隔离原子I/O3/3、调度/Vault集成4/4、Vault API9/9、迁移31/31、基础Vault11/11、设备密钥13/13、DEK4/4；真实Windows修复验收待完成，T6/T8继续阻断。详见 [第二轮复测记录](windows-vault-acceptance-retest-20261020.md)。未凭摘要断定全部FileNotFoundError均为路径长度问题，需Windows完整路径复核。

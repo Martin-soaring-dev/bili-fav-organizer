@@ -16,6 +16,15 @@ class FailureRecoveryTests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def test_onboarding_archive_error_is_reported_without_secondary_manifest_error(self):
+        current = runtime("legacy-normal", self.root)
+        result = probe(current, "onboard", env_overrides={"BFO_PROBE_ARCHIVE_FAILURE": "1"})
+        self.assertEqual(500, result["completion"]["http_status"])
+        self.assertIn("synthetic archive access denied", result["completion"]["body"]["error"])
+        self.assertIn("PermissionError", result["probe_stderr"])
+        self.assertNotIn("manifest", result)
+        self.assertTrue(current.db_file.is_file())
+
     def test_MIG_014_database_copy_interruption_preserves_source_and_retry(self):
         """Pre: source DB exists in isolated tree. Steps: inject backup OSError, then retry. Expect: source intact and retry succeeds."""
         current = runtime("legacy-normal", self.root)

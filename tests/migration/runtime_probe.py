@@ -9,6 +9,8 @@ import sqlite3
 import sys
 import tempfile
 import time
+from contextlib import nullcontext
+from unittest import mock
 from urllib.parse import unquote
 from pathlib import Path
 
@@ -279,9 +281,18 @@ def main() -> None:
         result["onboarding"] = _response_data(server.vault_onboarding(body))
         if result["onboarding"]["http_status"] == 200:
             result["recovery_code"] = result["onboarding"]["body"].get("recovery_code", "")
-            result["completion"] = _response_data(server.vault_complete_onboarding())
+            failure = (mock.patch.object(server, "_vault_archive_sources", side_effect=
+                       PermissionError(13, "synthetic archive access denied"))
+                       if os.environ.get("BFO_PROBE_ARCHIVE_FAILURE") == "1"
+                       else nullcontext())
+            with failure:
+                result["completion"] = _response_data(server.vault_complete_onboarding())
             result["vault_locked_after_completion"] = not server.VAULT.is_unlocked()
-            if server.VAULT_DB_ENC.is_file():
+            # A ciphertext may have been installed before a later archive
+            # failure. Keep the original completion error instead of raising
+            # a secondary "manifest missing" while collecting diagnostics.
+            if (result["completion"]["http_status"] == 200 and
+                    server.VAULT_DB_ENC.is_file()):
                 decrypted = Path(os.environ["TEMP"]) / "decrypted-synthetic.sqlite3"
                 server.VAULT.load_meta()
                 server.VAULT.unlock_with_password(os.environ["BFO_PROBE_PASSWORD"])

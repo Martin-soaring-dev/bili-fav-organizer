@@ -171,3 +171,7 @@ onboarding 会将 DB 加密到 `library.sqlite3.enc`，但当前实现保留明�
 ## 2026-10-20 Windows 候选复验阻断
 
 用户转交的65ba02e Windows全量结果为306项：261通过、6失败、39错误、零跳过。已定位空profile锁父目录缺失与历史schema7合成SQLite夹具未入Git；本提交修复并补回归。新修复的Linux隔离schema16/16及migration-only30/30通过，包括MIG-029，但Windows锁与封存场景仍需复验，不能标记Windows PASS。MIG-029在旧报告中的marker未出现可能由更早初始化错误导致，根因归类须以Windows子进程完整日志复核。参见 [阻断记录](windows-acceptance-blockers-20261020.md)。
+
+## 2026-10-20 第二轮 Vault 阻断
+
+ac9da20 Windows报告318项，298通过、6失败、14错误、零跳过；首轮锁目录和历史夹具问题已被反馈确认修复。新修复排除准确运行锁路径，保留所有业务来源；缩短同目录原子临时名，保留加密/哈希校验；探针失败不再用二次manifest读取掩盖原始接口500。本机migration-only31/31（含MIG-027/029）和生产调度/Vault集成4/4通过，Windows仍需复验。详见 [第二轮复测](windows-vault-acceptance-retest-20261020.md)。
