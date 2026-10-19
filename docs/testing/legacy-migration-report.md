@@ -167,3 +167,7 @@ onboarding 会将 DB 加密到 `library.sqlite3.enc`，但当前实现保留明�
 当前不建议继续发布 `v0.209-beta.1`。在发布前至少需要修复并回归：锁定后的明文处理策略、空 DB 创建与密文恢复顺序、完整 AEAD 验证、加密文件原子写入/截断重试，以及已有 vault 的重复初始化保护。随后在隔离数据上重跑 MIG-009–014，并让 v0.208 reader、传统安装形态和 Neo 安装形态读取相同基线；Windows Hello 与 NSIS/Inno Setup 测试仍需真实 Windows 验收。
 
 本分支没有修改生产迁移/保险库逻辑；本报告记录的缺陷仍待独立修复和回归验证。
+
+## 2026-10-20 Windows 候选复验阻断
+
+用户转交的65ba02e Windows全量结果为306项：261通过、6失败、39错误、零跳过。已定位空profile锁父目录缺失与历史schema7合成SQLite夹具未入Git；本提交修复并补回归。新修复的Linux隔离schema16/16及migration-only30/30通过，包括MIG-029，但Windows锁与封存场景仍需复验，不能标记Windows PASS。MIG-029在旧报告中的marker未出现可能由更早初始化错误导致，根因归类须以Windows子进程完整日志复核。参见 [阻断记录](windows-acceptance-blockers-20261020.md)。

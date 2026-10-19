@@ -188,6 +188,11 @@ class SchemaMigrationTests(unittest.TestCase):
     def test_historical_v0209_schema7_database_migrates_without_logical_data_loss(self):
         fixture = Path(__file__).parent / "fixtures" / "v0209_schema7.sqlite3"
         self.assertTrue(fixture.is_file())
+        self.assertEqual(
+            "511f66afc63562f8a102a49150a55a22a839c0340fa70a9c64a0690692e1b273",
+            self._sha256(fixture),
+            "historical fixture must match its documented synthetic source",
+        )
         self.db_file.write_bytes(fixture.read_bytes())
         before = self._business_rows(self.db_file)
         self.assertEqual(7, store.validate_database_candidate(self.db_file)["schema_version"])

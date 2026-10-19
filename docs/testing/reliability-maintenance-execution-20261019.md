@@ -91,3 +91,7 @@ GitHub 只读状态复核：仓库默认分支为 `main`；PR #21 当前仍 open
 ## GitHub 直接交接修正
 
 此前代码和文档未推送，导致 Windows 本地执行者从远端找不到维护候选。此次将离线包 tree `0155b38d8d7d16456a69a29981b04686343070b2` 的全部候选代码与测试，以 EA 为父基线整理为普通提交，更新交接文档为 GitHub 精确 SHA 获取方式，目标分支为 `feat/reliability-scheduler-implementation`。最终 commit/tree 和推送成功与否以交付消息及远端复核为准；较早未提交、未推送记录保留为历史检查点。原工作树、本地历史分支和未知目录不覆盖。仅推送功能分支不触发 main/PR 专用测试；Windows 候选全量测试和浏览器验收仍待运行。没有创建 PR、合并、tag 或 Release。
+
+## 2026-10-20 Windows 失败反馈与修复
+
+转交Windows结果为旧候选65ba02e的306项：261通过、6失败、39错误、零跳过。T6/T8保持FAIL/BLOCKED。已修复Windows锁父目录创建，保留WinError原生错误信息，并将被忽略的已知合成schema7夹具正式纳入Git。新增回归修复前失败、修复后5/5；schema16/16、lifecycle22/22、server实例锁2/2及migration-only30/30通过，均是本机隔离开发诊断，不能代替Windows复验。详见 [Windows阻断与复测](windows-acceptance-blockers-20261020.md)。后续只从远端准确修复SHA执行，保留旧失败证据，不沿用旧候选通过结论。

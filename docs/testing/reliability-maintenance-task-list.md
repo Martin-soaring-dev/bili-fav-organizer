@@ -9,6 +9,10 @@
 
 **Windows 本地交接：**目标分支 `feat/reliability-scheduler-implementation`；[本地 AI 验收提示词](local-ai-windows-acceptance-prompt.md)、代码、测试与本清单在同一交接提交中。准确候选 SHA 以交付消息与远端实际 HEAD 核验为准。旧离线包保留用于溯源，不能向新提交重复应用补丁。
 
+## 最新 Windows 阻断（2026-10-20）
+
+用户转交的 Windows 报告：旧候选 `65ba02e` 共306项，261 PASS、6 FAIL、39 ERROR、0 SKIP。**T6/T8 对旧候选为 FAIL/BLOCKED**。空profile父目录未创建及历史SQLite夹具未入Git已定位并在本提交修复，真实Windows复验仍待完成；下文2026-10-19记录保留为历史，不是最新放行结论。详见 [阻断根因与逐条复测指令](windows-acceptance-blockers-20261020.md)。本地AI只从目标远端分支取得交付消息指定的新SHA，不应用旧离线包。
+
 ## 本轮执行状态（2026-10-19）
 
 候选基线为 `ea4983d2bb9f6d8c0ea54faeddc790a9e096df63` / tree `939a0607988524b7afec8097fde3e9acda4ec655`。本次交接将维护工作树的候选代码、测试与文档整理为该基线的正常后继提交，目标远端分支为 `feat/reliability-scheduler-implementation`。读取当前交接提交的 `git rev-parse HEAD`、`git rev-parse HEAD^{tree}` 并与交付消息匹配，固定候选身份。原本地 `f22965f` 工作树与未知未跟踪文件保持保留。此前的离线包源码 tree 为 `0155b38d8d7d16456a69a29981b04686343070b2`；本次仅更新交接文档，生产代码与测试内容不变。下表不代表候选 Windows CI、安装验收或 Mimo 截图验收。

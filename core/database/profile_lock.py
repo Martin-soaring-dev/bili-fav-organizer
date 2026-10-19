@@ -198,6 +198,9 @@ def _windows_open(path: Path):
     import ctypes
     from ctypes import wintypes
 
+    # The Windows acquisition path calls this function directly, bypassing
+    # _open_os_lock_file. CreateFileW creates a file, not its parent directories.
+    path.parent.mkdir(parents=True, exist_ok=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     create_file = kernel32.CreateFileW
     create_file.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
@@ -213,7 +216,7 @@ def _windows_open(path: Path):
     invalid_handle = wintypes.HANDLE(-1).value
     if handle == invalid_handle:
         error = ctypes.get_last_error()
-        raise OSError(error, f"无法打开 profile 锁文件：{path}")
+        raise ctypes.WinError(error, f"无法打开 profile 锁文件：{path}")
     return kernel32, handle
 
 
@@ -246,7 +249,7 @@ def _windows_acquire(path: Path, *, exclusive: bool,
                 return _WindowsOSLock(handle, overlapped)
             error = ctypes.get_last_error()
             if deadline is None or error != 33:  # ERROR_LOCK_VIOLATION
-                raise OSError(error, "LockFileEx 无法获取 profile 锁")
+                raise ctypes.WinError(error, "LockFileEx 无法获取 profile 锁")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ProfileLockTimeoutError(
@@ -285,7 +288,7 @@ def _release_os_lock(os_lock: object | None) -> None:
             if not unlock(os_lock.handle, 0, 1, 0,
                           ctypes.byref(os_lock.overlapped)):
                 error = ctypes.get_last_error()
-                raise OSError(error, "UnlockFileEx 无法释放 profile 锁")
+                raise ctypes.WinError(error, "UnlockFileEx 无法释放 profile 锁")
         finally:
             close_handle(os_lock.handle)
 

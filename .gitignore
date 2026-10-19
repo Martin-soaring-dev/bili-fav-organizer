@@ -50,6 +50,7 @@ token.json
 # 本地数据库、密钥与证书
 *.sqlite
 *.sqlite3
+!tests/database/fixtures/v0209_schema7.sqlite3
 *.sqlite3-*
 *.sqlite-journal
 *.db
