@@ -4,20 +4,20 @@
 @media(max-width:1120px){.app{grid-template-columns:198px minmax(0,1fr)}.main{padding:23px 22px 55px}.gategrid{grid-template-columns:repeat(2,1fr)}.stats{grid-template-columns:repeat(2,1fr)}.revgrid{grid-template-columns:repeat(3,1fr)}}@media(max-width:830px){.app{display:block}.sidebar{position:static;height:auto;padding:10px 13px;gap:8px}.navlabel,.sidefoot{display:none}.logo{padding:1px 0}.logo small{display:none}.nav{display:flex;overflow:auto;gap:4px}.nav button{width:auto;white-space:nowrap;margin:0}.main{padding:22px 15px 55px}.two,.detailbody{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.trackname{padding-top:8px}.evidence{grid-template-columns:1fr}}@media(max-width:600px){.stats,.gategrid,.tasks,.riskgrid,.revgrid{grid-template-columns:1fr}.main{padding:18px 11px 45px}.hero{padding:20px}.gatecard{min-height:auto}.sectionhead{display:block}.detailtop{display:block}.top{align-items:start}.tools{width:100%}.btn{font-size:11px}.trackbar{gap:5px}.arrow{display:none}.trackbox{font-size:10px}.refline{display:block}.refline a{display:block;margin-top:8px}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style><style>
 .exec-layout{display:grid;grid-template-columns:1.05fr 1fr;gap:14px;margin:0 0 14px}.exec-test-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:9px;margin-top:12px}.exec-test{padding:11px;border:1px solid rgba(135,165,185,.22);border-radius:12px;background:rgba(127,154,176,.06)}.exec-test strong{display:block;font-size:19px;color:var(--teal);margin-bottom:4px}.exec-test span,.exec-test small{display:block}.exec-test small{color:var(--muted);margin-top:5px;line-height:1.45}.exec-online{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}.exec-online a{font-weight:700}.exec-online p{margin:6px 0;line-height:1.55}.exec-table-wrap{overflow:auto;margin-top:10px}.exec-table{width:100%;border-collapse:collapse;min-width:790px}.exec-table th,.exec-table td{text-align:left;padding:9px 10px;border-bottom:1px solid rgba(135,165,185,.2);vertical-align:top}.exec-table th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.exec-table td:nth-child(1){white-space:nowrap}.exec-next{margin:6px 0 0;padding-left:20px;line-height:1.75}.exec-note{margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid rgba(224,176,92,.25);background:rgba(224,176,92,.07);line-height:1.65}.exec-caption{font-size:12px;color:var(--muted);line-height:1.6}.exec-table td p{margin:0;line-height:1.55}@media(max-width:850px){.exec-layout{grid-template-columns:1fr}}
-</style></head><body><div class="app"><aside class="sidebar"><div class="logo"><div class="mark">B</div><div><strong>BiliFavOrganizer</strong><small>DELIVERY CONSOLE · V5</small></div></div><div><div class="navlabel">PROJECT WORKSPACE</div><nav class="nav" id="nav"><button class="active" data-page="overview"><span class="num">01</span>项目总览</button><button data-page="roadmap"><span class="num">02</span>路线图与合流</button><button data-page="tasks"><span class="num">03</span>任务与 Codex</button><button data-page="evidence"><span class="num">04</span>CI / 证据</button><button data-page="risk"><span class="num">05</span>风险与门禁</button><button data-page="history"><span class="num">06</span>Focus 演进</button></nav></div><div class="sidefoot"><strong id="sideVersion">状态快照 · 2026-10-19</strong><div>已验证与未完成严格分离。</div><div>HTML 离线可用 · 不自动同步 GitHub</div><div id="sideGit"></div></div></aside><main class="main"><div class="top"><div class="kicker">PROJECT INTELLIGENCE / RELEASE READINESS</div><div class="tools"><span class="pill ok">● T8 / PR CI PASS</span><span class="pill warn">RC 等待 T12 授权</span><button class="btn" id="theme">☀ 切换主题</button><button class="btn" id="copyOverview">复制现状</button><button class="btn accent" id="downloadJSON">导出 JSON</button></div></div><h1>仓库收尾完成：Pages 已使用 main/docs，远端只保留 main。</h1><p class="intro">PR #22 与验收证据已归档到 main，公开 dashboard 已由 main/docs 部署。T8/T10/T11a/T11b PASS；T3 PARTIAL，T12 NOT_RUN。分支收敛已完成，未创建发布。</p>
-<section id="page-overview" class="view active"><div class="hero"><div class="kicker" style="color:#94ddd5">CURRENT PROJECT CLOSEOUT · 2026-10-21</div><h2 id="heroTitle"></h2><p id="heroText"></p><div class="tags"><span class="pill ok">PR #22 merged</span><span class="pill ok">T8 330/330 PASS</span><span class="pill ok">T10 14/14 · 39 screenshots</span><span class="pill warn">T3 PARTIAL</span></div></div><div class="sectionhead"><h2>合并后收尾状态 · 2026-10-21</h2><small>候选 1981a94 已并入 main；T12 发布尚未执行</small></div><div id="executionPanel"></div><div class="stats" id="stats"></div><div class="sectionhead"><h2>当前状态</h2><small>候选验收与仓库收尾均已完成</small></div><div class="pane"><div class="lanes"><div class="trackname">候选验收 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">1981a94</span><span class="arrow">→</span><span class="trackbox passed">T8 330/330</span><span class="arrow">→</span><span class="trackbox passed">T10 14/14</span><span class="arrow">→</span><span class="trackbox passed">T11a / T11b</span><span class="arrow">→</span><span class="trackbox passed">PR #22 merged</span></div><p class="meta">T11b 使用同 SHA 本地 installer；Beta CI artifact 未上传。T3 保持 PARTIAL；T12 等待明确 GO。</p></div><div class="trackname">分支收敛 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">Pages → main/docs</span><span class="arrow">→</span><span class="trackbox passed">公开看板已核验</span><span class="arrow">→</span><span class="trackbox passed">仅保留 main</span></div><p class="meta">收尾已完成。未创建归档 tag；6 个已删除分支的独有 commit 历史未永久锚定，具体 head 见下方收尾记录。</p></div></div></div><div class="sectionhead"><h2>收尾与发布门禁</h2><small>查看各阶段证据与尚未授权的操作</small></div><div class="gategrid" id="gateCards"></div><div id="gatePreview"></div><div class="sectionhead"><h2>下一步执行焦点</h2><small>由真实阻塞而不是操作日志决定优先级</small></div><div class="two"><div class="pane"><div class="p-title">当前收尾工作 <span class="pill warn">IN PROGRESS</span></div><ul id="focusTodos" class="cleanlist"></ul></div><div class="pane"><div class="p-title">合并完成后还剩什么？</div><p id="focusWhy" class="meta" style="font-size:12px;line-height:1.9"></p><div class="caution" id="focusBlocked"></div></div></div></section>
-<section id="page-roadmap" class="view"><div class="sectionhead"><h2>验收关口与后续动作</h2><small>分支收敛已完成；T12 仍需明确 GO</small></div><div class="gategrid" id="roadmapCards"></div><div class="details" id="roadmapDetail"></div><div class="sectionhead"><h2>并行与合流规则</h2><small>避免多个云任务同时修改事务核心</small></div><div class="tasks" id="parallelBlocks"></div><div class="sectionhead"><h2>仓库收尾结果</h2><small>GitHub 状态复核 · 2026-10-21</small></div><div class="pane"><p><strong>Pages.</strong> GitHub Pages source 已设为 <code>main /docs</code>；部署成功，公开 dashboard 刷新后可正常加载。</p><p><strong>Branches.</strong> 远端活动分支只剩 <code>main</code>；其余 10 个分支引用已删除。</p><p><strong>PR / Issue.</strong> PR #22 已合并，PR #21 已关闭，当前没有 open PR；Issue #6 已关闭。</p><p><strong>历史保留.</strong> 本轮未创建归档 tag。6 个已删除分支有独有 commit 历史，head 与 ahead 数量记录在本页仓库数据中，但未被 tag 永久锚定；如需找回特定 head，请先检查 GitHub 删除分支的恢复入口是否仍可用，恢复后立即建立归档 ref。</p><p><strong>发布.</strong> 本轮未创建新版本 tag、Release 或触发发布 workflow。T12 仍为 <code>NOT_RUN</code>，需维护者明确 GO。</p></div></section>
+</style></head><body><div class="app"><aside class="sidebar"><div class="logo"><div class="mark">B</div><div><strong>BiliFavOrganizer</strong><small>DELIVERY CONSOLE · V5</small></div></div><div><div class="navlabel">PROJECT WORKSPACE</div><nav class="nav" id="nav"><button class="active" data-page="overview"><span class="num">01</span>项目总览</button><button data-page="roadmap"><span class="num">02</span>路线图与合流</button><button data-page="tasks"><span class="num">03</span>任务与 Codex</button><button data-page="evidence"><span class="num">04</span>CI / 证据</button><button data-page="risk"><span class="num">05</span>风险与门禁</button><button data-page="history"><span class="num">06</span>Focus 演进</button></nav></div><div class="sidefoot"><strong id="sideVersion">状态快照 · 2026-10-19</strong><div>已验证与未完成严格分离。</div><div>HTML 离线可用 · 不自动同步 GitHub</div><div id="sideGit"></div></div></aside><main class="main"><div class="top"><div class="kicker">PROJECT INTELLIGENCE / RELEASE READINESS</div><div class="tools"><span class="pill ok">● T8 / PR CI PASS</span><span class="pill warn">stable build #4 PASS · tag pending</span><button class="btn" id="theme">☀ 切换主题</button><button class="btn" id="copyOverview">复制现状</button><button class="btn accent" id="downloadJSON">导出 JSON</button></div></div><h1>仓库收尾完成：Pages 已使用 main/docs，远端只保留 main。</h1><p class="intro">PR #22 与验收证据已归档到 main，公开 dashboard 已由 main/docs 部署。T8/T10/T11a/T11b PASS；T3 PARTIAL；v0.210.0 稳定候选 build #4 在 d62b2cf 上 330/330 PASS，tag 与正式发布待完成。</p>
+<section id="page-overview" class="view active"><div class="hero"><div class="kicker" style="color:#94ddd5">CURRENT PROJECT CLOSEOUT · 2026-10-21</div><h2 id="heroTitle"></h2><p id="heroText"></p><div class="tags"><span class="pill ok">PR #22 merged</span><span class="pill ok">T8 330/330 PASS</span><span class="pill ok">T10 14/14 · 39 screenshots</span><span class="pill warn">T3 PARTIAL</span></div></div><div class="sectionhead"><h2>合并后收尾状态 · 2026-10-21</h2><small>v0.210.0 稳定候选 build #4 PASS；tag 与正式发布待完成</small></div><div id="executionPanel"></div><div class="stats" id="stats"></div><div class="sectionhead"><h2>当前状态</h2><small>候选验收与仓库收尾均已完成</small></div><div class="pane"><div class="lanes"><div class="trackname">候选验收 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">1981a94</span><span class="arrow">→</span><span class="trackbox passed">T8 330/330</span><span class="arrow">→</span><span class="trackbox passed">T10 14/14</span><span class="arrow">→</span><span class="trackbox passed">T11a / T11b</span><span class="arrow">→</span><span class="trackbox passed">PR #22 merged</span></div><p class="meta">T11b 使用同 SHA 本地 installer；CI 未上传 T11b installer。稳定候选 build #4 在 d62b2cf 上 330/330 PASS，已上传 candidate artifact；v0.210.0 tag 与正式发布待完成。</p></div><div class="trackname">分支收敛 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">Pages → main/docs</span><span class="arrow">→</span><span class="trackbox passed">公开看板已核验</span><span class="arrow">→</span><span class="trackbox passed">仅保留 main</span></div><p class="meta">收尾已完成。未创建归档 tag；6 个已删除分支的独有 commit 历史未永久锚定，具体 head 见下方收尾记录。</p></div></div></div><div class="sectionhead"><h2>收尾与发布门禁</h2><small>查看各阶段证据与尚未授权的操作</small></div><div class="gategrid" id="gateCards"></div><div id="gatePreview"></div><div class="sectionhead"><h2>下一步执行焦点</h2><small>由真实阻塞而不是操作日志决定优先级</small></div><div class="two"><div class="pane"><div class="p-title">当前收尾工作 <span class="pill warn">IN PROGRESS</span></div><ul id="focusTodos" class="cleanlist"></ul></div><div class="pane"><div class="p-title">合并完成后还剩什么？</div><p id="focusWhy" class="meta" style="font-size:12px;line-height:1.9"></p><div class="caution" id="focusBlocked"></div></div></div></section>
+<section id="page-roadmap" class="view"><div class="sectionhead"><h2>验收关口与后续动作</h2><small>分支收敛已完成；稳定候选已通过，tag/发布待完成</small></div><div class="gategrid" id="roadmapCards"></div><div class="details" id="roadmapDetail"></div><div class="sectionhead"><h2>并行与合流规则</h2><small>避免多个云任务同时修改事务核心</small></div><div class="tasks" id="parallelBlocks"></div><div class="sectionhead"><h2>仓库收尾结果</h2><small>GitHub 状态复核 · 2026-10-21</small></div><div class="pane"><p><strong>Pages.</strong> GitHub Pages source 已设为 <code>main /docs</code>；部署成功，公开 dashboard 刷新后可正常加载。</p><p><strong>Branches.</strong> 远端活动分支只剩 <code>main</code>；其余 10 个分支引用已删除。</p><p><strong>PR / Issue.</strong> PR #22 已合并，PR #21 已关闭，当前没有 open PR；Issue #6 已关闭。</p><p><strong>历史保留.</strong> 本轮未创建归档 tag。6 个已删除分支有独有 commit 历史，head 与 ahead 数量记录在本页仓库数据中，但未被 tag 永久锚定；如需找回特定 head，请先检查 GitHub 删除分支的恢复入口是否仍可用，恢复后立即建立归档 ref。</p><p><strong>发布.</strong> 稳定候选 build #4 已通过（330/330，source d62b2cf）；当前尚未创建 v0.210.0 tag 或 Release，publish-release workflow 也未 dispatch。T12 为 <code>PARTIAL</code>。</p></div></section>
 <section id="page-tasks" class="view"><div class="sectionhead"><h2>7 项合并收尾工作</h2><small>只展示当前 PR、分支、Issue 与发布收尾事项</small></div><div class="filters"><input class="field search" id="taskSearch" placeholder="搜索编号、标题、模块或下一步"><select class="field" id="taskFilter"><option value="all">全部状态</option><option value="BLOCKED">BLOCKED</option><option value="FAIL">FAIL</option><option value="PASS">PASS</option><option value="NOT_RUN">NOT_RUN</option><option value="PARTIAL">PARTIAL</option><option value="PATCH_TESTED">PATCH_TESTED</option><option value="EA_CI_PASS">EA_CI_PASS</option><option value="PENDING">PENDING</option><option value="OPEN">OPEN</option></select><select class="field" id="taskWave"><option value="all">全部波次</option><option>W0</option><option>W1</option><option>W2</option><option>W3</option><option>W4</option><option>W5</option></select></div><p id="taskCount" class="tasks-note"></p><div class="tasks" id="taskList"></div></section>
-<section id="page-evidence" class="view"><div class="sectionhead"><h2>CI / 质量证据</h2><small>只显示与仓库可追溯的真实结果</small></div><div class="evidence" id="ciPanels"></div><div class="sectionhead"><h2>状态与 GitHub 原始证据</h2><small>以 PR、Run、Issue 和具体 SHA 为准</small></div><div class="pane refs" id="refs"></div><div class="sectionhead"><h2>提交指纹</h2></div><pre id="shaPanel" class="codeish"></pre><div class="caution" style="margin-top:15px">T8/T10/T11a/T11b 已通过并合并；T11b 安装验收使用同 SHA 本地安装包，CI 未上传 artifact。尚未创建 tag 或 Release；T12 需要明确 GO。</div></section>
+<section id="page-evidence" class="view"><div class="sectionhead"><h2>CI / 质量证据</h2><small>只显示与仓库可追溯的真实结果</small></div><div class="evidence" id="ciPanels"></div><div class="sectionhead"><h2>状态与 GitHub 原始证据</h2><small>以 PR、Run、Issue 和具体 SHA 为准</small></div><div class="pane refs" id="refs"></div><div class="sectionhead"><h2>提交指纹</h2></div><pre id="shaPanel" class="codeish"></pre><div class="caution" style="margin-top:15px">T8/T10/T11a/T11b 已通过并合并；T11b 实机验收使用同 SHA 本地安装包。Stable candidate build #4 在 d62b2cf 上 330/330 PASS；v0.210.0 tag 与 Release 尚未创建。</div></section>
 <section id="page-risk" class="view"><div class="sectionhead"><h2>阻塞与风险</h2><small>只保留对发布/数据安全有实际影响的事项</small></div><div class="riskgrid" id="riskGrid"></div><div class="sectionhead"><h2>发布前必须满足的门禁</h2></div><div id="riskGates" class="details"></div></section>
 <section id="page-history" class="view"><div class="sectionhead"><h2>Focus 演进：从 G0 保全到真实 CI</h2><small>点击状态快照看“为什么改变”，不是让动画伪装进度</small></div><div class="revgrid" id="revisions"></div><div class="filters"><button class="btn" id="prevRev">← 上一版</button><input type="range" id="revSlider" min="0" max="7" value="7" style="flex:1;accent-color:var(--teal)" aria-label="历史快照选择"><button class="btn" id="nextRev">下一版 →</button><button class="btn" id="playRevs">▶ 播放</button></div><div id="revisionDetail" class="details"></div><div class="sectionhead"><h2>状态更新原则</h2></div><div class="caution">下一轮只追加有明确 commit / 测试日志 / 文件哈希 / 验收签字的事实；历史快照不被覆盖。黄色表示待验收，不代表不通过；绿色仅用于证据支持的具体测试或交付项。不要用一项成功的 CI 代替其他安全门禁。</div></section>
-<footer class="foot"><div class="footer-status"><span class="pill ok">T8/T10/T11a/T11b PASS · T3 PARTIAL · T12 NOT_RUN</span><span>Snapshot: <span id="footDate"></span></span><span>Offline read-only</span></div><div class="flex"><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer" target="_blank" rel="noopener">GitHub 仓库 ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22" target="_blank" rel="noopener">PR #22 ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669811" target="_blank" rel="noopener">Windows CI ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669881" target="_blank" rel="noopener">Packaging CI ↗</a></div><p>本页面由静态状态快照构建，没有 GitHub 写权限，也不会自动更新远端。每轮更新请先重新核对事实再重建。</p></footer></main></div><div class="toast" id="toast" aria-live="polite"></div><script type="application/json" id="project-data">{
+<footer class="foot"><div class="footer-status"><span class="pill ok">T8/T10/T11a/T11b PASS · T3 PARTIAL · v0.210.0 build PASS · T12 PARTIAL</span><span>Snapshot: <span id="footDate"></span></span><span>Offline read-only</span></div><div class="flex"><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer" target="_blank" rel="noopener">GitHub 仓库 ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22" target="_blank" rel="noopener">PR #22 ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669811" target="_blank" rel="noopener">Windows CI ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669881" target="_blank" rel="noopener">Packaging CI ↗</a></div><p>本页面由静态状态快照构建，没有 GitHub 写权限，也不会自动更新远端。每轮更新请先重新核对事实再重建。</p></footer></main></div><div class="toast" id="toast" aria-live="polite"></div><script type="application/json" id="project-data">{
   "name": "BiliFavOrganizer",
   "version": "Status Console V5.3",
   "snapshot_date": "2026-10-21",
-  "snapshot_kind": "closeout complete; Pages main/docs live; only main branch remains; T8/T10/T11a/T11b PASS; T3 PARTIAL; T12 NOT_RUN",
-  "headline": "仓库收尾完成：GitHub Pages 已从 main/docs 提供，远端活动分支只剩 main。PR #22 已合并；T8/T10/T11a/T11b PASS，T3 PARTIAL，T12 NOT_RUN。Issue #6 已关闭；没有创建发布 tag、Release 或触发发布 workflow。",
-  "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / T12 NOT_RUN / PAGES main/docs / ONLY MAIN BRANCH",
+  "snapshot_kind": "closeout complete; Pages main/docs live; only main branch remains; T8/T10/T11a/T11b PASS; T3 PARTIAL; stable v0.210.0 candidate build #4 PASS; T12 PARTIAL pending tag and publish workflow",
+  "headline": "仓库收尾完成：GitHub Pages 已由 main/docs 提供，远端仅保留 main。T8/T10/T11a/T11b PASS，T3 PARTIAL；v0.210.0 稳定候选构建 #4 已在 d62b2cf 上通过（330/330），tag 与正式发布 workflow 待执行。",
+  "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / stable build #4 PASS @ d62b2cf / T12 PARTIAL (tag and publish pending) / PAGES main/docs / ONLY MAIN BRANCH",
   "repository": {
     "name": "Martin-soaring-dev/bili-fav-organizer",
     "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer",
@@ -284,9 +284,9 @@
       "title": "实机验收与发布",
       "status": "PARTIAL",
       "who": "T10 / T11b / T12",
-      "short": "T10 14/14、T11b 安装升级均 PASS；T12 尚未执行。",
-      "exit": "维护者明确授权后完成发布；发布前再次核对当前 main 与候选源码关系。",
-      "next": "等待明确 T12 GO；没有创建 tag、Release 或触发发布 workflow。",
+      "short": "T10 14/14、T11b 安装升级 PASS；v0.210.0 稳定候选构建 #4 在 d62b2cf 上通过 330/330；tag 与正式发布 workflow 尚未执行。",
+      "exit": "候选构建来源、tag 指向与六个附件通过 publish-release workflow 校验，并生成正式 Release。",
+      "next": "候选 run #4 成功（source_run_id 39510181199）；创建 v0.210.0 指向 d62b2cf 后，从 main dispatch publish-release。",
       "tasks": [
         "T10",
         "T11b",
@@ -295,15 +295,15 @@
     }
   ],
   "focus": {
-    "title": "仓库收尾已完成：Pages 使用 main/docs，远端只保留 main",
-    "scope": "PR #22 已合并到 main；GitHub Pages 使用 main/docs，公开页面已复核；远端活动分支仅 main，10 个非 main refs 已删除。",
-    "why": "T8、T10、T11a、T11b 已通过；T3 仍为 PARTIAL，T12 仍为 NOT_RUN 并需明确 GO。分支清理与 Pages 迁移已完成，Issue #6 已关闭。没有创建发布 tag、Release 或 dispatch 发布 workflow。",
+    "title": "稳定候选构建已通过：待创建 v0.210.0 tag 并发布",
+    "scope": "候选构建 #4 已从 main 的 d62b2cf 成功完成；v0.210.0 tag 尚不存在，publish-release workflow 尚未 dispatch。",
+    "why": "T8、T10、T11a、T11b 已通过；稳定候选构建 #4 为 330/330 PASS。T3 仍为 PARTIAL；T12 当前 PARTIAL，待 tag 和正式发布 workflow 完成。T9 已退出当前门禁。",
     "do_now": [
-      "T3 仍有按版本抽样、动态 CHECK 枚举和 schema<5 恢复/导出自动化缺口；如继续补齐，将产生新的代码提交并重跑受影响门禁。",
-      "T12 仍为 NOT_RUN；只有维护者明确 GO 后才执行发布。",
+      "T3 仍有按版本抽样、动态 CHECK 枚举和 schema<5 恢复/导出自动化缺口；这是后续测试覆盖事项。",
+      "候选构建 run #4 成功，source SHA 为 d62b2cf487edebc317202c7312440938ef036dd2；创建 v0.210.0 指向该 SHA，再以 source_run_id 39510181199 dispatch publish-release。",
       "Issue #6 已关闭；只有出现新的复现时才重新打开跟踪。"
     ],
-    "blocked": "仓库收尾已完成。发布仍需单独的 T12 GO；T3 PARTIAL 是未完成的独立改进项。"
+    "blocked": "v0.210.0 tag 尚未创建；publish-release workflow 需要先校验 tag 与候选 source SHA 一致，再校验六个构建附件并创建 Release。"
   },
   "parallel": [
     {
@@ -477,10 +477,10 @@
     {
       "id": "K12",
       "severity": "HIGH",
-      "title": "T12 发布尚未执行",
-      "impact": "没有 tag、Release 或发布 workflow dispatch。",
-      "owner": "维护者",
-      "action": "收到明确 GO 后再走 T12。"
+      "title": "T12 稳定候选构建已通过，tag 与正式发布待完成",
+      "impact": "stable candidate run #4 在 d62b2cf 上 330/330 PASS，构建附件已上传；目前没有 v0.210.0 tag、Release 或 publish-release workflow run。",
+      "owner": "发布流程",
+      "action": "让 v0.210.0 指向 d62b2cf487edebc317202c7312440938ef036dd2，再 dispatch publish-release，source_run_id=39510181199。"
     },
     {
       "id": "K13",
@@ -606,11 +606,11 @@
       "id": "C05",
       "title": "T12 Beta / stable 发布",
       "module": "Release",
-      "status": "NOT_RUN",
+      "status": "PARTIAL",
       "wave": "W5",
       "priority": "P1",
-      "detail": "尚未创建 tag、Release 或触发发布 workflow；需要维护者明确 GO。",
-      "next": "等待明确 GO。",
+      "detail": "稳定候选构建 #4 成功：330/330，source SHA d62b2cf，artifact 已上传；v0.210.0 tag 与正式 Release 尚未创建，publish-release workflow 尚未执行。",
+      "next": "创建 v0.210.0 指向 d62b2cf487edebc317202c7312440938，再从 main dispatch publish-release，source_run_id=39510181199。",
       "deps": [],
       "write": [],
       "accept": [
@@ -669,7 +669,7 @@
   },
   "execution_snapshot": {
     "date": "2026-10-21",
-    "hero_title": "仓库收尾完成：Pages 已切换到 main/docs，远端只保留 main",
+    "hero_title": "v0.210.0 稳定候选构建已通过；tag 与正式发布待完成",
     "candidate": {
       "baseline_sha": "ea4983d2bb9f6d8c0ea54faeddc790a9e096df63",
       "baseline_tree": "939a0607988524b7afec8097fde3e9acda4ec655",
@@ -678,7 +678,7 @@
       "other_local_sha_online": false,
       "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
-      "state": "PR #22 已合并；T8/T10/T11a/T11b PASS；T3 PARTIAL；T9 已退休；T12 NOT_RUN。Pages main/docs 构建成功，公开看板可读；远端活动分支仅 main。",
+      "state": "PR #22 已合并；T8/T10/T11a/T11b PASS；T3 PARTIAL；T9 已退出当前门禁。稳定候选 build #4 在 main 的 d62b2cf 上 330/330 PASS，artifact 已上传；v0.210.0 tag 与正式发布 workflow 待执行。",
       "parent_sha": "aa9dfb35033186fcb2e04db19cfbc250ecf37873",
       "branch_head_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "branch_head_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
@@ -724,6 +724,13 @@
         "sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
         "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669881",
         "scope": "packaged smoke passed; workflow did not upload installer"
+      },
+      {
+        "title": "Stable release candidate · run #4",
+        "value": "SUCCESS · 330/330 · artifact uploaded",
+        "sha": "d62b2cf487edebc317202c7312440938ef036dd2",
+        "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39510181199",
+        "scope": "workflow_dispatch · main · run #4 · release-candidate artifact"
       }
     ],
     "tasks": [
@@ -766,13 +773,13 @@
       {
         "id": "T12",
         "title": "Beta / stable 发布",
-        "status": "NOT_RUN",
-        "detail": "未创建 tag 或 Release，未 dispatch 发布 workflow；需维护者明确 GO。"
+        "status": "PARTIAL",
+        "detail": "stable candidate run #4 成功（330/330，source d62b2cf，artifact 已上传）；尚无 v0.210.0 tag 或 Release，publish-release workflow 未 dispatch。"
       }
     ],
     "next_actions": [
       "T3 仍有按版本抽样、动态 CHECK 枚举、schema<5 普通连接拒绝和人工恢复/导出自动化缺口。",
-      "T12 为 NOT_RUN；只有维护者明确 GO 后才开始发布流程。",
+      "稳定候选 build #4 已通过；创建 v0.210.0 指向 d62b2cf487edebc317202c7312440938ef036dd2，再 dispatch publish-release，source_run_id=39510181199。",
       "Issue #6 已关闭；若出现新的复现，再补充证据并重新打开跟踪。"
     ],
     "record": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md",
@@ -1096,7 +1103,20 @@
       "如果继续处理 T3，按剩余验收缺口单独安排代码与测试变更。",
       "发布须等到维护者明确给出 T12 GO。"
     ],
-    "blocked": "分支清理与 Pages 迁移已完成。T3 PARTIAL 是独立的测试覆盖改进项；T12 NOT_RUN 并需明确 GO。"
+    "blocked": "分支清理与 Pages 迁移已完成。T3 PARTIAL 是独立的测试覆盖改进项；T12 NOT_RUN 并需明确 GO。",
+    "stable_release_candidate": {
+      "tag": "v0.210.0",
+      "source_sha": "d62b2cf487edebc317202c7312440938ef036dd2",
+      "source_tree": "0a69559d2be9ddab98cb71af2bbadc2247697446",
+      "source_run_id": "39510181199",
+      "source_run_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39510181199",
+      "result": "success",
+      "tests": "330/330 · 0 skipped",
+      "artifact_id": "12305677053",
+      "artifact_size_bytes": 201887872,
+      "artifact_sha256": "3445f3411ec725c736c0ee3b0a8ed492c493733ba02fdef2cf04912679a9903d",
+      "next": "Create tag v0.210.0 at source SHA d62b2cf, then dispatch publish-release from main."
+    }
   }
 }</script><script>
 (()=>{'use strict';
@@ -1123,7 +1143,7 @@ function renderExecution(){
  const statusLabel={PARTIAL:'部分完成',BLOCKED:'阻塞',NOT_RUN:'未开始',PASS:'通过',RETIRED:'已移出当前门禁'};
  const rows=E.tasks.map(function(t){return '<tr><td><code>'+esc(t.id)+'</code></td><td><strong>'+esc(t.title)+'</strong></td><td>'+pill(t.status,statusLabel[t.status]||t.status)+'</td><td><p>'+esc(t.detail)+'</p></td></tr>'}).join('');
  const next=E.next_actions.map(function(x){return '<li>'+esc(x)+'</li>'}).join('');
- el('executionPanel').innerHTML='<div class="exec-layout"><div class="pane"><div class="p-title">当前结论 '+pill('BLOCKED','RC 等待 T12 授权')+'</div><p>'+esc(E.candidate.state)+'</p><p class="exec-caption">PR #22 merge commit '+esc(E.candidate.baseline_sha)+' · main docs snapshot '+esc(E.candidate.main_head_sha)+'</p><p class="exec-caption">'+esc(E.candidate.maintenance_worktree)+'。候选验收通过，PR #22 已合并。</p><div class="exec-note"><strong>验收平台：</strong>Windows 11。</div></div><div class="pane"><div class="p-title">隔离定向测试（分组统计）</div><div class="exec-test-grid">'+groups+'</div><p class="exec-caption">'+esc(E.count_note)+'</p></div></div><div class="pane"><div class="p-title">PR #22 在线证据</div><div class="exec-online">'+checks+'</div></div><div class="sectionhead"><h3>当前门禁与收尾状态</h3><small>灰色未开始；黄色部分完成；红色阻塞</small></div><div class="pane exec-table-wrap"><table class="exec-table"><thead><tr><th>ID</th><th>任务</th><th>状态</th><th>当前证据 / 剩余项</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="two" style="margin-top:14px"><div class="pane"><div class="p-title">下一步</div><ul class="exec-next">'+next+'</ul></div><div class="pane"><div class="p-title">验收路径</div><p class="exec-caption">候选 SHA/tree 固定 → Windows 回归和 UAT → PR checks → 隔离安装/升级 → 合并。仓库收尾已完成：Pages 使用 main/docs，活动分支只剩 main。未创建归档 tag，部分已删除分支的独有历史未永久锚定。T12 发布仍需明确 GO。</p></div></div>';
+ el('executionPanel').innerHTML='<div class="exec-layout"><div class="pane"><div class="p-title">当前结论 '+pill('PARTIAL','stable build #4 PASS · tag pending')+'</div><p>'+esc(E.candidate.state)+'</p><p class="exec-caption">PR #22 merge commit '+esc(E.candidate.baseline_sha)+' · main docs snapshot '+esc(E.candidate.main_head_sha)+'</p><p class="exec-caption">'+esc(E.candidate.maintenance_worktree)+'。候选验收通过，PR #22 已合并。</p><div class="exec-note"><strong>验收平台：</strong>Windows 11。</div></div><div class="pane"><div class="p-title">隔离定向测试（分组统计）</div><div class="exec-test-grid">'+groups+'</div><p class="exec-caption">'+esc(E.count_note)+'</p></div></div><div class="pane"><div class="p-title">GitHub Actions 在线证据</div><div class="exec-online">'+checks+'</div></div><div class="sectionhead"><h3>当前门禁与收尾状态</h3><small>灰色未开始；黄色部分完成；红色阻塞</small></div><div class="pane exec-table-wrap"><table class="exec-table"><thead><tr><th>ID</th><th>任务</th><th>状态</th><th>当前证据 / 剩余项</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="two" style="margin-top:14px"><div class="pane"><div class="p-title">下一步</div><ul class="exec-next">'+next+'</ul></div><div class="pane"><div class="p-title">验收路径</div><p class="exec-caption">候选 SHA/tree 固定 → Windows 回归和 UAT → PR checks → 隔离安装/升级 → 合并。仓库收尾已完成：Pages 使用 main/docs，活动分支只剩 main。未创建归档 tag，部分已删除分支的独有历史未永久锚定。稳定候选已构建；v0.210.0 tag 与正式发布 workflow 待完成。</p></div></div>';
 }
 renderExecution();
 function gates(){const make=(g,i)=>`<button class="gatecard ${S.stage===i?'selected':''}" data-stage="${i}"><span class="gnum">GATE ${g.id}</span><strong>${esc(g.title)}</strong><p>${esc(g.short)}</p>${pill(g.status)}</button>`;el('gateCards').innerHTML=D.stages.map(make).join('');el('roadmapCards').innerHTML=D.stages.map(make).join('');document.querySelectorAll('[data-stage]').forEach(x=>x.addEventListener('click',()=>{S.stage=Number(x.dataset.stage);gates()}));const g=D.stages[S.stage];const details=`<div class="detailtop"><div><div class="kicker">STAGE ${g.id} · ${esc(g.who)}</div><h3>${esc(g.title)}</h3></div>${pill(g.status)}</div><div class="detailbody"><div class="minibox"><div class="kicker">退出条件 / 验收</div><p>${esc(g.exit)}</p></div><div class="minibox"><div class="kicker">当前下一步</div><p>${esc(g.next)}</p></div></div><p class="meta">关联任务：${g.tasks.map(id=>`<code>${esc(id)}</code>`).join(' · ')}</p>`;el('gatePreview').innerHTML='<div class="details">'+details+'</div>';el('roadmapDetail').innerHTML=details;}
