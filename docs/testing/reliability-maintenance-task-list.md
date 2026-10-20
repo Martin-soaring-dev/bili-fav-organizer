@@ -1,13 +1,22 @@
 # 可靠性维护任务清单（供 Mimo Desktop 执行）
 
 **用途：**按本清单维护 `bili-fav-organizer`，逐项修复、测试、截图验收并汇报。它把 [维护计划](reliability-maintenance-plan.md) 转成可执行任务卡。
-**更新日期：**2026-10-19
+**更新日期：**2026-10-20
 **状态：**代码维护与复审进行中；未完成 Windows CI、Mimo 验收或发布审批，不代表 Beta 可发布。
 
 **交互看板：**既有项目状态页 `index(20261018-203653).html`（已合并本轮进度） · [最新执行记录](reliability-maintenance-execution-20261019.md)
 
 
 **Windows 本地交接：**目标分支 `feat/reliability-scheduler-implementation`；[本地 AI 验收提示词](local-ai-windows-acceptance-prompt.md)、代码、测试与本清单在同一交接提交中。准确候选 SHA 以交付消息与远端实际 HEAD 核验为准。旧离线包保留用于溯源，不能向新提交重复应用补丁。
+
+## 最新补充（2026-10-20，T3 版本契约与拒绝路径）
+
+本补充绑定代码提交 `aa9dfb35033186fcb2e04db19cfbc250ecf37873`（tree `8dcc6deddccffdeca6a89cd54b1a87c15976d672`，父提交 `c75a06bd008c9f546349f60c7e3a147c266dade2`），覆盖下方早期候选状态表中的 T3 和候选验收结论。
+
+- **T3：PASS（schema 契约与 fail-closed 恢复状态）。** 按 schema 5–8 逐版本校验已声明列、SQLite 声明类型和 NOT NULL；schema 8 校验 remote operation 与 scheduler 表中的全部 CHECK 约束。schema 4 被拒绝时，测试确认原库哈希不变、进入 `RECOVERY_REQUIRED`、普通连接被拒绝。拒绝后的人工恢复操作仍由维护者执行；本测试不伪称已恢复旧库。
+- **定向验证：** `python -m unittest tests.database.test_schema_migration tests.database.test_lifecycle`，42/42 通过；`python -m compileall -q store.py tests/database/test_schema_migration.py` 通过。验证在本地 Linux 临时工作目录完成，不涉及真实 profile。
+- **T8 / T10：** `c75a06b` 的 Windows 328/328 和 T10 14/14（39 张截图）只适用于父候选 `c75a06b`。它们不继承到 `aa9dfb3`；新候选尚无 Windows 全量回归或截图 UAT 记录，均为 **NOT_RUN**。本次没有触发 workflow。
+- **其他门禁：** T9 仍为 FAIL（维护者接受风险）；T11a 仍需 Draft PR 授权；T11b/T12 未获相应授权，保持未执行。c75a06b 的 328 项原始 Windows 日志仍未归档。
 
 ## 最新 Windows 回归：323 项，仅剩 owner 锁竞争失败（第三轮）
 
