@@ -1,15 +1,29 @@
 # 可靠性维护任务清单（供 Mimo Desktop 执行）
 
+## 合并后收尾状态（2026-10-21）
+
+- **当前主线：**PR [#22](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22) 已合并到 `main`。候选 `1981a94ed750d7be4e3404d6622ad776708f2091` 的 tree `e943cc30ebf0b6dffcf69866c01761fba9928b32` 已纳入 merge commit `903666a11f3914291f3352bd92e041eaa40f7ce5`。
+- **当前验收：**T8 Windows 全量回归 330/330 PASS；T10 实机 UAT 14/14 PASS、39 张截图；T11a PR checks PASS；T11b 隔离安装、schema 7→8 升级与重启验收 PASS。T11b 使用同 SHA 本地构建安装包；Beta CI 成功构建并通过 smoke，但未上传安装包 artifact。详见[验收报告](https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md)。
+- **T3：PARTIAL。**schema 5–8 契约及现有拒绝路径有证据；仍缺按版本抽样的类型/NOT NULL 变异、动态枚举 CHECK 的证伪测试，以及 schema<5 普通连接拒绝与人工恢复/导出路径自动化验证。
+- **T9：**维护者已将其从当前发布门禁中退休。旧只读审查仅作历史记录，不参与当前判定。
+- **T12：NOT_RUN。**本轮未创建 tag、Release 或发布；发布仍须维护者明确 GO。
+- **PR 清理：**旧 CI-only PR #21 已关闭。Issue [#6](https://github.com/Martin-soaring-dev/bili-fav-organizer/issues/6) 是未解决的收藏夹计数异常问题，不属于 PR #22 的实现范围，继续保持 open。
+- **当前看板：**[BiliFavOrganizer Delivery Console](https://martin-soaring-dev.github.io/bili-fav-organizer/)。
+
+本节为当前权威状态。下方较早的执行记录保留用于追溯，不能覆盖本节结论。
+
 **用途：**按本清单维护 `bili-fav-organizer`，逐项修复、测试、截图验收并汇报。它把 [维护计划](reliability-maintenance-plan.md) 转成可执行任务卡。
-**更新日期：**2026-10-20
-**状态：**代码维护与复审进行中；未完成 Windows CI、Mimo 验收或发布审批，不代表 Beta 可发布。
+**更新日期：**2026-10-21
+**状态：**候选已合并；T8/T10/T11a/T11b 已通过，T3 为 PARTIAL，T12 未执行。详细结论见上方“合并后收尾状态”。
 
-**交互看板：**既有项目状态页 `index(20261018-203653).html`（已合并本轮进度） · [最新执行记录](reliability-maintenance-execution-20261019.md)
+**交互看板：**[公开 Delivery Console](https://martin-soaring-dev.github.io/bili-fav-organizer/) · [T11b 安装与升级验收报告](https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md) · [历史执行记录](reliability-maintenance-execution-20261019.md)
 
 
-**Windows 本地交接：**目标分支 `feat/reliability-scheduler-implementation`；[本地 AI 验收提示词](local-ai-windows-acceptance-prompt.md)、代码、测试与本清单在同一交接提交中。准确候选 SHA 以交付消息与远端实际 HEAD 核验为准。旧离线包保留用于溯源，不能向新提交重复应用补丁。
+**历史 Windows 本地交接：**其目标分支 `feat/reliability-scheduler-implementation` 已并入 `main`；[本地 AI 验收提示词](local-ai-windows-acceptance-prompt.md)、代码、测试与本清单在同一交接提交中。准确候选 SHA 以交付消息与远端实际 HEAD 核验为准。旧离线包保留用于溯源，不能向新提交重复应用补丁。
 
-## 最新补充（2026-10-20，T3 版本契约与拒绝路径）
+## 历史记录（2026-10-20，T3 版本契约与拒绝路径；由上方合并后状态覆盖）
+
+> 此处只记录当时的验证状态。T3 最终维持 PARTIAL；T8/T10 与 T11a/T11b 已在后续验收完成，见上方当前状态与证据报告。
 
 本补充绑定代码提交 `aa9dfb35033186fcb2e04db19cfbc250ecf37873`（tree `8dcc6deddccffdeca6a89cd54b1a87c15976d672`，父提交 `c75a06bd008c9f546349f60c7e3a147c266dade2`），覆盖下方早期候选状态表中的 T3 和候选验收结论。
 
