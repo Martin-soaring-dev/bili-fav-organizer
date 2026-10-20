@@ -12,7 +12,7 @@
 
 本节为当前权威状态。下方较早的执行记录保留用于追溯，不能覆盖本节结论。
 
-**分支收敛状态（远端复核：2026-10-21）：**目标是最终只保留 `main`。当前远端有 11 个分支，其中 10 个非 `main` 分支；PR #22 已合并、PR #21 已关闭，目前没有打开的 PR。候选、两条 evidence 分支的报告/日志/截图均已归档到 main，验收链接已指向 main；`feat/reliability-scheduler-implementation`、`docs/reliability-scheduler-refactor-plan`、`fix/vault-active-work-barrier`、`master` 均无 main 独有提交，可清理。`ci/ea-playwright-full-regression-20261019` 的 6 个独有提交中，workflow 改动已被 main 更新版本覆盖；`maintenance/release-pipeline-post-v0209`（3 个独有提交，head `c4e1d79616abd45c8a7776125ecabb6893271e52`）与 `new_arch`（1 个独有提交，head `52d4f9e5a898a7013724da215cf0caf18b6d7dab`）包含未合入内容。为保留完整历史，清理前应将这三条分支 head 保存为 `archive/*` 标签；这些是归档标签，不是发布标签。公开看板已复制到 `main/docs/index.html`，但 Pages 当前仍依赖 `gh-pages`：切换 Pages source 到 `main` 的 `/docs` 并在线确认成功后，再删除 `gh-pages`。最后删除其余 9 条非 main branch refs，并复核分支列表只剩 `main`。
+**分支收敛状态（远端复核：2026-10-21）：**目标是最终只保留 `main`。当前远端有 11 个分支，其中 10 个非 `main` 分支；PR #22 已合并、PR #21 已关闭，目前没有打开的 PR。候选、两条 evidence 分支的报告/日志/截图均已归档到 main，验收链接已指向 main；`feat/reliability-scheduler-implementation`、`docs/reliability-scheduler-refactor-plan`、`fix/vault-active-work-barrier`、`master` 均无 main 独有提交，可清理。`ci/ea-playwright-full-regression-20261019` 的 6 个独有提交中，workflow 改动已被 main 更新版本覆盖；`maintenance/release-pipeline-post-v0209`（3 个独有提交，head `c4e1d79616abd45c8a7776125ecabb6893271e52`）与 `new_arch`（1 个独有提交，head `52d4f9e5a898a7013724da215cf0caf18b6d7dab`）包含未合入内容。为保留完整历史，清理前应将这三条分支 head 保存为 `archive/*` 标签；这些是归档标签，不是发布标签。公开看板已复制到 `main/docs/index.html`，但 Pages 当前仍依赖 `gh-pages`：切换 Pages source 到 `main` 的 `/docs` 并在线确认成功后，再删除 `gh-pages`。最后删除全部 10 条非 main branch refs，并复核分支列表只剩 `main`。
 
 **用途：**按本清单维护 `bili-fav-organizer`，逐项修复、测试、截图验收并汇报。它把 [维护计划](reliability-maintenance-plan.md) 转成可执行任务卡。
 **更新日期：**2026-10-21（分支盘点补充）
