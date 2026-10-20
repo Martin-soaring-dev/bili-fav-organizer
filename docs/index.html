@@ -6,7 +6,7 @@
 .exec-layout{display:grid;grid-template-columns:1.05fr 1fr;gap:14px;margin:0 0 14px}.exec-test-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:9px;margin-top:12px}.exec-test{padding:11px;border:1px solid rgba(135,165,185,.22);border-radius:12px;background:rgba(127,154,176,.06)}.exec-test strong{display:block;font-size:19px;color:var(--teal);margin-bottom:4px}.exec-test span,.exec-test small{display:block}.exec-test small{color:var(--muted);margin-top:5px;line-height:1.45}.exec-online{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}.exec-online a{font-weight:700}.exec-online p{margin:6px 0;line-height:1.55}.exec-table-wrap{overflow:auto;margin-top:10px}.exec-table{width:100%;border-collapse:collapse;min-width:790px}.exec-table th,.exec-table td{text-align:left;padding:9px 10px;border-bottom:1px solid rgba(135,165,185,.2);vertical-align:top}.exec-table th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.exec-table td:nth-child(1){white-space:nowrap}.exec-next{margin:6px 0 0;padding-left:20px;line-height:1.75}.exec-note{margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid rgba(224,176,92,.25);background:rgba(224,176,92,.07);line-height:1.65}.exec-caption{font-size:12px;color:var(--muted);line-height:1.6}.exec-table td p{margin:0;line-height:1.55}@media(max-width:850px){.exec-layout{grid-template-columns:1fr}}
 </style></head><body><div class="app"><aside class="sidebar"><div class="logo"><div class="mark">B</div><div><strong>BiliFavOrganizer</strong><small>DELIVERY CONSOLE · V5</small></div></div><div><div class="navlabel">PROJECT WORKSPACE</div><nav class="nav" id="nav"><button class="active" data-page="overview"><span class="num">01</span>项目总览</button><button data-page="roadmap"><span class="num">02</span>路线图与合流</button><button data-page="tasks"><span class="num">03</span>任务与 Codex</button><button data-page="evidence"><span class="num">04</span>CI / 证据</button><button data-page="risk"><span class="num">05</span>风险与门禁</button><button data-page="history"><span class="num">06</span>Focus 演进</button></nav></div><div class="sidefoot"><strong id="sideVersion">状态快照 · 2026-10-19</strong><div>已验证与未完成严格分离。</div><div>HTML 离线可用 · 不自动同步 GitHub</div><div id="sideGit"></div></div></aside><main class="main"><div class="top"><div class="kicker">PROJECT INTELLIGENCE / RELEASE READINESS</div><div class="tools"><span class="pill ok">● T8 / PR CI PASS</span><span class="pill warn">RC 等待 T12 授权</span><button class="btn" id="theme">☀ 切换主题</button><button class="btn" id="copyOverview">复制现状</button><button class="btn accent" id="downloadJSON">导出 JSON</button></div></div><h1>候选验收通过，主线已合并；进入仓库收尾阶段。</h1><p class="intro">首页汇总已合并候选的验收、仍开放的问题，以及将远端分支收敛至 main 前必须保全的内容。</p>
 <section id="page-overview" class="view active"><div class="hero"><div class="kicker" style="color:#94ddd5">CURRENT PROJECT CLOSEOUT · 2026-10-21</div><h2 id="heroTitle"></h2><p id="heroText"></p><div class="tags"><span class="pill ok">PR #22 merged</span><span class="pill ok">T8 330/330 PASS</span><span class="pill ok">T10 14/14 · 39 screenshots</span><span class="pill warn">T3 PARTIAL</span></div></div><div class="sectionhead"><h2>合并后收尾状态 · 2026-10-21</h2><small>候选 1981a94 已并入 main；T12 发布尚未执行</small></div><div id="executionPanel"></div><div class="stats" id="stats"></div><div class="sectionhead"><h2>当前状态</h2><small>已合并候选与 branch consolidation 计划</small></div><div class="pane"><div class="lanes"><div class="trackname">候选验收 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">1981a94</span><span class="arrow">→</span><span class="trackbox passed">T8 330/330</span><span class="arrow">→</span><span class="trackbox passed">T10 14/14</span><span class="arrow">→</span><span class="trackbox passed">T11a / T11b</span><span class="arrow">→</span><span class="trackbox passed">PR #22 merged</span></div><p class="meta">T11b 使用同 SHA 本地 installer；Beta CI artifact 未上传。T3 保持 PARTIAL；T12 等待明确 GO。</p></div><div class="trackname">分支收敛 →</div><div class="track future"><div class="trackbar"><span class="trackbox passed">main 已含候选</span><span class="arrow">→</span><span class="trackbox next">迁移 Pages</span><span class="arrow">→</span><span class="trackbox">归档 evidence / unique commits</span><span class="arrow">→</span><span class="trackbox">仅保留 main</span></div><p class="meta">先保全公开看板、验收证据与非 main 独有提交，再删除其他分支。</p></div></div></div><div class="sectionhead"><h2>收尾与发布门禁</h2><small>查看各阶段证据与尚未授权的操作</small></div><div class="gategrid" id="gateCards"></div><div id="gatePreview"></div><div class="sectionhead"><h2>下一步执行焦点</h2><small>由真实阻塞而不是操作日志决定优先级</small></div><div class="two"><div class="pane"><div class="p-title">当前收尾工作 <span class="pill warn">IN PROGRESS</span></div><ul id="focusTodos" class="cleanlist"></ul></div><div class="pane"><div class="p-title">合并完成后还剩什么？</div><p id="focusWhy" class="meta" style="font-size:12px;line-height:1.9"></p><div class="caution" id="focusBlocked"></div></div></div></section>
-<section id="page-roadmap" class="view"><div class="sectionhead"><h2>验收关口与后续动作</h2><small>T12 需要明确 GO；分支删除前先迁移独有数据</small></div><div class="gategrid" id="roadmapCards"></div><div class="details" id="roadmapDetail"></div><div class="sectionhead"><h2>并行与合流规则</h2><small>避免多个云任务同时修改事务核心</small></div><div class="tasks" id="parallelBlocks"></div><div class="sectionhead"><h2>分支收敛顺序</h2><small>保全内容后再删除远端 refs</small></div><div class="pane"><p><strong>1.</strong> 将公开看板从 <code>gh-pages</code> 迁移到 main 来源并验证线上页面。</p><p><strong>2.</strong> 将 T8/T10/T11b 报告、日志与截图迁移到 main 的证据归档。</p><p><strong>3.</strong> 审阅 CI 与 release-pipeline 分支的独有提交，确认已保存在 main 或可恢复归档。</p><p><strong>4.</strong> 删除其余远端 branch refs，最终核对仅剩 <code>main</code>。</p><p class="meta">feature/docs/fix/master 无 main 独有提交；CI workflow 已被 main 更新覆盖。gh-pages、evidence、maintenance 与 new_arch 需先迁移或决定如何保留。</p></div></section>
+<section id="page-roadmap" class="view"><div class="sectionhead"><h2>验收关口与后续动作</h2><small>T12 需要明确 GO；分支删除前先迁移独有数据</small></div><div class="gategrid" id="roadmapCards"></div><div class="details" id="roadmapDetail"></div><div class="sectionhead"><h2>并行与合流规则</h2><small>避免多个云任务同时修改事务核心</small></div><div class="tasks" id="parallelBlocks"></div><div class="sectionhead"><h2>分支收敛顺序</h2><small>保全内容后再删除远端 refs</small></div><div class="pane"><p><strong>1.</strong> 将公开看板从 <code>gh-pages</code> 迁移到 main 来源并验证线上页面。</p><p><strong>2.</strong> T8/T10/T11b 报告、日志与截图已迁入 main 的证据归档；复核后删除 evidence refs。</p><p><strong>3.</strong> 审阅 release-pipeline 与 new_arch 的独有提交，决定迁入 main 或舍弃。</p><p><strong>4.</strong> 删除其余远端 branch refs，最终核对仅剩 <code>main</code>。</p><p class="meta">feature/docs/fix/master 无 main 独有提交；CI workflow 已被 main 更新覆盖；evidence 已迁入 main。gh-pages 需切换 Pages 来源；maintenance 与 new_arch 需处置独有代码。</p></div></section>
 <section id="page-tasks" class="view"><div class="sectionhead"><h2>7 项合并收尾工作</h2><small>只展示当前 PR、分支、Issue 与发布收尾事项</small></div><div class="filters"><input class="field search" id="taskSearch" placeholder="搜索编号、标题、模块或下一步"><select class="field" id="taskFilter"><option value="all">全部状态</option><option value="BLOCKED">BLOCKED</option><option value="FAIL">FAIL</option><option value="PASS">PASS</option><option value="NOT_RUN">NOT_RUN</option><option value="PARTIAL">PARTIAL</option><option value="PATCH_TESTED">PATCH_TESTED</option><option value="EA_CI_PASS">EA_CI_PASS</option><option value="PENDING">PENDING</option><option value="OPEN">OPEN</option></select><select class="field" id="taskWave"><option value="all">全部波次</option><option>W0</option><option>W1</option><option>W2</option><option>W3</option><option>W4</option><option>W5</option></select></div><p id="taskCount" class="tasks-note"></p><div class="tasks" id="taskList"></div></section>
 <section id="page-evidence" class="view"><div class="sectionhead"><h2>CI / 质量证据</h2><small>只显示与仓库可追溯的真实结果</small></div><div class="evidence" id="ciPanels"></div><div class="sectionhead"><h2>状态与 GitHub 原始证据</h2><small>以 PR、Run、Issue 和具体 SHA 为准</small></div><div class="pane refs" id="refs"></div><div class="sectionhead"><h2>提交指纹</h2></div><pre id="shaPanel" class="codeish"></pre><div class="caution" style="margin-top:15px">T8/T10/T11a/T11b 已通过并合并；T11b 安装验收使用同 SHA 本地安装包，CI 未上传 artifact。尚未创建 tag 或 Release；T12 需要明确 GO。</div></section>
 <section id="page-risk" class="view"><div class="sectionhead"><h2>阻塞与风险</h2><small>只保留对发布/数据安全有实际影响的事项</small></div><div class="riskgrid" id="riskGrid"></div><div class="sectionhead"><h2>发布前必须满足的门禁</h2></div><div id="riskGates" class="details"></div></section>
@@ -16,12 +16,12 @@
   "version": "Status Console V5.2",
   "snapshot_date": "2026-10-21",
   "snapshot_kind": "post-merge closeout; PR #22 merged; T8/T10/T11a/T11b PASS; T3 PARTIAL; T12 NOT_RUN; branch consolidation to main pending safe migration",
-  "headline": "PR #22 已合并到 main（merge commit 903666a；main 收尾文档同步提交 7c81c38）。候选 1981a94 的 T8 330/330、T10 14/14（39 张截图）、T11a PR checks、T11b 隔离安装与 schema 7→8 升级均 PASS。T11b 使用同 SHA 本地构建安装包；CI packaging 通过 smoke 但未上传 artifact。T3 维持 PARTIAL；T9 已从当前门禁退休；T12 尚未执行，需明确 GO。旧 PR #21 已关闭。",
+  "headline": "PR #22 已合并到 main（merge commit 903666a；main 收尾与 evidence 同步提交 9cc4187）。候选 1981a94 的 T8 330/330、T10 14/14（39 张截图）、T11a PR checks、T11b 隔离安装与 schema 7→8 升级均 PASS。T11b 使用同 SHA 本地构建安装包；CI packaging 通过 smoke 但未上传 artifact。T3 维持 PARTIAL；T9 已从当前门禁退休；T12 尚未执行，需明确 GO。旧 PR #21 已关闭。",
   "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / T12 NOT_RUN",
   "repository": {
     "name": "Martin-soaring-dev/bili-fav-organizer",
     "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer",
-    "main_sha": "7c81c3832a926b8312e7a5916af123256053c7bd",
+    "main_sha": "9cc4187eac3761df39be760096c1398eedcaee87",
     "ea_branch": "feat/reliability-scheduler-implementation",
     "ea_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
     "ci_branch": "ci/ea-playwright-full-regression-20261019",
@@ -68,25 +68,26 @@
     },
     "branch_goal": "仅保留 main；需先迁移 GitHub Pages、证据和非 main 独有提交",
     "branch_cleanup": {
-      "status": "PENDING_MIGRATION",
-      "safe_to_remove_after_cleanup": [
+      "status": "PENDING_PAGES_AND_UNIQUE_CODE",
+      "safe_to_remove_after_verification": [
         "feat/reliability-scheduler-implementation",
         "docs/reliability-scheduler-refactor-plan",
         "fix/vault-active-work-barrier",
         "master",
-        "ci/ea-playwright-full-regression-20261019"
+        "ci/ea-playwright-full-regression-20261019",
+        "evidence/windows-t10-uat-20261020",
+        "evidence/windows-owner-lock-20261020"
       ],
       "preserve_until_migrated_or_decided": [
         "gh-pages",
-        "evidence/windows-t10-uat-20261020",
-        "evidence/windows-owner-lock-20261020",
         "maintenance/release-pipeline-post-v0209",
         "new_arch"
       ],
-      "note": "feature/docs/fix/master 均无 main 独有提交；CI 分支的两份 workflow 修改已被 main 中更严格版本取代，PR #21 保留其历史。gh-pages 承载公开看板；evidence 分支承载验收材料；maintenance 与 new_arch 含未合并独有内容。迁移/归档或明确舍弃前不要删除这些 refs。"
+      "note": "证据目录已复制到 main（commit d74bdb9）并且任务清单链接已更新。gh-pages 仍承载线上页面；release-pipeline 与 new_arch 含 main 未有独有代码。Pages 切换验证及独有代码处置完成后再删剩余 refs。"
     },
-    "dashboard_main_snapshot_sha": "7c81c3832a926b8312e7a5916af123256053c7bd",
-    "dashboard_path_on_main": "docs/index.html"
+    "dashboard_main_snapshot_sha": "9cc4187eac3761df39be760096c1398eedcaee87",
+    "dashboard_path_on_main": "docs/index.html",
+    "evidence_archive_commit": "d74bdb9c0d7a15860dbe5f39e2b67a4a9d6ed093"
   },
   "metrics": [
     {
@@ -212,12 +213,12 @@
   ],
   "focus": {
     "title": "PR #22 已并入 main；当前做分支收尾与发布边界确认",
-    "scope": "候选 1981a94 → merge commit 903666a；状态与分支计划同步至 main 文档提交 7c81c38；dashboard 已准备迁入 main/docs",
+    "scope": "候选 1981a94 → merge commit 903666a；evidence 归档与分支计划同步至 main 9cc4187e；dashboard 已准备迁入 main/docs",
     "why": "T8、T10、T11a、T11b 已在同一候选源码上通过；T3 保持 PARTIAL，已明确剩余覆盖缺口且不阻断本次合并。T9 已移出当前发布门禁。仍需把非 main 分支的独有内容与 Pages 看板迁移/归档后，才能安全达成只保留 main 的目标；Issue #6 是独立未解决问题。T12 仍需明确 GO。",
     "do_now": [
-      "将公开 dashboard 迁移到 main 并验证 Pages 来源，之后删除 gh-pages。",
-      "将 evidence 分支中的验收报告、日志与截图归档到 main，更新其引用后再删 evidence refs。",
-      "确认 maintenance/release-pipeline 与 new_arch 的独有内容如何保留或舍弃。",
+      "切换 GitHub Pages 到 main/docs 并在线验证，之后删除 gh-pages。",
+      "验收证据已复制到 main/docs/testing/evidence 并更新 task list；复核后可删除两个 evidence refs。",
+      "审阅 maintenance/release-pipeline 与 new_arch 的独有代码，迁入 main 或明确舍弃后再删分支。",
       "保持 Issue #6 open；只有维护者明确 GO 后才执行 T12。"
     ],
     "blocked": "PR #22 已成功合并；当前唯一未执行的发布动作是等待明确 T12 GO。只留 main 需要先迁移 Pages、验收证据及非 main 独有提交。"
@@ -245,7 +246,7 @@
         "ci/*",
         "maintenance/*"
       ],
-      "note": "feature/docs/fix/master 分支没有 main 独有提交；CI workflow 修改已被 main 中更严格版本取代。gh-pages、evidence、maintenance/release-pipeline 和 new_arch 需迁移或明确处置后才能删除。"
+      "note": "验收报告、日志与截图已归档在 main/docs/testing/evidence，两个 evidence refs 可在链接复核后删除。gh-pages 承载线上看板；maintenance/release-pipeline 和 new_arch 有 main 未合入的独有代码。"
     },
     {
       "title": "未关闭的独立事项",
@@ -320,7 +321,7 @@
       "kind": "实机执行 / 部分验收",
       "focus": "候选 c75a06b；真实 Chromium 本地 UI；证据独立推送",
       "change": "证据提交 5fb3151e；发现 T10-03 两截图同 blob，要求补采；目标分支仍在 c75a06b。",
-      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/screenshots"
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/main/docs/testing/evidence/20261020-windows-t10-uat/screenshots"
     },
     {
       "id": "S7",
@@ -329,7 +330,7 @@
       "kind": "远端证据核验",
       "focus": "只重采 T10-03；候选源码与目标分支不变",
       "change": "证据提交 3a63e169（父提交 5fb3151e，tree f24637f4）；12 个改动全部位于证据目录。stop-requested、after-stop、scan-running 三个截图 blob 不同；逐图核验界面与报告/JSON 一致。T10-14 仍 NOT_RUN，T10 整体 PARTIAL。",
-      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · commit 3a63e16921171f5b48729ab9a574672ebc7e4500"
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · commit 3a63e16921171f5b48729ab9a574672ebc7e4500"
     },
     {
       "id": "S8",
@@ -338,7 +339,7 @@
       "kind": "远端证据核验",
       "focus": "候选 c75a06b；证据提交 a317a77e；产品分支未移动",
       "change": "T10 更新为 14/14 PASS、39 张截图；T10-14 以 schema 7→8 迁移后的数据与 UI 结果验收通过，迁移过程 UI 不存在的限制如实保留。T9 管理员权限只读核验确认为 FAIL：Environment、main protection、rulesets、tag protection 缺失。候选分支仍在 c75a06b；T11a/T11b/T12 未完成。",
-      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md · commit a317a77e9533e9970a226ccbc2678fd9ea0f9f72"
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md · commit a317a77e9533e9970a226ccbc2678fd9ea0f9f72"
     },
     {
       "id": "S9",
@@ -347,7 +348,7 @@
       "kind": "候选更新 / Windows 回归 / 实机 UAT",
       "focus": "候选 c75a06b（tree be8cef37，parent 4baa66e）",
       "change": "T1 支持边界定为 schema 5–8，新增 v0.200/schema5 与 v0.203/schema6 历史夹具和 5→8/6→8 数据保全测试。Windows 全量回归报告 328/328 PASS，227.2 秒；T10 在新候选 14/14 PASS、39 张截图。T9 缺少发布保护，维护者接受风险但 T9 仍 FAIL；T3 部分结构契约/恢复路径、T11a/T11b/T12 未完成。远端证据包当前缺 328 项全量原始日志。",
-      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/c75a06bd008c9f546349f60c7e3a147c266dade2 · https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · T10 report commit 7cd6c49700b7ce3c31afcb4dcc9d71823828fccf · latest evidence branch HEAD 32a178cbee16ef5d69e35d6f9007f649f9215ec7"
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/c75a06bd008c9f546349f60c7e3a147c266dade2 · https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · T10 report commit 7cd6c49700b7ce3c31afcb4dcc9d71823828fccf · latest evidence branch HEAD 32a178cbee16ef5d69e35d6f9007f649f9215ec7"
     },
     {
       "id": "S10",
@@ -365,7 +366,7 @@
       "kind": "Windows 候选验收",
       "focus": "候选 1981a94 · T8 330/330、T10 14/14 PASS",
       "change": "同一候选 SHA 上完成 Windows 全量回归 330/330（0 FAIL/ERROR/SKIP，219.6s）及 T10 实机 UAT 14/14（39 张截图，255.9s）。T9 仍 FAIL（风险已接受），发布 等待 T12 授权。T3 任务清单补充为 PASS、验收报告为 PARTIAL，需统一验收口径。",
-      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md · T8 日志 https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt"
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md · T8 日志 https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt"
     },
     {
       "id": "S12",
@@ -406,9 +407,9 @@
       "id": "K13",
       "severity": "MEDIUM",
       "title": "非 main 独有内容需迁移后再删分支",
-      "impact": "gh-pages 承载看板；evidence 分支承载验收材料；maintenance/release-pipeline 与 new_arch 有 main 不含的独有提交。直接删除这些 refs 会中断看板或丢失证据/代码。",
+      "impact": "公开 dashboard 仍由 gh-pages 提供；maintenance/release-pipeline 与 new_arch 仍有 main 未包含的独有代码。验收 evidence 已迁入 main/docs/testing/evidence。",
       "owner": "仓库维护者",
-      "action": "迁移 Pages 和证据，审阅/归档独有提交，然后清理远端 refs。"
+      "action": "切换 Pages 来源并验证；对两条含独有代码的分支做迁入或舍弃决定；完成后清理远端 refs。"
     },
     {
       "id": "K14",
@@ -431,14 +432,14 @@
       "why": "旧 CI-only PR 已关闭；其分支有独有 workflow commits，迁移核对完成前保留。"
     },
     {
-      "title": "T11b 安装与升级验收报告",
-      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md",
+      "title": "T11b 安装与升级验收报告（main archive）",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md",
       "why": "隔离安装、schema 7→8、重启与数据完整性；明确标注本地同 SHA installer。"
     },
     {
-      "title": "T8 Windows 全量日志与汇总",
-      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94",
-      "why": "330/330 PASS，完整原始日志、摘要与 SHA-256 manifest。"
+      "title": "T8/T10 全量日志与 UAT 证据（main archive）",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/main/docs/testing/evidence/20261020-windows-1981a94",
+      "why": "330/330 PASS、14/14 PASS 与 39 张截图；目录与 manifest 均已复制到 main。"
     },
     {
       "title": "PR #22 · Windows CI",
@@ -552,8 +553,8 @@
       "status": "PARTIAL",
       "wave": "W5",
       "priority": "P1",
-      "detail": "feature/docs/fix/master 分支没有 main 独有提交；CI workflow 修改已被 main 中更严格版本取代。gh-pages/evidence/maintenance/new_arch 仍承载看板、证据或 main 不含的独有内容。",
-      "next": "先迁移看板与证据；审阅 maintenance/new_arch 的独有提交并决定保留方式，再删除其余远端分支。",
+      "detail": "Windows T8/T10/T11b evidence 已迁入 main。gh-pages 仍承载公开 dashboard；maintenance/release-pipeline 与 new_arch 仍含 main 未有的独有代码。",
+      "next": "切换 Pages 到 main/docs 并在线验证；对独有代码做处置决定后，再删除剩余 refs。",
       "deps": [],
       "write": [
         "Pages 配置",
@@ -561,9 +562,9 @@
         "远端 branch refs"
       ],
       "accept": [
-        "公开看板在 main 来源正常部署",
-        "证据链接持续可用",
-        "每个独有提交均已保全",
+        "T8/T10/T11b evidence 链接在 main 可用",
+        "公开 dashboard 在 main/docs 来源正常部署",
+        "独有代码均已保全或明确舍弃",
         "最终分支列表仅 main"
       ]
     },
@@ -591,7 +592,7 @@
     "C03": "T3 当前为 PARTIAL。若继续，请只补齐按 schema 5/6/7/8 的类型与 NOT NULL 抽样变异、动态枚举 CHECK 约束并逐条证伪、schema<5 普通连接拒绝与人工恢复/导出的自动化路径；任何源码改动都要生成新 SHA 并重跑受影响门禁。",
     "C04": "先独立复现和修复 Issue #6 的收藏夹计数不一致，再按 issue 的验收场景验证。未修复并验收前保持 issue open，不要仅因 PR #22 合并而关闭。",
     "C05": "T12 目前 NOT_RUN。只有维护者明确给出发布 GO 后，才开始检查当前 main、构建候选、创建 tag 或触发发布 workflow。",
-    "C06": "目标是最终仅保留 main。先将 GitHub Pages 看板、验收证据和非 main 独有提交迁移/归档并验证；在确认内容可访问、可恢复前不要删除相关分支。"
+    "C06": "目标是最终仅保留 main。证据已迁入 main；先把 Pages 来源切到 main/docs 并验证，再检查 maintenance/release-pipeline 和 new_arch 的独有代码并迁入或明确舍弃。确认所有链接与部署正常后，删除其他远端 branch refs。"
   },
   "execution_snapshot": {
     "date": "2026-10-21",
@@ -599,16 +600,16 @@
     "candidate": {
       "baseline_sha": "ea4983d2bb9f6d8c0ea54faeddc790a9e096df63",
       "baseline_tree": "939a0607988524b7afec8097fde3e9acda4ec655",
-      "maintenance_worktree": "PR #22 merged; dashboard is staged for main/docs Pages migration.",
+      "maintenance_worktree": "PR #22 merged; Windows acceptance evidence copied to main; dashboard staged in main/docs.",
       "other_local_sha": "f22965f6477e90335d3cfad12c2e351d1941c69e",
       "other_local_sha_online": false,
       "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
-      "state": "PR #22 已合并：候选 1981a94/tree e943cc30 → merge commit 903666a；当前 main 为文档同步提交 1d9ce32。T8 330/330、T10 14/14、T11a/T11b PASS；T3 PARTIAL；T9 已退休；T12 NOT_RUN。",
+      "state": "PR #22 已合并：候选 1981a94/tree e943cc30 → merge commit 903666a；收尾与 evidence 同步至 main 9cc4187。T8 330/330、T10 14/14、T11a/T11b PASS；T3 PARTIAL；T9 已退休；T12 NOT_RUN。",
       "parent_sha": "aa9dfb35033186fcb2e04db19cfbc250ecf37873",
       "branch_head_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "branch_head_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
-      "main_head_sha": "7c81c3832a926b8312e7a5916af123256053c7bd",
+      "main_head_sha": "9cc4187eac3761df39be760096c1398eedcaee87",
       "merge_commit_sha": "903666a11f3914291f3352bd92e041eaa40f7ce5",
       "merge_candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "merge_candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32"
@@ -697,24 +698,25 @@
       }
     ],
     "next_actions": [
-      "为实现只留 main，先迁移公开 Pages 看板、归档 evidence 分支数据，并确认 CI/release-pipeline 分支的独有提交均已保全。",
-      "Issue #6 是独立未解决的收藏夹快照计数问题，继续保持 open。",
-      "T3 维持 PARTIAL；记录的覆盖缺口不阻断当前已合并候选。",
-      "T12 仍 NOT_RUN；只有维护者明确 GO 后才执行。"
+      "将 GitHub Pages 来源切换到 main/docs，在线验证公开 dashboard 后删除 gh-pages。",
+      "确认 main 中新增的 evidence archive 可读取，随后删除两个 evidence branches。",
+      "审阅 maintenance/release-pipeline 与 new_arch 的独有代码，决定迁入 main 或舍弃。",
+      "Issue #6 继续 open；T12 需要维护者明确 GO。"
     ],
-    "record": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md",
+    "record": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md",
     "target_platform": "Windows",
     "handoff": {
       "status": "current closeout",
-      "main_head": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3",
+      "main_head": "9cc4187eac3761df39be760096c1398eedcaee87",
       "merge_commit": "903666a11f3914291f3352bd92e041eaa40f7ce5",
       "branch_goal": "main only after data migration",
       "preserve_before_cleanup": [
         "gh-pages Pages deployment",
-        "Windows T8/T10/T11b evidence",
-        "non-main CI/release-pipeline commits"
+        "maintenance/release-pipeline unique code",
+        "new_arch unique code"
       ],
-      "main_snapshot_sha": "7c81c3832a926b8312e7a5916af123256053c7bd"
+      "main_snapshot_sha": "9cc4187eac3761df39be760096c1398eedcaee87",
+      "evidence_archive_commit": "d74bdb9c0d7a15860dbe5f39e2b67a4a9d6ed093"
     },
     "windows_acceptance": {
       "source": "本轮远端候选 1981a94 的 Windows acceptance-report、t8-summary.json、完整原始 T8 日志和逐项 T10 JSON/截图。",
@@ -731,13 +733,13 @@
       "chromium_ui_executed": 7,
       "chromium_ui_passed": 7,
       "chromium_ui_skipped": 0,
-      "evidence_branch": "evidence/windows-t10-uat-20261020",
+      "evidence_branch": "main",
       "evidence_commit": "8fee41fa4946a186735b427f3ac686fa000fa026",
-      "evidence_branch_head": "42742c8f173c68716a773128e032dbb2548e6cef",
-      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
-      "raw_log_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt",
+      "evidence_branch_head": "d74bdb9c0d7a15860dbe5f39e2b67a4a9d6ed093",
+      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
+      "raw_log_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt",
       "raw_log_sha256": "3c792601…f67c7",
-      "summary_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/t8-summary.json",
+      "summary_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/t8-summary.json",
       "raw_log_status": "当前候选 T8 原始日志已归档，SHA-256 记于 acceptance-report/manifest。"
     },
     "windows_history": [
@@ -799,11 +801,11 @@
       "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
       "target_branch_head": "1981a94ed750d7be4e3404d6622ad776708f2091",
-      "evidence_branch": "evidence/windows-t10-uat-20261020",
+      "evidence_branch": "main",
       "evidence_commit": "8fee41fa4946a186735b427f3ac686fa000fa026",
-      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
-      "evidence_folder_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94",
-      "screenshots_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/screenshots",
+      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
+      "evidence_folder_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/main/docs/testing/evidence/20261020-windows-1981a94",
+      "screenshots_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/main/docs/testing/evidence/20261020-windows-1981a94/screenshots",
       "screenshots_file_count": 39,
       "scenarios_pass": 14,
       "scenarios_fail": 0,
@@ -904,7 +906,8 @@
         "浏览器为无头 Chromium，不是 Electron 外壳。"
       ],
       "current_candidate_status": "1981a94: PASS 14/14; 39 screenshots",
-      "evidence_branch_head": "42742c8f173c68716a773128e032dbb2548e6cef"
+      "evidence_branch_head": "d74bdb9c0d7a15860dbe5f39e2b67a4a9d6ed093",
+      "evidence_branch_head_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/main/docs/testing/evidence/20261020-windows-1981a94"
     },
     "t9_acceptance": {
       "status": "FAIL",
@@ -913,7 +916,7 @@
       "evidence_branch_head": "8fee41fa4946a186735b427f3ac686fa000fa026",
       "evidence_branch_head_tree": "9ca8f65ee8cd29d17ec23feda7e6a4c35284ba7d",
       "evidence_branch_head_parent": "7cd6c49700b7ce3c31afcb4dcc9d71823828fccf",
-      "report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md",
+      "report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md",
       "admin_read_permission_confirmed": true,
       "environment_count": 0,
       "release_approval_environment_exists": false,
@@ -934,7 +937,7 @@
       "retired_by_maintainer_on": "2026-10-21",
       "decision": "Historical audit only; retired from current gate by maintainer. Do not report as a current release blocker."
     },
-    "t9_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md",
+    "t9_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md",
     "current_candidate_tests": {
       "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
@@ -942,9 +945,9 @@
       "platform": "Windows 11 Pro build 26300",
       "windows_t8": "PASS 330/330; 0 FAIL / 0 ERROR / 0 SKIP; 219.6s; exit 0",
       "t10": "PASS 14/14; 39 screenshots; 255.9s",
-      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
-      "raw_log_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt",
-      "summary_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/t8-summary.json",
+      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
+      "raw_log_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt",
+      "summary_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261020-windows-1981a94/t8-summary.json",
       "note": "All results bind to current candidate 1981a94; previous c75a06b results remain historical."
     },
     "current_candidate_status": {
