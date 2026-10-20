@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -497,35 +498,59 @@ _REQUIRED_DATABASE_TABLES = frozenset({
     "plans", "app_state", "folder_scan_state", "scan_stage", "folder_profiles",
     "providers", "models",
 })
-_REQUIRED_DATABASE_COLUMNS = {
-    "schema_migrations": frozenset({"version", "applied_at"}),
-    "folders": frozenset({
-        "media_id", "title", "remote_count", "record_json", "status",
-        "archived_at", "directory_order",
-    }),
-    "videos": frozenset({
-        "resource_key", "bvid", "resource_id", "resource_type", "record_json",
-        "updated_at",
-    }),
-    "folder_items": frozenset({"media_id", "resource_key", "fav_time", "scan_run_id"}),
-    "analyses": frozenset({"resource_key", "record_json"}),
-    "plans": frozenset({"resource_key", "record_json"}),
-    "app_state": frozenset({"name", "value_json"}),
-    "folder_scan_state": frozenset({
-        "media_id", "status", "strategy", "expected_count", "fetched_count",
-        "cursor_page", "snapshot_started_at", "snapshot_completed_at", "last_error",
-    }),
-    "scan_stage": frozenset({"scan_run_id", "media_id", "resource_key", "record_json"}),
-    "folder_profiles": frozenset({"media_id", "profile_json", "updated_at"}),
-    "providers": frozenset({
-        "id", "name", "base_url", "api_key", "created_at", "updated_at",
-    }),
-    # context_source/output_source are additions made while upgrading schema 7.
-    "models": frozenset({
-        "id", "provider_id", "name", "context_tokens", "max_output_tokens",
-        "thinking_effort", "test_status", "test_message",
-        "test_at", "created_at", "updated_at",
-    }),
+_REQUIRED_DATABASE_COLUMN_CONTRACTS = {
+    # Each entry is (declared SQLite type, PRAGMA table_info notnull flag).
+    # Single-column PRIMARY KEY declarations report notnull=0 in SQLite, so
+    # their uniqueness is checked separately by _REQUIRED_DATABASE_PRIMARY_KEYS.
+    "schema_migrations": {
+        "version": ("INTEGER", False), "applied_at": ("TEXT", True),
+    },
+    "folders": {
+        "media_id": ("TEXT", False), "title": ("TEXT", True),
+        "remote_count": ("INTEGER", True), "record_json": ("TEXT", True),
+        "status": ("TEXT", True), "archived_at": ("TEXT", False),
+        "directory_order": ("INTEGER", True),
+    },
+    "videos": {
+        "resource_key": ("TEXT", False), "bvid": ("TEXT", False),
+        "resource_id": ("TEXT", True), "resource_type": ("INTEGER", True),
+        "record_json": ("TEXT", True), "updated_at": ("TEXT", True),
+    },
+    "folder_items": {
+        "media_id": ("TEXT", True), "resource_key": ("TEXT", True),
+        "fav_time": ("INTEGER", False), "scan_run_id": ("TEXT", False),
+    },
+    "analyses": {"resource_key": ("TEXT", False), "record_json": ("TEXT", True)},
+    "plans": {"resource_key": ("TEXT", False), "record_json": ("TEXT", True)},
+    "app_state": {"name": ("TEXT", False), "value_json": ("TEXT", True)},
+    "folder_scan_state": {
+        "media_id": ("TEXT", False), "status": ("TEXT", True),
+        "strategy": ("TEXT", False), "expected_count": ("INTEGER", False),
+        "fetched_count": ("INTEGER", True), "cursor_page": ("INTEGER", False),
+        "snapshot_started_at": ("TEXT", False), "snapshot_completed_at": ("TEXT", False),
+        "last_error": ("TEXT", False),
+    },
+    "scan_stage": {
+        "scan_run_id": ("TEXT", True), "media_id": ("TEXT", True),
+        "resource_key": ("TEXT", True), "record_json": ("TEXT", True),
+    },
+    "folder_profiles": {
+        "media_id": ("TEXT", False), "profile_json": ("TEXT", True),
+        "updated_at": ("TEXT", True),
+    },
+    "providers": {
+        "id": ("TEXT", False), "name": ("TEXT", True), "base_url": ("TEXT", True),
+        "api_key": ("TEXT", True), "created_at": ("TEXT", True),
+        "updated_at": ("TEXT", True),
+    },
+    "models": {
+        "id": ("TEXT", False), "provider_id": ("TEXT", True),
+        "name": ("TEXT", True), "context_tokens": ("INTEGER", True),
+        "max_output_tokens": ("INTEGER", True), "thinking_effort": ("TEXT", True),
+        "test_status": ("TEXT", True), "test_message": ("TEXT", False),
+        "test_at": ("TEXT", False), "created_at": ("TEXT", True),
+        "updated_at": ("TEXT", True),
+    },
 }
 _VERSIONED_EXTENSION_TABLES = {
     8: frozenset({
@@ -533,34 +558,69 @@ _VERSIONED_EXTENSION_TABLES = {
         "bfo_scheduler_tasks", "bfo_scheduler_meta",
     }),
 }
-_VERSIONED_EXTENSION_COLUMNS = {
+_VERSIONED_EXTENSION_COLUMN_CONTRACTS = {
     6: {
-        "analyses": frozenset({"status", "dependent_ids"}),
+        "analyses": {"status": ("TEXT", True), "dependent_ids": ("TEXT", True)},
     },
     7: {
-        "models": frozenset({"capabilities_json"}),
+        "models": {"capabilities_json": ("TEXT", True)},
     },
     8: {
-        "models": frozenset({"context_source", "output_source"}),
-        "remote_operation_schema_version": frozenset({"version"}),
-        "remote_operations": frozenset({
-            "operation_id", "intent_json", "task_id", "account_id", "operation_type",
-            "resource_keys_json", "status", "attempt", "version",
-            "remote_response_json", "local_result_json", "reconciliation_json",
-            "error_code", "created_at", "updated_at", "resolved_at",
-        }),
-        "remote_operation_events": frozenset({
-            "event_id", "operation_id", "from_status", "to_status", "event_type",
-            "details_json", "created_at",
-        }),
-        "bfo_scheduler_tasks": frozenset({
-            "task_id", "task_type", "task_schema_version", "checkpoint_schema_version",
-            "status", "parameters_json", "checkpoint_json", "progress_json", "error_json",
-            "resume_policy", "pause_reason", "resume_intent", "attempt", "owner_epoch",
-            "resource_keys_json", "idempotency_key", "reconciliation_required",
-            "reconciliation_reason", "created_at", "updated_at", "revision",
-        }),
-        "bfo_scheduler_meta": frozenset({"key", "value"}),
+        "models": {
+            "context_source": ("TEXT", True), "output_source": ("TEXT", True),
+        },
+        "remote_operation_schema_version": {"version": ("INTEGER", True)},
+        "remote_operations": {
+            "operation_id": ("TEXT", False), "intent_json": ("TEXT", True),
+            "task_id": ("TEXT", True), "account_id": ("TEXT", True),
+            "operation_type": ("TEXT", True), "resource_keys_json": ("TEXT", True),
+            "status": ("TEXT", True), "attempt": ("INTEGER", True),
+            "version": ("INTEGER", True), "remote_response_json": ("TEXT", False),
+            "local_result_json": ("TEXT", False), "reconciliation_json": ("TEXT", False),
+            "error_code": ("TEXT", False), "created_at": ("TEXT", True),
+            "updated_at": ("TEXT", True), "resolved_at": ("TEXT", False),
+        },
+        "remote_operation_events": {
+            "event_id": ("INTEGER", False), "operation_id": ("TEXT", True),
+            "from_status": ("TEXT", False), "to_status": ("TEXT", True),
+            "event_type": ("TEXT", True), "details_json": ("TEXT", True),
+            "created_at": ("TEXT", True),
+        },
+        "bfo_scheduler_tasks": {
+            "task_id": ("TEXT", False), "task_type": ("TEXT", True),
+            "task_schema_version": ("INTEGER", True),
+            "checkpoint_schema_version": ("INTEGER", True), "status": ("TEXT", True),
+            "parameters_json": ("TEXT", True), "checkpoint_json": ("TEXT", False),
+            "progress_json": ("TEXT", True), "error_json": ("TEXT", False),
+            "resume_policy": ("TEXT", True), "pause_reason": ("TEXT", False),
+            "resume_intent": ("TEXT", True), "attempt": ("INTEGER", True),
+            "owner_epoch": ("INTEGER", True), "resource_keys_json": ("TEXT", True),
+            "idempotency_key": ("TEXT", False),
+            "reconciliation_required": ("INTEGER", True),
+            "reconciliation_reason": ("TEXT", True), "created_at": ("TEXT", True),
+            "updated_at": ("TEXT", True), "revision": ("INTEGER", True),
+        },
+        "bfo_scheduler_meta": {
+            "key": ("TEXT", False), "value": ("TEXT", True),
+        },
+    }
+}
+
+_VERSIONED_EXTENSION_CHECKS = {
+    8: {
+        "remote_operations": {
+            "status": "CHECK(STATUSIN('PREPARED','DISPATCHING','CONFIRMED','REJECTED',"
+                      "'NEEDS_RECONCILIATION','NOT_APPLIED','MANUAL_REVIEW'))",
+            "attempt": "CHECK(ATTEMPT>=0)",
+            "version": "CHECK(VERSION>=0)",
+        },
+        "bfo_scheduler_tasks": {
+            "task_schema_version": "CHECK(TASK_SCHEMA_VERSION>0)",
+            "checkpoint_schema_version": "CHECK(CHECKPOINT_SCHEMA_VERSION>0)",
+            "attempt": "CHECK(ATTEMPT>=0)",
+            "owner_epoch": "CHECK(OWNER_EPOCH>=0)",
+            "revision": "CHECK(REVISION>0)",
+        },
     }
 }
 _REQUIRED_DATABASE_PRIMARY_KEYS = {
@@ -624,8 +684,13 @@ def validate_database_candidate(path: str | Path) -> dict:
             "SELECT name FROM sqlite_master WHERE type='table'")}
         schema_version = int(validation.schema_version)
         required_tables = set(_REQUIRED_DATABASE_TABLES)
-        required_columns = {name: set(columns)
-                            for name, columns in _REQUIRED_DATABASE_COLUMNS.items()}
+        required_column_contracts = {
+            name: dict(columns)
+            for name, columns in _REQUIRED_DATABASE_COLUMN_CONTRACTS.items()
+        }
+        required_columns = {
+            name: set(columns) for name, columns in required_column_contracts.items()
+        }
         required_primary_keys = dict(_REQUIRED_DATABASE_PRIMARY_KEYS)
         required_foreign_keys = {
             name: set(keys) for name, keys in _REQUIRED_DATABASE_FOREIGN_KEYS.items()
@@ -634,7 +699,9 @@ def validate_database_candidate(path: str | Path) -> dict:
         for version, extension_tables in _VERSIONED_EXTENSION_TABLES.items():
             if schema_version >= version:
                 required_tables.update(extension_tables)
-                for table, columns in _VERSIONED_EXTENSION_COLUMNS.get(version, {}).items():
+                for table, columns in _VERSIONED_EXTENSION_COLUMN_CONTRACTS.get(
+                        version, {}).items():
+                    required_column_contracts.setdefault(table, {}).update(columns)
                     required_columns.setdefault(table, set()).update(columns)
                 required_primary_keys.update(
                     _VERSIONED_EXTENSION_PRIMARY_KEYS.get(version, {}))
@@ -651,11 +718,27 @@ def validate_database_candidate(path: str | Path) -> dict:
         primary_key_mismatches = []
         foreign_key_mismatches = []
         unique_key_mismatches = []
+        column_shape_mismatches = []
         for table in sorted(required_tables):
             info = list(connection.execute(f'PRAGMA table_info("{table}")'))
             columns = {str(row[1]) for row in info}
             for column in sorted(required_columns.get(table, ()) - columns):
                 missing_columns.append(f"{table}.{column}")
+            for row in info:
+                column_name = str(row[1])
+                expected_shape = required_column_contracts.get(table, {}).get(column_name)
+                if expected_shape is None:
+                    continue
+                expected_type, expected_not_null = expected_shape
+                actual_type = str(row[2]).strip().upper()
+                if actual_type != expected_type:
+                    column_shape_mismatches.append(
+                        f"{table}.{column_name} 类型 {actual_type or '未声明'} != {expected_type}")
+                if bool(row[3]) != expected_not_null:
+                    actual_requirement = "NOT NULL" if bool(row[3]) else "可空"
+                    expected_requirement = "NOT NULL" if expected_not_null else "可空"
+                    column_shape_mismatches.append(
+                        f"{table}.{column_name} {actual_requirement} != {expected_requirement}")
             primary_key = tuple(
                 str(row[1]) for row in sorted(
                     (row for row in info if int(row[5]) > 0), key=lambda row: int(row[5]))
@@ -688,6 +771,10 @@ def validate_database_candidate(path: str | Path) -> dict:
         if missing_columns:
             raise IntegrityValidationError(
                 "候选数据库缺少必要列，拒绝自动补建：" + ", ".join(missing_columns))
+        if column_shape_mismatches:
+            raise IntegrityValidationError(
+                "候选数据库列类型或 NOT NULL 约束不匹配："
+                + "; ".join(column_shape_mismatches))
         if primary_key_mismatches:
             raise IntegrityValidationError(
                 "候选数据库主键结构不匹配，拒绝自动补建：" + "; ".join(primary_key_mismatches))
@@ -697,6 +784,26 @@ def validate_database_candidate(path: str | Path) -> dict:
         if unique_key_mismatches:
             raise IntegrityValidationError(
                 "候选数据库唯一约束缺失，拒绝自动补建：" + "; ".join(unique_key_mismatches))
+
+        check_mismatches = []
+        for version, checks_by_table in _VERSIONED_EXTENSION_CHECKS.items():
+            if schema_version < version:
+                continue
+            for table, checks_by_column in checks_by_table.items():
+                row = connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+                    (table,),
+                ).fetchone()
+                table_sql = "" if row is None or row[0] is None else str(row[0])
+                normalized_sql = "".join(table_sql.split())
+                normalized_sql = (normalized_sql.replace('"', "").replace("`", "")
+                                  .replace("[", "").replace("]", "").upper())
+                for column, expected_check in checks_by_column.items():
+                    if expected_check not in normalized_sql:
+                        check_mismatches.append(f"{table}.{column}")
+        if check_mismatches:
+            raise IntegrityValidationError(
+                "候选数据库缺少必要 CHECK 约束：" + ", ".join(check_mismatches))
 
         ledger_info = {str(row[1]): row for row in connection.execute(
             'PRAGMA table_info("schema_migrations")')}

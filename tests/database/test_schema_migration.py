@@ -12,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import store
-from core.database import DatabaseState, IntegrityValidationError
+from core.database import DatabaseLifecycleError, DatabaseState, IntegrityValidationError
 
 
 class SchemaMigrationTests(unittest.TestCase):
@@ -131,6 +131,27 @@ class SchemaMigrationTests(unittest.TestCase):
             store._initialize_existing_database()
         self.assertEqual(source_hash, self._sha256(self.db_file))
         self.assertEqual(DatabaseState.RECOVERY_REQUIRED, store._lifecycle().state)
+
+    @staticmethod
+    def _replace_table_schema_fragment(path: Path, table: str, before: str,
+                                       after: str) -> None:
+        """Mutate only SQLite's declared DDL in a disposable schema fixture."""
+        with closing(sqlite3.connect(path)) as connection:
+            row = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+            ).fetchone()
+            if row is None or before not in str(row[0]):
+                raise AssertionError(f"{table} DDL did not contain expected fragment {before!r}")
+            connection.execute("PRAGMA writable_schema=ON")
+            connection.execute(
+                "UPDATE sqlite_master SET sql=? WHERE type='table' AND name=?",
+                (str(row[0]).replace(before, after, 1), table),
+            )
+            schema_cookie = int(connection.execute("PRAGMA schema_version").fetchone()[0])
+            connection.execute(f"PRAGMA schema_version={schema_cookie + 1}")
+            connection.execute("PRAGMA writable_schema=OFF")
+            connection.commit()
+
 
     def test_schema7_database_migrates_on_copy_and_installs_atomically(self):
         self._create_schema_database(self.db_file)
@@ -299,6 +320,45 @@ class SchemaMigrationTests(unittest.TestCase):
 
         self._assert_rejected_without_source_change("列|字段|schema")
 
+    def test_schema8_column_type_and_not_null_contract_are_enforced(self):
+        mutations = (
+            ("folders", "archived_at TEXT", "archived_at BLOB", "列类型"),
+            ("folders", "title TEXT NOT NULL DEFAULT ''",
+             "title TEXT DEFAULT ''", "NOT NULL"),
+        )
+        for index, (table, before, after, expected_error) in enumerate(mutations):
+            with self.subTest(table=table, expected_error=expected_error):
+                candidate = self.root / f"bad-column-contract-{index}.sqlite3"
+                self._create_schema_database(candidate, schema_version=8)
+                self._replace_table_schema_fragment(candidate, table, before, after)
+                source_hash = self._sha256(candidate)
+                with self.assertRaisesRegex(IntegrityValidationError, expected_error):
+                    store.validate_database_candidate(candidate)
+                self.assertEqual(source_hash, self._sha256(candidate))
+
+    def test_schema8_each_declared_check_constraint_is_required(self):
+        mutations = (
+            ("remote_operations", "'PREPARED'", "'PREPARED_INVALID'"),
+            ("remote_operations", "CHECK(attempt >= 0)", "CHECK(attempt >= -1)"),
+            ("remote_operations", "CHECK(version >= 0)", "CHECK(version >= -1)"),
+            ("bfo_scheduler_tasks", "CHECK(task_schema_version > 0)",
+             "CHECK(task_schema_version >= 0)"),
+            ("bfo_scheduler_tasks", "CHECK(checkpoint_schema_version > 0)",
+             "CHECK(checkpoint_schema_version >= 0)"),
+            ("bfo_scheduler_tasks", "CHECK(attempt >= 0)", "CHECK(attempt >= -1)"),
+            ("bfo_scheduler_tasks", "CHECK(owner_epoch >= 0)", "CHECK(owner_epoch >= -1)"),
+            ("bfo_scheduler_tasks", "CHECK(revision > 0)", "CHECK(revision >= 0)"),
+        )
+        for index, (table, before, after) in enumerate(mutations):
+            with self.subTest(table=table, fragment=before):
+                candidate = self.root / f"bad-check-contract-{index}.sqlite3"
+                self._create_schema_database(candidate, schema_version=8)
+                self._replace_table_schema_fragment(candidate, table, before, after)
+                source_hash = self._sha256(candidate)
+                with self.assertRaisesRegex(IntegrityValidationError, "CHECK"):
+                    store.validate_database_candidate(candidate)
+                self.assertEqual(source_hash, self._sha256(candidate))
+
     def test_schema7_ledger_gap_is_rejected_without_source_change(self):
         self._create_schema_database(self.db_file, schema_version=7)
         with closing(sqlite3.connect(self.db_file)) as connection:
@@ -396,6 +456,9 @@ class SchemaMigrationTests(unittest.TestCase):
         self._create_schema_database(self.db_file, schema_version=4)
 
         self._assert_rejected_without_source_change("支持|schema|版本")
+        self.assertEqual((), store.database_connections())
+        with self.assertRaisesRegex(DatabaseLifecycleError, "RECOVERY_REQUIRED"):
+            store._connect()
 
     def _historical_fixture_rows(self, path: Path) -> dict:
         """Business rows that exist unchanged in schema 5, 6, 7 and 8."""
