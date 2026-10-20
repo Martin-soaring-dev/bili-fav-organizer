@@ -1,0 +1,21 @@
+UAT_BEFORE_SEED_TASKS C:\BFO-UAT\profiles\t10-02\profile\BiliFavOrganizer\data\library.sqlite3
+UAT_AFTER_SEED_TASKS 3
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "vault_complete": true, "vault_locked": false, "port": "57335", "app_version": null}
+
+===== start 04:26:19 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "57295"}
+
+===== start 04:45:53 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "51299"}
+
+===== start 05:02:09 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "55426"}
+
+===== start 05:08:41 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "52646"}
+
+===== start 07:22:49 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "64151"}
+
+===== start 22:49:29 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-02\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "57989"}

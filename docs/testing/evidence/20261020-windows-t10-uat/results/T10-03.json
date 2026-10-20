@@ -1,0 +1,38 @@
+{
+  "scenario": "T10-03",
+  "status": "PASS",
+  "checks": {
+    "folders_count": true,
+    "videos_count": true,
+    "stop_request_observed_running": true,
+    "stop_request_progress_visible": true,
+    "stop_request_log_shows_stopping": true,
+    "scan_terminal_is_cancelled": true,
+    "after_stop_progress_hidden": true,
+    "stop_requested_differs_from_after_stop": true,
+    "folders_preserved": true,
+    "analyzed_preserved": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-03-legacy-counts.png",
+    "T10-03-scan-running.png",
+    "T10-03-stop-requested.png",
+    "T10-03-after-stop.png"
+  ],
+  "notes": [
+    "旧格式数据计数（界面）：{\"st-folders\": \"2\", \"st-videos\": \"8\", \"st-analyzed\": \"0\", \"st-planned\": \"0\"}",
+    "运行中截图状态：{\"file\": \"T10-03-scan-running.png\", \"status\": {\"running\": true, \"status\": \"running\", \"done\": 3, \"total\": 8}, \"progress\": {\"display\": \"flex\", \"fill\": \"38%\", \"text\": \"已抓取 3/8 条 · 收藏夹 1/2 · 当前：异常收藏夹 · ID 核对 + 本地索引\"}, \"log_tail\": [\"[07:23:09]ID/元数据索引路径未通过完整性检查（模拟批量接口数量不一致，回退分页），改用分页明细\", \"[07:23:14]「正常收藏夹」完成：3 条（索引路径失败后分页）\", \"[07:23:14]开始扫描「异常收藏夹」：ID 清单 + 本地索引\", \"[07:23:14]ID/元数据索引路径未通过完整性检查（模拟批量接口数量不一",
+    "停止请求后立即截图状态：{\"file\": \"T10-03-stop-requested.png\", \"status\": {\"running\": true, \"status\": \"running\", \"done\": 3, \"total\": 8}, \"progress\": {\"display\": \"flex\", \"fill\": \"38%\", \"text\": \"已抓取 3/8 条 · 收藏夹 1/2 · 当前：异常收藏夹 · ID 核对 + 本地索引\"}, \"log_tail\": [\"[07:23:14]「正常收藏夹」完成：3 条（索引路径失败后分页）\", \"[07:23:14]开始扫描「异常收藏夹」：ID 清单 + 本地索引\", \"[07:23:14]ID/元数据索引路径未通过完整性检查（模拟批量接口数量不一致，回退分页），改用分页明细\", \"[07:23:14]正在停止扫描（已扫内容已保存）...\"]}",
+    "停止后 /api/scan/status = {\"id\": \"46922cfdbe4349b08562d108d9b3965a\", \"running\": false, \"status\": \"cancelled\", \"step\": \"videos\", \"done\": 3, \"total\": 8, \"error\": null, \"strategy\": \"paged_index_fallback\", \"stop\": true, \"folder_done\": 1, \"folder_tota",
+    "停止完成后截图状态：{\"file\": \"T10-03-after-stop.png\", \"status\": {\"running\": false, \"status\": \"cancelled\", \"done\": 3, \"total\": 8}, \"progress\": {\"display\": \"none\", \"fill\": \"38%\", \"text\": \"已抓取 3/8 条 · 收藏夹 1/2 · 当前：异常收藏夹 · ID 核对 + 本地索引\"}, \"log_tail\": [\"[07:23:14]开始扫描「异常收藏夹」：ID 清单 + 本地索引\", \"[07:23:14]ID/元数据索引路径未通过完整性检查（模拟批量接口数量不一致，回退分页），改用分页明细\", \"[07:23:14]正在停止扫描（已扫内容已保存）...\", \"[07:23:15]扫描已取消；已完成的收藏夹保留，下次可继续扫描\"]}",
+    "截图 SHA-256：{\"T10-03-stop-requested.png\": \"bc568184351982e9b8b7ff821382c27d83f2b1681736920f36649e0992f1b456\", \"T10-03-after-stop.png\": \"54f6cab91efe668bffd7770483f685e4bc826bf73a42c67167cf40a6cf807502\", \"T10-03-scan-running.png\": \"31ba2e70f8a563f3829559cd93c6d14331073a8c070648f522744138ed4f48ff\"}"
+  ],
+  "screenshot_sha256": {
+    "T10-03-stop-requested.png": "bc568184351982e9b8b7ff821382c27d83f2b1681736920f36649e0992f1b456",
+    "T10-03-after-stop.png": "54f6cab91efe668bffd7770483f685e4bc826bf73a42c67167cf40a6cf807502",
+    "T10-03-scan-running.png": "31ba2e70f8a563f3829559cd93c6d14331073a8c070648f522744138ed4f48ff"
+  },
+  "stop_request_visual": "PASS",
+  "duration_seconds": 17.5
+}

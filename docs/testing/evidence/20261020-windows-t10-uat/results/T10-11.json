@@ -1,0 +1,23 @@
+{
+  "scenario": "T10-11",
+  "status": "PASS",
+  "checks": {
+    "units_folders": true,
+    "units_items": true,
+    "checkpoint_line": true,
+    "pause_reason_label": true,
+    "resume_clicked": true,
+    "stale_pause_reason_cleared": true,
+    "api_pause_reason_cleared": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-11-paused-with-reason.png",
+    "T10-11-after-resume.png"
+  ],
+  "notes": [
+    "暂停态任务卡：收藏夹扫描 · 92f655521bb9 已暂停 收藏夹 2/2 · 条目 19/19 · 用户暂停 检查点：收藏夹 10 · 已处理 19 条 · 检查点 v1 开始：2026-10-19T23:25:42.422+00:00 · 更新：2026-10-19T23:25:57.872+00:00 · 执行次数：1 恢复 取消",
+    "恢复后任务卡：收藏夹扫描 · 92f655521bb9 已完成 收藏夹 2/2 · 条目 19/19 检查点：收藏夹 10 · 已处理 19 条 · 检查点 v1 开始：2026-10-19T23:25:42.422+00:00 · 更新：2026-10-19T23:25:59.910+00:00 · 执行次数：2"
+  ],
+  "duration_seconds": 30.5
+}

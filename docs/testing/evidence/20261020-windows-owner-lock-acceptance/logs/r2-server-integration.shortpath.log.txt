@@ -1,0 +1,21 @@
+Isolated checkout: <USERPROFILE>\AppData\Local\Temp\<SHORTPATH-CLONE>\<RUN-TEMP>\checkout
+Isolated LOCALAPPDATA: <USERPROFILE>\AppData\Local\Temp\<SHORTPATH-CLONE>\<RUN-TEMP>\profile
+python.exe : test_scan_route_persists_and_runs_through_the_scheduler (scheduler.test_server_integration.ServerScheduler
+IntegrationTests.test_scan_route_persists_and_runs_through_the_scheduler) ... ok
+所在位置 行:9 字符: 1
++ & $Vpy tools/run_isolated_tests.py --test scheduler.test_server_integ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_scan_route...heduler) ... ok:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_unlock_starts_scheduler_and_recovers_stale_task_rows (scheduler.test_server_integration.ServerSchedulerIntegration
+Tests.test_unlock_starts_scheduler_and_recovers_stale_task_rows) ... ok
+test_vault_lock_waits_for_checkpoint_then_resumes_same_process_runner (scheduler.test_server_integration.ServerSchedule
+rIntegrationTests.test_vault_lock_waits_for_checkpoint_then_resumes_same_process_runner) ... ok
+test_vault_seals_business_files_without_reading_or_replacing_runtime_locks (scheduler.test_server_integration.ServerSch
+edulerIntegrationTests.test_vault_seals_business_files_without_reading_or_replacing_runtime_locks) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 9.669s
+
+OK

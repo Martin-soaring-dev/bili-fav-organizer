@@ -1,0 +1,78 @@
+Read-only state observations captured through the HTTP API
+==========================================================
+
+[T10-01] status=PASS
+    未初始化 profile 的 /api/status = 503（界面仍未连接）
+    恢复码弹窗出现但未截图（避免敏感值入档）
+    通过界面把 scan_interval 改为 5，/api/config 返回 5
+
+[T10-02] status=PASS
+    加载时弹出扫描异常提示：True
+
+[T10-03] status=PASS
+    旧格式数据计数（界面）：{"st-folders": "2", "st-videos": "8", "st-analyzed": "0", "st-planned": "0"}
+    运行中截图状态：{"file": "T10-03-scan-running.png", "status": {"running": true, "status": "running", "done": 3, "total": 8}, "progress": {"display": "flex", "fill": "38%", "text": "已抓取 3/8 条 · 收藏夹 1/2 · 当前：异常收藏夹 · ID 核对 + 本地索引"}, "log_tail": ["[22:49:49]ID/元数据索引路径未通过完整性检查（模拟批量接口数量不一致，回退分页），改用分页明细", "[22:49:53]「正常收藏夹」完成：3 条（索引路径失败后分页）", "[22:49:53]开始扫描「异常收藏夹」：ID 清单 + 本地索引", "[22:49:53]ID/元数据索引路径未通过完整性检查（模拟批量接口数量不一
+    停止请求后立即截图状态：{"file": "T10-03-stop-requested.png", "status": {"running": true, "status": "running", "done": 3, "total": 8}, "progress": {"display": "flex", "fill": "38%", "text": "已抓取 3/8 条 · 收藏夹 1/2 · 当前：异常收藏夹 · ID 核对 + 本地索引"}, "log_tail": ["[22:49:53]「正常收藏夹」完成：3 条（索引路径失败后分页）", "[22:49:53]开始扫描「异常收藏夹」：ID 清单 + 本地索引", "[22:49:53]ID/元数据索引路径未通过完整性检查（模拟批量接口数量不一致，回退分页），改用分页明细", "[22:49:54]正在停止扫描（已扫内容已保存）..."]}
+    停止后 /api/scan/status = {"id": "b1ef6cfa843e43dea6c30b322b19058a", "running": false, "status": "cancelled", "step": "videos", "done": 3, "total": 8, "error": null, "strategy": "paged_index_fallback", "stop": true, "folder_done": 1, "folder_tota
+    停止完成后截图状态：{"file": "T10-03-after-stop.png", "status": {"running": false, "status": "cancelled", "done": 3, "total": 8}, "progress": {"display": "none", "fill": "38%", "text": "已抓取 3/8 条 · 收藏夹 1/2 · 当前：异常收藏夹 · ID 核对 + 本地索引"}, "log_tail": ["[22:49:53]开始扫描「异常收藏夹」：ID 清单 + 本地索引", "[22:49:53]ID/元数据索引路径未通过完整性检查（模拟批量接口数量不一致，回退分页），改用分页明细", "[22:49:54]正在停止扫描（已扫内容已保存）...", "[22:49:55]扫描已取消；已完成的收藏夹保留，下次可继续扫描"]}
+    截图 SHA-256：{"T10-03-stop-requested.png": "9e313858af6f4f540936faadfc7d6e15a5f61650434b4775421346b416b81950", "T10-03-after-stop.png": "40319159d8dc64aeaa18987a1f2ffad8ce7a7f09b351eafe13b84f3dc85479f4", "T10-03-scan-running.png": "639bcca28bf906c656b3c26d8a54c42d31fc35ddd9af4109147daa3d180be34f"}
+
+[T10-04] status=PASS
+    锁定前任务状态：RUNNING
+    锁定尝试记录：[]
+    锁定后 /api/vault/status.lock_phase = {'phase': 'locked', 'error': '', 'updated_at': '2026-10-20T22:50:07+0800'} database_state = LOCKED
+    锁定窗口内 /api/tasks 也一并拒绝（属预期：数据库已封闭）
+    任务卡文案片段：收藏夹扫描 · aa7b20b2e665 已完成 收藏夹 2/2 · 条目 15/15 检查点：收藏夹 10 · 已处理 15 条 · 检查点 v1 开始：2026-10-20T14:50:06.266+00:00 · 更新：2026-10-20T14:50:11.000+00:00 · 执行次数：2
+    解锁后任务记录：[{"task_id": "aa7b20b2e6654de98337c53d07d5049d", "task_type": "scan", "task_schema_version": 1, "checkpoint_schema_version": 1, "status": "COMPLETED", "parameters": {"folder_ids": [], "mode": "resume", "recovery": null}, "checkpoint": {"version": 1, "folder_done": 2, "last_completed_folder": "10", "done": 15}, "progress": {"phase": "folder_complete", "current": "", "items": {"done": 15, "total": 15}, "folders": {"done": 2, "total": 2}}, "error": null, "resume_policy": "AUTO_SAFE", "pause_reason": null, "resume_intent": "MANUAL", "attempt": 2, "owner_epoch": 1, "resource_keys": ["local-library"
+
+[T10-05] status=PASS
+    已强制终止服务进程（模拟崩溃），task_id=960eabc4772f42dfa2f2a49d44ee244d
+    重启后任务卡文案：收藏夹扫描 · 960eabc4772f 已中断 收藏夹 1/2 · 条目 3/17 · 错误：程序在任务运行期间退出；恢复前必须校验检查点 检查点：收藏夹 20 · 已处理 3 条 · 检查点 v1 开始：2026-10-20T14:50:26.300+00:00 · 更新：2026-10-20T14:50:33.635+00:00 · 执行次数：1 应用重启时任务中断；为避免重复远端写入，不会自动重放。请从对应业务页按已保存进度重新发起。
+    中断任务 error={"category": "process_interrupted", "message": "程序在任务运行期间退出；恢复前必须校验检查点"}
+    对中断任务请求 resume -> HTTP 409 {"ok": false, "error": "此任务的进程内工作器已丢失；请从业务页按持久化进度重新发起"}
+
+[T10-06] status=PASS
+    清理结果文案：「异常收藏夹」重新扫描验证通过。B 站数量由 5 更新为 5 条，本次读取 5 条。 可以继续整理。
+    mock 远端调用序列：["session_created", "get_mid", "clean_invalid_folder", "list_folders", "get_folder_resource_ids", "iter_folder_videos"]
+    远端写入核对面板文案：uat_move_to_existing · 10 等待核对 操作 ID：bfo-op-v1-f12ad15fe839595fb19733ffc94e4a5fc84055ce4bed3f78dd7f7f54dc8f7cac · 任务：uat-task · 尝试：1 · 更新：2026-10-20T14:50:44.587Z 前置条件：{}；目标结果：{} 我已检查 B 站当前状态，原操作前置条件仍然成立；允许系统复用同一操作记录重试。 确认远端已生效 确认未生效并允许安全重试 暂转人工复核
+
+[T10-07] status=PASS
+    取消后任务：{"status": "CANCELLED", "pause_reason": null, "error": null}
+    取消后 /api/scan/status = {"id": "5c22ac8f1fb5464eb416844e601c6723", "running": false, "status": "cancelled", "step": "videos", "done": 3, "total": 17, "error": null, "strategy": "paged_index_fallback", "stop": true, "folder_d
+    取消后请求 resume -> HTTP 409 {"ok": false, "error": "此任务的进程内工作器已丢失；请从业务页按持久化进度重新发起"}
+
+[T10-08] status=PASS
+    启动 5 秒内 /api/config 请求 2 次
+    稳态第一窗口新增 0 次，第二窗口新增 0 次（总计 2）
+
+[T10-09] status=PASS
+    两轮 scan_idle 后 #scan-issue-modal display = 'none'
+
+[T10-10] status=PASS
+    暂停后：{"status": "PAUSED", "pause_reason": "USER", "checkpoint": {"version": 1, "folder_done": 2, "last_completed_folder": "10", "done": 19}}
+    取消后：{"status": "CANCELLED", "pause_reason": null, "checkpoint": {"version": 1, "folder_done": 2, "last_completed_folder": "10", "done": 19}}
+
+[T10-11] status=PASS
+    暂停态任务卡：收藏夹扫描 · 53a0100be8c6 已暂停 收藏夹 2/2 · 条目 19/19 · 用户暂停 检查点：收藏夹 10 · 已处理 19 条 · 检查点 v1 开始：2026-10-20T14:52:22.278+00:00 · 更新：2026-10-20T14:52:37.692+00:00 · 执行次数：1 恢复 取消
+    恢复后任务卡：收藏夹扫描 · 53a0100be8c6 已完成 收藏夹 2/2 · 条目 19/19 检查点：收藏夹 10 · 已处理 19 条 · 检查点 v1 开始：2026-10-20T14:52:22.278+00:00 · 更新：2026-10-20T14:52:39.628+00:00 · 执行次数：2
+
+[T10-12] status=PASS
+    空核对卡片：uat_probe_empty · 10 等待核对 操作 ID：bfo-op-v1-f747acafabef38013f894399ca9e3ee3d61a545843571962f1a8208e6e22e2c4 · 任务：uat-task · 尝试：1 · 更新：2026-10-20T14:52:46.189Z 前置条件：{}；目标结果：{} 我已检查 B 站当前状态，原操作前置条件仍然成立；允
+
+[T10-13] status=PASS
+    扫描终态由受控输入提供（/api/scan/status 路由拦截），其余接口为真实服务端；completed 分支进入分析阶段 1 次
+
+[T10-14] status=PASS
+    迁移前夹具快照：{"schema_version": 7, "folders": [{"media_id": "FIXTURE-FOLDER", "title": "v0.209 synthetic folder"}], "videos": [{"bvid": "BVFIXTURE0001", "resource_id": "900001"}], "folder_items": [{"media_id": "FIXTURE-FOLDER", "resource_key": "BVFIXTURE0001"}], "counts": {"folders": 1, "videos": 1, "folder_items": 1, "analyses": 0, "plans": 0}, "integrity_check": "ok", "foreign_key_violations": 0}
+    迁移后数据库快照：{"schema_version": 8, "folders": [{"media_id": "FIXTURE-FOLDER", "title": "v0.209 synthetic folder"}], "videos": [{"bvid": "BVFIXTURE0001", "resource_id": "900001"}], "folder_items": [{"media_id": "FIXTURE-FOLDER", "resource_key": "BVFIXTURE0001"}], "counts": {"folders": 1, "videos": 1, "folder_items": 1, "analyses": 0, "plans": 0}, "integrity_check": "ok", "foreign_key_violations": 0}
+    迁移后 /api/vault/status.database_state = READY
+    迁移后 /api/status.stats = {"folders": 1, "videos": 1, "analyzed": 0, "planned": 0}
+    升级后界面计数：{"st-folders": "1", "st-videos": "1", "st-analyzed": "0", "st-planned": "0"}
+    本地内容视图收藏夹数量：1
+    界面收藏夹文本：v0.209 synthetic folder 1 / 1
+    界面内容标题：v0.209 synthetic folder · 内容 · 条目数=1
+    界面条目文本：synthetic video BVFIXTURE0001 · 2023/11/15 06:13:20
+    夹具源哈希（前/后）：511f66afc63562f8a102a49150a55a22a839c0340fa70a9c64a0690692e1b273 / 511f66afc63562f8a102a49150a55a22a839c0340fa70a9c64a0690692e1b273
+    应用实际使用 DB：C:\BFO-UAT\profiles\t10-14\profile\BiliFavOrganizer\data\library.sqlite3
+    截图 SHA-256：{"T10-14-after-upgrade-main-ui.png": "2bd7a4b3be55b66cf978a278565ccabe2a2cf856e77b5aa91ad25a35832a6f8f", "T10-14-fixture-folder-items.png": "40c2b8104ab5ad534369e23399d3555f073aef39abd78e415fc3b044d3fb4a03"}
+

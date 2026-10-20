@@ -1,0 +1,13 @@
+Mock remote-write audit (no real network write)
+========================================
+Outbound HTTP(S) is forced through 127.0.0.1:9 (closed port) for every server
+process, and bili_api.BiliSession is replaced by a recording fake.
+
+[T10-03] total_callbacks=8 remote_write_calls=0
+[T10-04] total_callbacks=10 remote_write_calls=0
+[T10-06] total_callbacks=6 remote_write_calls=1
+    {"action": "clean_invalid_folder", "media_id": "10"}
+[T10-07] total_callbacks=8 remote_write_calls=0
+[T10-09] total_callbacks=10 remote_write_calls=0
+[T10-10] total_callbacks=7 remote_write_calls=0
+[T10-11] total_callbacks=10 remote_write_calls=0

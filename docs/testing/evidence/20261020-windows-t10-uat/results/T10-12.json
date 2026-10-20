@@ -1,0 +1,17 @@
+{
+  "scenario": "T10-12",
+  "status": "PASS",
+  "checks": {
+    "empty_card_has_no_reconciliation": true,
+    "recorded_card_shows_decision": true,
+    "recorded_card_shows_note": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-12-operations-empty-reconciliation.png"
+  ],
+  "notes": [
+    "空核对卡片：uat_probe_empty · 10 等待核对 操作 ID：bfo-op-v1-f747acafabef38013f894399ca9e3ee3d61a545843571962f1a8208e6e22e2c4 · 任务：uat-task · 尝试：1 · 更新：2026-10-19T23:26:06.612Z 前置条件：{}；目标结果：{} 我已检查 B 站当前状态，原操作前置条件仍然成立；允"
+  ],
+  "duration_seconds": 11.0
+}

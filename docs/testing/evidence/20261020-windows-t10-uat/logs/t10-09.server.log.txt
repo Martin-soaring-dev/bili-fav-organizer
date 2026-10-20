@@ -1,0 +1,91 @@
+
+===== start 04:16:02 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "58938"}
+
+===== start 04:17:30 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "63541"}
+2026-10-20 04:17:34,005 [core.scheduler.scheduler] Task 4b81c33d51904555a9e6c409f1ce3607 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+2026-10-20 04:17:35,886 [core.scheduler.scheduler] Task acdab53c215b419a8021892d6c9a88e7 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+
+===== start 04:49:47 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "56484"}
+
+===== start 04:52:49 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "57793"}
+2026-10-20 04:52:53,092 [core.scheduler.scheduler] Task 0b4d23b86057443f9664d926f02ce713 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+2026-10-20 04:52:54,939 [core.scheduler.scheduler] Task 5ddf169854d54512ae58ce9cdd6563d1 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+
+===== start 05:04:14 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "52877"}
+2026-10-20 05:04:17,822 [core.scheduler.scheduler] Task eb5e8ec8219a43d08d48e6aba655e726 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+2026-10-20 05:04:19,715 [core.scheduler.scheduler] Task e2e0091bdc1d4b85b189bff920a076ba failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+
+===== start 05:10:47 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "60857"}
+2026-10-20 05:10:50,094 [core.scheduler.scheduler] Task ba2d322c902e41b089cb000bbcb04e5f failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+2026-10-20 05:10:51,939 [core.scheduler.scheduler] Task fe54aec10e134dc39416a3f23061a569 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+
+===== start 07:24:59 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-09\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "59720"}
+2026-10-20 07:25:02,349 [core.scheduler.scheduler] Task d8c92684652b46438aec80e89d5501cf failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+2026-10-20 07:25:04,180 [core.scheduler.scheduler] Task 9486ab07b04d4558b89e51b50d63fb0e failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示

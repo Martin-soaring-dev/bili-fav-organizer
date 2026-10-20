@@ -1,0 +1,114 @@
+
+===== start 04:18:05 =====
+Traceback (most recent call last):
+  File "C:\BFO-UAT\profiles\t10-01\bootstrap.py", line 40, in <module>
+    uatseed.seed_business(store, cfg)
+  File "C:\BFO-UAT\harness\uatseed.py", line 137, in seed_business
+    store.save_folders([dict(item) for item in folders])
+  File "C:\BFOU1\store.py", line 1177, in save_folders
+    with _transaction() as conn:
+         ^^^^^^^^^^^^^^
+  File "<USERPROFILE>\AppData\Roaming\Xiaomi MiMo\runtimes\bundled\52714f768b8b\python\Lib\contextlib.py", line 137, in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "C:\BFOU1\store.py", line 204, in _transaction
+    conn = _connect()
+           ^^^^^^^^^^
+  File "C:\BFOU1\store.py", line 194, in _connect
+    conn = _lifecycle().connect(mode=mode, owner=owner)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\BFOU1\core\database\lifecycle.py", line 304, in connect
+    raise self._missing_error()
+core.database.lifecycle.DatabaseNotInitializedError: 数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+
+===== start 04:18:29 =====
+2026-10-20 04:18:31,353 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "62502"}
+
+===== start 04:19:28 =====
+2026-10-20 04:19:30,515 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "52676"}
+
+===== start 04:20:01 =====
+2026-10-20 04:20:03,107 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "54645"}
+
+===== start 04:21:22 =====
+2026-10-20 04:21:23,862 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "53595"}
+
+===== start 04:21:35 =====
+2026-10-20 04:21:37,213 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "62986"}
+
+===== start 04:23:19 =====
+2026-10-20 04:23:21,186 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "59649"}
+2026-10-20 04:23:21,952 [asyncio] Exception in callback _ProactorBasePipeTransport._call_connection_lost(None)
+handle: <Handle _ProactorBasePipeTransport._call_connection_lost(None)>
+Traceback (most recent call last):
+  File "<USERPROFILE>\AppData\Roaming\Xiaomi MiMo\runtimes\bundled\52714f768b8b\python\Lib\asyncio\events.py", line 88, in _run
+    self._context.run(self._callback, *self._args)
+  File "<USERPROFILE>\AppData\Roaming\Xiaomi MiMo\runtimes\bundled\52714f768b8b\python\Lib\asyncio\proactor_events.py", line 165, in _call_connection_lost
+    self._sock.shutdown(socket.SHUT_RDWR)
+ConnectionResetError: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
+
+===== start 04:23:32 =====
+2026-10-20 04:23:34,054 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "57605"}
+
+===== start 04:25:58 =====
+2026-10-20 04:26:00,566 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "57833"}
+
+===== start 04:26:11 =====
+2026-10-20 04:26:13,303 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "56632"}
+
+===== start 04:26:37 =====
+2026-10-20 04:26:39,343 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "58463"}
+
+===== start 04:26:50 =====
+2026-10-20 04:26:52,322 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "54522"}
+
+===== start 04:27:15 =====
+2026-10-20 04:27:16,896 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "64383"}
+
+===== start 04:27:28 =====
+2026-10-20 04:27:29,766 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "52649"}
+
+===== start 04:45:32 =====
+2026-10-20 04:45:34,313 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "62772"}
+
+===== start 04:45:45 =====
+2026-10-20 04:45:47,021 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "52912"}
+
+===== start 05:01:48 =====
+2026-10-20 05:01:50,007 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "60477"}
+
+===== start 05:02:01 =====
+2026-10-20 05:02:02,973 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "57000"}
+
+===== start 05:08:20 =====
+2026-10-20 05:08:22,457 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "55724"}
+
+===== start 05:08:33 =====
+2026-10-20 05:08:35,382 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "55369"}
+
+===== start 07:22:29 =====
+2026-10-20 07:22:30,840 [server] 供应商/模型初始化失败：数据库尚未初始化：C:\BFO-UAT\profiles\t10-01\profile\BiliFavOrganizer\data\library.sqlite3；需要显式执行首次初始化
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": false, "database_state": "UNINITIALIZED", "vault_complete": false, "vault_locked": false, "port": "49942"}
+
+===== start 07:22:42 =====
+2026-10-20 07:22:43,748 [server] 供应商/模型初始化失败：数据库当前不允许普通访问（状态：LOCKED）
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-01\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "LOCKED", "vault_complete": false, "vault_locked": false, "port": "52663"}

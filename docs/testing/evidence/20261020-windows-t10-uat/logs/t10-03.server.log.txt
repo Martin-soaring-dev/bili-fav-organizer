@@ -1,0 +1,40 @@
+
+===== start 04:18:07 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "53766"}
+
+===== start 04:19:06 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "59206"}
+2026-10-20 04:19:12,170 [core.scheduler.scheduler] Task 34e4e05ca59542b18a48fbb0aa3c30d2 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 'id'
+Traceback (most recent call last):
+  File "C:\BFOU1\server.py", line 4340, in run
+    if f"{resource['type']}:{resource['id']}" not in cached]
+                             ~~~~~~~~^^^^^^
+KeyError: 'id'
+
+
+===== start 04:19:35 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "53256"}
+
+===== start 04:46:03 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "56593"}
+
+===== start 05:02:19 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "62264"}
+
+===== start 05:08:52 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "51824"}
+
+===== start 05:37:09 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "55504"}
+
+===== start 05:37:53 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "58293"}
+
+===== start 07:23:00 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-03\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "54943"}

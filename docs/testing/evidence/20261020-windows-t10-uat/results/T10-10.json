@@ -1,0 +1,27 @@
+{
+  "scenario": "T10-10",
+  "status": "PASS",
+  "checks": {
+    "task_running": true,
+    "pause_clicked": true,
+    "status_paused": true,
+    "checkpoint_saved_on_pause": true,
+    "ui_shows_paused": true,
+    "cancel_clicked": true,
+    "status_cancelled": true,
+    "cancel_clears_pause_reason": true,
+    "checkpoint_kept_after_cancel": true,
+    "ui_distinguishes_cancel_from_pause": true,
+    "cancel_card_still_shows_checkpoint": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-10-paused.png",
+    "T10-10-cancelled.png"
+  ],
+  "notes": [
+    "暂停后：{\"status\": \"PAUSED\", \"pause_reason\": \"USER\", \"checkpoint\": {\"version\": 1, \"folder_done\": 2, \"last_completed_folder\": \"10\", \"done\": 19}}",
+    "取消后：{\"status\": \"CANCELLED\", \"pause_reason\": null, \"checkpoint\": {\"version\": 1, \"folder_done\": 2, \"last_completed_folder\": \"10\", \"done\": 19}}"
+  ],
+  "duration_seconds": 28.1
+}

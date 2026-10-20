@@ -1,0 +1,18 @@
+
+===== start 04:36:34 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "64039"}
+
+===== start 04:49:05 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "52038"}
+
+===== start 05:03:32 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "50371"}
+
+===== start 05:10:04 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "63901"}
+
+===== start 07:24:17 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "54180"}
+
+===== start 22:50:56 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-07\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "57560"}

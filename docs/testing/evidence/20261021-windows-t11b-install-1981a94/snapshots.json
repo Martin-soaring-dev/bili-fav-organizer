@@ -1,0 +1,52 @@
+{
+  "candidate": {
+    "sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+    "tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+    "parent": "aa9dfb35033186fcb2e04db19cfbc250ecf37873"
+  },
+  "installer": {
+    "name": "BiliFavOrganizer-neo-Setup-0.209.0-beta.2.exe",
+    "bytes": 140995964,
+    "sha256": "B2853AC38DF8CF6244367724C0B66F8BB31AE89EB71DA5F742650C917684D532",
+    "built_locally_at_same_sha": true,
+    "ci_artifact_uploaded": false
+  },
+  "fixture": {
+    "name": "v0209_schema7.sqlite3",
+    "sha256_before": "511f66afc63562f8a102a49150a55a22a839c0340fa70a9c64a0690692e1b273",
+    "sha256_after": "511f66afc63562f8a102a49150a55a22a839c0340fa70a9c64a0690692e1b273"
+  },
+  "pre_upgrade": {
+    "schema_version": 7,
+    "counts": {"folders": 1, "videos": 1, "folder_items": 1, "analyses": 0, "plans": 0},
+    "folder_ids": ["FIXTURE-FOLDER"],
+    "video_bvids": ["BVFIXTURE0001"],
+    "db_bytes": 126976
+  },
+  "post_upgrade": {
+    "schema_version": 8,
+    "counts": {"folders": 1, "videos": 1, "folder_items": 1, "analyses": 0, "plans": 0},
+    "folder_ids": ["FIXTURE-FOLDER"],
+    "video_bvids": ["BVFIXTURE0001"],
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "analyses_cols": ["dependent_ids", "record_json", "resource_key", "status"],
+    "db_bytes": 184320,
+    "recovery_copies": 1
+  },
+  "after_restart": {
+    "schema_version": 8,
+    "counts": {"folders": 1, "videos": 1, "folder_items": 1, "analyses": 0, "plans": 0},
+    "folder_ids": ["FIXTURE-FOLDER"],
+    "video_bvids": ["BVFIXTURE0001"],
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "db_bytes": 184320
+  },
+  "isolation": {
+    "install_dir": "C:\\BFO-UAT\\install-t11b",
+    "profile_dir": "C:\\BFO-UAT\\prof-t11b",
+    "real_profile_last_write": "2026-09-26T00:02:08",
+    "real_profile_touched": false
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "scenario": "T10-01",
+  "status": "PASS",
+  "checks": {
+    "fresh_profile_shows_onboarding": true,
+    "status_503_before_onboarding": true,
+    "recovery_code_modal_shown": true,
+    "status_200_after_onboarding": true,
+    "config_saved_via_ui": true,
+    "no_onboarding_after_reload": true,
+    "config_survived_reload": true,
+    "no_page_errors": true,
+    "restart_requires_unlock": true,
+    "config_survived_process_restart": true,
+    "no_page_errors_after_restart": true
+  },
+  "screenshots": [
+    "T10-01-first-run-onboarding.png",
+    "T10-01-setup-complete-locked.png",
+    "T10-01-main-after-setup.png",
+    "T10-01-after-reload-config-persisted.png",
+    "T10-01-restart-requires-unlock.png",
+    "T10-01-after-process-restart.png"
+  ],
+  "notes": [
+    "未初始化 profile 的 /api/status = 503（界面仍未连接）",
+    "恢复码弹窗出现但未截图（避免敏感值入档）",
+    "通过界面把 scan_interval 改为 5，/api/config 返回 5"
+  ],
+  "duration_seconds": 20.8
+}

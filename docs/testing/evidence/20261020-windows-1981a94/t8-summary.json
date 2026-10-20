@@ -1,0 +1,23 @@
+{
+  "suite": "T8 Windows full isolated regression",
+  "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+  "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+  "candidate_parent": "aa9dfb35033186fcb2e04db19cfbc250ecf37873",
+  "command": "python tools/run_isolated_tests.py",
+  "started_at": "2026-10-20 22:37:27",
+  "ended_at": "2026-10-20 22:41:06",
+  "duration_seconds": 219.6,
+  "discovered": 330,
+  "unittest_seconds": 216.994,
+  "pass": 330,
+  "fail": 0,
+  "error": 0,
+  "skip": 0,
+  "exit_code": 0,
+  "unittest_summary_line": "Ran 330 tests in 216.994s / OK",
+  "failure_headers": 0,
+  "error_headers": 0,
+  "log_sha256": "3c792601f432b2971c76bf4e5a67ca55cd5c70136ea20a630dcb4dd1533f67c7",
+  "log_bytes": 157040,
+  "chromium_gate": "BFO_REQUIRE_PLAYWRIGHT=1; UI tests executed, 0 skipped"
+}

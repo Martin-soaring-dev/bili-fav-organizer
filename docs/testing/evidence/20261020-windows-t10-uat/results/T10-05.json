@@ -1,0 +1,26 @@
+{
+  "scenario": "T10-05",
+  "status": "PASS",
+  "checks": {
+    "task_was_running": true,
+    "checkpoint_existed_before_crash": true,
+    "shows_interrupted": true,
+    "explains_no_auto_replay": true,
+    "checkpoint_preserved": true,
+    "api_reports_interrupted": true,
+    "error_category_process_interrupted": true,
+    "resume_refused_after_restart": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-05-before-crash.png",
+    "T10-05-after-restart-interrupted.png"
+  ],
+  "notes": [
+    "已强制终止服务进程（模拟崩溃），task_id=69211af43626478ca13457cd51619385",
+    "重启后任务卡文案：收藏夹扫描 · 69211af43626 已中断 收藏夹 1/2 · 条目 3/17 · 错误：程序在任务运行期间退出；恢复前必须校验检查点 检查点：收藏夹 20 · 已处理 3 条 · 检查点 v1 开始：2026-10-19T23:23:46.499+00:00 · 更新：2026-10-19T23:23:53.885+00:00 · 执行次数：1 应用重启时任务中断；为避免重复远端写入，不会自动重放。请从对应业务页按已保存进度重新发起。",
+    "中断任务 error={\"category\": \"process_interrupted\", \"message\": \"程序在任务运行期间退出；恢复前必须校验检查点\"}",
+    "对中断任务请求 resume -> HTTP 409 {\"ok\": false, \"error\": \"此任务的进程内工作器已丢失；请从业务页按持久化进度重新发起\"}"
+  ],
+  "duration_seconds": 24.9
+}

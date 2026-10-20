@@ -1,0 +1,35 @@
+BiliFavOrganizer Windows acceptance - environment snapshot
+==========================================================
+collected_at_local      : 2026-10-20 03:46:03
+os_caption              : Microsoft Windows 11 专业版
+os_version              : 10.0.26300
+os_build                : 26300
+os_architecture         : 64-bit
+powershell              : 5.1.26100.9711
+python                  : 3.12.13 (isolated venv created from bundled CPython)
+pip_pinned_deps         : requirements-test.txt
+playwright              : 1.63.0
+chromium_launch_probe   : Chrome/153.0.8010.12 (playwright chromium build v1243) - launch OK
+playwright_gate         : BFO_REQUIRE_PLAYWRIGHT=1
+long_paths_enabled      : 0 (HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled)
+
+git identity of the disposable clone (all values re-read after the test runs)
+--------------------------------------------------------------------------
+repository              : https://github.com/Martin-soaring-dev/bili-fav-organizer.git
+target_branch           : feat/reliability-scheduler-implementation
+remote_branch_head      : 4baa66e628538cfb2762b63bed82facd1b47f28a
+candidate_head          : 4baa66e628538cfb2762b63bed82facd1b47f28a
+candidate_tree          : 2b4a7263705ff345fa1fbab6c6173f0510b55673
+candidate_parent        : f590ae8cbab2a0c58e3bb90c49550b8bdd67134f
+commit_subject          : fix(scheduler): acquire Windows owner lock without reading locked bytes
+working_tree_status     : clean during all test runs; only this evidence directory added afterwards
+checkout_mode           : detached HEAD
+
+path-length evidence (placeholders preserve original lengths)
+------------------------------------------------------------
+<USERPROFILE>            = 19 chars
+<LONGPATH-CLONE>         = 41 chars
+<RUN-TEMP>               = 28 chars (.bfo-isolated-tests-<8hex>)
+<SHORTPATH-CLONE>        = 5 chars
+reconstructed candidate  = 266 chars (> MAX_PATH 260, LongPathsEnabled=0) -> SQLITE_CANTOPEN
+probe control            = 267 chars FAIL / 227 chars OK

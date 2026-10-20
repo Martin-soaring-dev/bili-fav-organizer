@@ -1,0 +1,53 @@
+{
+  "scenario": "T10-06",
+  "status": "PASS",
+  "checks": {
+    "mock_received_one_clean": true,
+    "mock_clean_targets_folder_10": true,
+    "ui_reported_clean_result": true,
+    "no_real_network_write": true
+  },
+  "screenshots": [
+    "T10-06-scan-issue-detail.png",
+    "T10-06-clean-result.png",
+    "T10-06-operations-ledger.png"
+  ],
+  "notes": [
+    "清理结果文案：「异常收藏夹」重新扫描验证通过。B 站数量由 5 更新为 5 条，本次读取 5 条。 可以继续整理。",
+    "mock 远端调用序列：[\"session_created\", \"get_mid\", \"clean_invalid_folder\", \"list_folders\", \"get_folder_resource_ids\", \"iter_folder_videos\"]",
+    "远端写入核对面板文案：uat_move_to_existing · 10 等待核对 操作 ID：bfo-op-v1-f12ad15fe839595fb19733ffc94e4a5fc84055ce4bed3f78dd7f7f54dc8f7cac · 任务：uat-task · 尝试：1 · 更新：2026-10-19T23:24:04.910Z 前置条件：{}；目标结果：{} 我已检查 B 站当前状态，原操作前置条件仍然成立；允许系统复用同一操作记录重试。 确认远端已生效 确认未生效并允许安全重试 暂转人工复核"
+  ],
+  "mock_calls": [
+    {
+      "action": "session_created",
+      "at": 1792452246.5208638
+    },
+    {
+      "action": "get_mid",
+      "at": 1792452246.5208638
+    },
+    {
+      "action": "clean_invalid_folder",
+      "at": 1792452246.5719671,
+      "media_id": "10"
+    },
+    {
+      "action": "list_folders",
+      "at": 1792452246.578805,
+      "count": 2
+    },
+    {
+      "action": "get_folder_resource_ids",
+      "at": 1792452246.5918598,
+      "media_id": "10",
+      "expected": 5
+    },
+    {
+      "action": "iter_folder_videos",
+      "at": 1792452246.5980268,
+      "media_id": "10",
+      "expected": 5
+    }
+  ],
+  "duration_seconds": 14.1
+}

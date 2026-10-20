@@ -1,0 +1,19 @@
+Isolated checkout: <USERPROFILE>\AppData\Local\Temp\<SHORTPATH-CLONE>\<RUN-TEMP>\checkout
+Isolated LOCALAPPDATA: <USERPROFILE>\AppData\Local\Temp\<SHORTPATH-CLONE>\<RUN-TEMP>\profile
+python.exe : test_real_process_contention_and_reacquisition_for_empty_and_existing_files (scheduler.test_owner_lock.Fil
+eOwnerLockTests.test_real_process_contention_and_reacquisition_for_empty_and_existing_files) ... ok
+所在位置 行:14 字符: 1
++ & $Vpy tools/run_isolated_tests.py --test scheduler.test_owner_lock > ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_real_proce...g_files) ... ok:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_windows_acquire_never_reads_or_writes_lock_bytes (scheduler.test_owner_lock.FileOwnerLockTests.test_windows_acquir
+e_never_reads_or_writes_lock_bytes) ... ok
+test_windows_contender_reports_ownership_and_closes_handle_without_io (scheduler.test_owner_lock.FileOwnerLockTests.tes
+t_windows_contender_reports_ownership_and_closes_handle_without_io) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 1.458s
+
+OK

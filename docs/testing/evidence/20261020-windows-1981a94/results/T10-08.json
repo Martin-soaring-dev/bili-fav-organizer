@@ -1,0 +1,22 @@
+{
+  "scenario": "T10-08",
+  "status": "PASS",
+  "checks": {
+    "lamp_shows_no_model": true,
+    "startup_requests_bounded": true,
+    "steady_state_no_storm_window1": true,
+    "steady_state_no_storm_window2": true,
+    "api_models_empty": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-08-empty-model-config.png",
+    "T10-08-settings-model-empty.png"
+  ],
+  "notes": [
+    "启动 5 秒内 /api/config 请求 2 次",
+    "稳态第一窗口新增 0 次，第二窗口新增 0 次（总计 2）"
+  ],
+  "config_request_count": 2,
+  "duration_seconds": 21.6
+}

@@ -1,0 +1,32 @@
+[
+  {
+    "action": "session_created",
+    "at": 1792507846.322346
+  },
+  {
+    "action": "get_mid",
+    "at": 1792507846.3228686
+  },
+  {
+    "action": "clean_invalid_folder",
+    "at": 1792507846.3710842,
+    "media_id": "10"
+  },
+  {
+    "action": "list_folders",
+    "at": 1792507846.377897,
+    "count": 2
+  },
+  {
+    "action": "get_folder_resource_ids",
+    "at": 1792507846.39143,
+    "media_id": "10",
+    "expected": 5
+  },
+  {
+    "action": "iter_folder_videos",
+    "at": 1792507846.3964293,
+    "media_id": "10",
+    "expected": 5
+  }
+]

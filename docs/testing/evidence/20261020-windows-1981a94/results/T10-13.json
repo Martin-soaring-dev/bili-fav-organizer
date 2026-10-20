@@ -1,0 +1,22 @@
+{
+  "scenario": "T10-13",
+  "status": "PASS",
+  "checks": {
+    "paused_shows_reason": true,
+    "paused_no_analyze": true,
+    "paused_one_failed_step": true,
+    "cancelled_shows_reason": true,
+    "cancelled_no_analyze": true,
+    "cancelled_one_failed_step": true,
+    "completed_enters_analyze": true
+  },
+  "screenshots": [
+    "T10-13-scan-paused.png",
+    "T10-13-scan-cancelled.png",
+    "T10-13-scan-completed.png"
+  ],
+  "notes": [
+    "扫描终态由受控输入提供（/api/scan/status 路由拦截），其余接口为真实服务端；completed 分支进入分析阶段 1 次"
+  ],
+  "duration_seconds": 13.2
+}

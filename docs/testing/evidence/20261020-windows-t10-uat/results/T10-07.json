@@ -1,0 +1,23 @@
+{
+  "scenario": "T10-07",
+  "status": "PASS",
+  "checks": {
+    "task_running": true,
+    "cancel_button_clicked": true,
+    "task_cancelled": true,
+    "ui_shows_cancelled": true,
+    "resume_refused_after_cancel": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-07-task-running.png",
+    "T10-07-cancel-requested.png",
+    "T10-07-after-cancel.png"
+  ],
+  "notes": [
+    "取消后任务：{\"status\": \"CANCELLED\", \"pause_reason\": null, \"error\": null}",
+    "取消后 /api/scan/status = {\"id\": \"73a30a0ec87c4056a72077a67b5ec04c\", \"running\": false, \"status\": \"cancelled\", \"step\": \"videos\", \"done\": 3, \"total\": 17, \"error\": null, \"strategy\": \"paged_index_fallback\", \"stop\": true, \"folder_d",
+    "取消后请求 resume -> HTTP 409 {\"ok\": false, \"error\": \"此任务的进程内工作器已丢失；请从业务页按持久化进度重新发起\"}"
+  ],
+  "duration_seconds": 20.5
+}

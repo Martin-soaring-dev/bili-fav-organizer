@@ -1,0 +1,111 @@
+{
+  "scenario": "T10-14",
+  "status": "PASS",
+  "checks": {
+    "fixture_source_sha_unchanged": true,
+    "schema7_before_migration": true,
+    "schema_migrated_to_8": true,
+    "database_state_ready": true,
+    "counts_match_fixture": true,
+    "key_ids_match_fixture": true,
+    "integrity_check_ok": true,
+    "foreign_key_check_clean": true,
+    "ui_counters_rendered": true,
+    "ui_shows_fixture_folder": true,
+    "ui_shows_fixture_item": true,
+    "ui_item_count_is_one": true,
+    "db_inside_disposable_profile": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-14-after-upgrade-main-ui.png",
+    "T10-14-fixture-folder-items.png"
+  ],
+  "notes": [
+    "迁移前夹具快照：{\"schema_version\": 7, \"folders\": [{\"media_id\": \"FIXTURE-FOLDER\", \"title\": \"v0.209 synthetic folder\"}], \"videos\": [{\"bvid\": \"BVFIXTURE0001\", \"resource_id\": \"900001\"}], \"folder_items\": [{\"media_id\": \"FIXTURE-FOLDER\", \"resource_key\": \"BVFIXTURE0001\"}], \"counts\": {\"folders\": 1, \"videos\": 1, \"folder_items\": 1, \"analyses\": 0, \"plans\": 0}, \"integrity_check\": \"ok\", \"foreign_key_violations\": 0}",
+    "迁移后数据库快照：{\"schema_version\": 8, \"folders\": [{\"media_id\": \"FIXTURE-FOLDER\", \"title\": \"v0.209 synthetic folder\"}], \"videos\": [{\"bvid\": \"BVFIXTURE0001\", \"resource_id\": \"900001\"}], \"folder_items\": [{\"media_id\": \"FIXTURE-FOLDER\", \"resource_key\": \"BVFIXTURE0001\"}], \"counts\": {\"folders\": 1, \"videos\": 1, \"folder_items\": 1, \"analyses\": 0, \"plans\": 0}, \"integrity_check\": \"ok\", \"foreign_key_violations\": 0}",
+    "迁移后 /api/vault/status.database_state = READY",
+    "迁移后 /api/status.stats = {\"folders\": 1, \"videos\": 1, \"analyzed\": 0, \"planned\": 0}",
+    "升级后界面计数：{\"st-folders\": \"1\", \"st-videos\": \"1\", \"st-analyzed\": \"0\", \"st-planned\": \"0\"}",
+    "本地内容视图收藏夹数量：1",
+    "界面收藏夹文本：v0.209 synthetic folder 1 / 1",
+    "界面内容标题：v0.209 synthetic folder · 内容 · 条目数=1",
+    "界面条目文本：synthetic video BVFIXTURE0001 · 2023/11/15 06:13:20",
+    "夹具源哈希（前/后）：511f66afc63562f8a102a49150a55a22a839c0340fa70a9c64a0690692e1b273 / 511f66afc63562f8a102a49150a55a22a839c0340fa70a9c64a0690692e1b273",
+    "应用实际使用 DB：C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3",
+    "截图 SHA-256：{\"T10-14-after-upgrade-main-ui.png\": \"2bd7a4b3be55b66cf978a278565ccabe2a2cf856e77b5aa91ad25a35832a6f8f\", \"T10-14-fixture-folder-items.png\": \"40c2b8104ab5ad534369e23399d3555f073aef39abd78e415fc3b044d3fb4a03\"}"
+  ],
+  "screenshot_sha256": {
+    "T10-14-after-upgrade-main-ui.png": "2bd7a4b3be55b66cf978a278565ccabe2a2cf856e77b5aa91ad25a35832a6f8f",
+    "T10-14-fixture-folder-items.png": "40c2b8104ab5ad534369e23399d3555f073aef39abd78e415fc3b044d3fb4a03"
+  },
+  "blocked_reason": null,
+  "migration_snapshot_before": {
+    "schema_version": 7,
+    "folders": [
+      {
+        "media_id": "FIXTURE-FOLDER",
+        "title": "v0.209 synthetic folder"
+      }
+    ],
+    "videos": [
+      {
+        "bvid": "BVFIXTURE0001",
+        "resource_id": "900001"
+      }
+    ],
+    "folder_items": [
+      {
+        "media_id": "FIXTURE-FOLDER",
+        "resource_key": "BVFIXTURE0001"
+      }
+    ],
+    "counts": {
+      "folders": 1,
+      "videos": 1,
+      "folder_items": 1,
+      "analyses": 0,
+      "plans": 0
+    },
+    "integrity_check": "ok",
+    "foreign_key_violations": 0
+  },
+  "migration_snapshot_after": {
+    "schema_version": 8,
+    "folders": [
+      {
+        "media_id": "FIXTURE-FOLDER",
+        "title": "v0.209 synthetic folder"
+      }
+    ],
+    "videos": [
+      {
+        "bvid": "BVFIXTURE0001",
+        "resource_id": "900001"
+      }
+    ],
+    "folder_items": [
+      {
+        "media_id": "FIXTURE-FOLDER",
+        "resource_key": "BVFIXTURE0001"
+      }
+    ],
+    "counts": {
+      "folders": 1,
+      "videos": 1,
+      "folder_items": 1,
+      "analyses": 0,
+      "plans": 0
+    },
+    "integrity_check": "ok",
+    "foreign_key_violations": 0
+  },
+  "fixture_sha256": "511f66afc63562f8a102a49150a55a22a839c0340fa70a9c64a0690692e1b273",
+  "ui_counts_after_upgrade": {
+    "st-folders": "1",
+    "st-videos": "1",
+    "st-analyzed": "0",
+    "st-planned": "0"
+  },
+  "duration_seconds": 14.7
+}

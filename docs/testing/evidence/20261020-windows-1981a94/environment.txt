@@ -1,0 +1,17 @@
+BiliFavOrganizer T10 GUI acceptance - environment
+================================================
+collected_at            : 2026-10-20 22:54:02
+os_caption              : Microsoft Windows 11 专业版
+os_version_build         : 10.0.26300 / 26300 (64-bit)
+powershell              : 5.1.26100.9711
+python                  : 3.12.13
+playwright              : 1.63.0
+chromium                : Chrome for Testing 153.0.8010.12 (playwright build v1243)
+browser_mode            : headless Chromium, viewport 1440x900, deviceScaleFactor 1
+server_launch           : python <bootstrap.py> -> uvicorn.run(server.app, 127.0.0.1, ephemeral port)
+candidate_repo          : C:\BFOU5
+candidate_head          : 1981a94ed750d7be4e3404d6622ad776708f2091
+candidate_tree          : e943cc30ebf0b6dffcf69866c01761fba9928b32
+candidate_parent        : aa9dfb35033186fcb2e04db19cfbc250ecf37873
+
+Per-scenario server logs and mock call records are in logs/.

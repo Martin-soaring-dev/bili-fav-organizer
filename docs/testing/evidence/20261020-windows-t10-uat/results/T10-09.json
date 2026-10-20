@@ -1,0 +1,21 @@
+{
+  "scenario": "T10-09",
+  "status": "PASS",
+  "checks": {
+    "closed_by_user": true,
+    "banner_still_visible": true,
+    "popup_stayed_closed_after_scan_idle": true,
+    "user_can_reopen": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-09-issue-popup-open.png",
+    "T10-09-popup-closed-banner-visible.png",
+    "T10-09-after-scan-idle.png",
+    "T10-09-reopened-by-user.png"
+  ],
+  "notes": [
+    "两轮 scan_idle 后 #scan-issue-modal display = 'none'"
+  ],
+  "duration_seconds": 6.8
+}

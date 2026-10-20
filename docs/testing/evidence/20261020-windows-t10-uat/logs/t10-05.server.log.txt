@@ -1,0 +1,73 @@
+
+===== start 04:29:12 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "59054"}
+
+===== start 04:29:23 =====
+Traceback (most recent call last):
+  File "C:\BFO-UAT\profiles\t10-05\bootstrap.py", line 59, in <module>
+    server.VAULT.initialize(bound_mid=cfg.get("mid", "12345"),
+  File "C:\BFOU1\vault.py", line 198, in initialize
+    raise VaultError("加密库已经初始化，请解锁已有保险库，禁止重复初始化")
+vault.VaultError: 加密库已经初始化，请解锁已有保险库，禁止重复初始化
+
+===== start 04:31:20 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "62954"}
+
+===== start 04:31:31 =====
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": false, "vault_locked": false, "port": "64739"}
+
+===== start 04:32:33 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "64472"}
+2026-10-20 04:33:04,117 [core.scheduler.scheduler] Task 3f78a97a00754aa387088783db7fe081 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+
+===== start 04:33:06 =====
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": false, "vault_locked": false, "port": "53078"}
+
+===== start 04:33:49 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "52736"}
+2026-10-20 04:34:20,040 [core.scheduler.scheduler] Task 97343d0d6d5e43679a4a7649b33a3615 failed
+Traceback (most recent call last):
+  File "C:\BFOU1\core\scheduler\scheduler.py", line 861, in _run_task
+    execute(context)
+  File "C:\BFOU1\server.py", line 2162, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 收藏夹数量不一致，请先处理扫描异常提示
+
+===== start 04:34:22 =====
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": false, "vault_locked": false, "port": "59504"}
+
+===== start 04:35:24 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "58359"}
+
+===== start 04:35:38 =====
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": false, "vault_locked": false, "port": "59960"}
+
+===== start 04:48:26 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "56565"}
+
+===== start 04:48:39 =====
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": false, "vault_locked": false, "port": "57285"}
+
+===== start 05:02:53 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "62588"}
+
+===== start 05:03:06 =====
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": false, "vault_locked": false, "port": "52299"}
+
+===== start 05:09:25 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "59157"}
+
+===== start 05:09:38 =====
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": false, "vault_locked": false, "port": "52643"}
+
+===== start 07:23:38 =====
+UAT_BOOTSTRAP_READY {"mode": "fresh", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "58194"}
+
+===== start 07:23:51 =====
+UAT_BOOTSTRAP_READY {"mode": "uninitialized", "data_dir": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-05\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": false, "vault_locked": false, "port": "50673"}

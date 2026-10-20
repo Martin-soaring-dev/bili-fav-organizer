@@ -1,0 +1,30 @@
+{
+  "scenario": "T10-04",
+  "status": "PASS",
+  "checks": {
+    "task_running_before_lock": true,
+    "lock_screen_shown": true,
+    "vault_reports_locked": true,
+    "database_locked": true,
+    "unlock_accepted": true,
+    "task_survived_lock_cycle": true,
+    "checkpoint_preserved_across_lock": true,
+    "card_shows_checkpoint": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-04-scan-running-before-lock.png",
+    "T10-04-locked.png",
+    "T10-04-after-unlock.png",
+    "T10-04-task-after-unlock.png"
+  ],
+  "notes": [
+    "锁定前任务状态：RUNNING",
+    "锁定尝试记录：[]",
+    "锁定后 /api/vault/status.lock_phase = {'phase': 'locked', 'error': '', 'updated_at': '2026-10-20T22:50:07+0800'} database_state = LOCKED",
+    "锁定窗口内 /api/tasks 也一并拒绝（属预期：数据库已封闭）",
+    "任务卡文案片段：收藏夹扫描 · aa7b20b2e665 已完成 收藏夹 2/2 · 条目 15/15 检查点：收藏夹 10 · 已处理 15 条 · 检查点 v1 开始：2026-10-20T14:50:06.266+00:00 · 更新：2026-10-20T14:50:11.000+00:00 · 执行次数：2",
+    "解锁后任务记录：[{\"task_id\": \"aa7b20b2e6654de98337c53d07d5049d\", \"task_type\": \"scan\", \"task_schema_version\": 1, \"checkpoint_schema_version\": 1, \"status\": \"COMPLETED\", \"parameters\": {\"folder_ids\": [], \"mode\": \"resume\", \"recovery\": null}, \"checkpoint\": {\"version\": 1, \"folder_done\": 2, \"last_completed_folder\": \"10\", \"done\": 15}, \"progress\": {\"phase\": \"folder_complete\", \"current\": \"\", \"items\": {\"done\": 15, \"total\": 15}, \"folders\": {\"done\": 2, \"total\": 2}}, \"error\": null, \"resume_policy\": \"AUTO_SAFE\", \"pause_reason\": null, \"resume_intent\": \"MANUAL\", \"attempt\": 2, \"owner_epoch\": 1, \"resource_keys\": [\"local-library\""
+  ],
+  "duration_seconds": 20.0
+}

@@ -1,0 +1,39 @@
+[
+  {
+    "action": "session_created",
+    "at": 1792452314.4386845
+  },
+  {
+    "action": "get_mid",
+    "at": 1792452314.439199
+  },
+  {
+    "action": "list_folders",
+    "at": 1792452314.4418106,
+    "count": 2
+  },
+  {
+    "action": "get_folder_resource_ids",
+    "at": 1792452314.4819922,
+    "media_id": "20",
+    "expected": 3
+  },
+  {
+    "action": "iter_folder_videos",
+    "at": 1792452314.4910522,
+    "media_id": "20",
+    "expected": 3
+  },
+  {
+    "action": "get_folder_resource_ids",
+    "at": 1792452316.952295,
+    "media_id": "10",
+    "expected": 16
+  },
+  {
+    "action": "iter_folder_videos",
+    "at": 1792452316.9667523,
+    "media_id": "10",
+    "expected": 16
+  }
+]

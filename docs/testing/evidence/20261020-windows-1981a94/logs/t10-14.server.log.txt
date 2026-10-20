@@ -1,0 +1,24 @@
+
+===== start 04:38:38 =====
+UAT_BOOTSTRAP_READY {"mode": "schema7", "data_dir": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "50972"}
+
+===== start 04:40:18 =====
+UAT_BOOTSTRAP_READY {"mode": "schema7", "data_dir": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "50841"}
+
+===== start 04:51:47 =====
+UAT_BOOTSTRAP_READY {"mode": "schema7", "data_dir": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "59086"}
+
+===== start 05:05:44 =====
+UAT_BOOTSTRAP_READY {"mode": "schema7", "data_dir": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "56477"}
+
+===== start 05:12:17 =====
+UAT_BOOTSTRAP_READY {"mode": "schema7", "data_dir": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "54695"}
+
+===== start 05:57:05 =====
+UAT_BOOTSTRAP_READY {"mode": "schema7", "data_dir": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "61048"}
+
+===== start 07:26:29 =====
+UAT_BOOTSTRAP_READY {"mode": "schema7", "data_dir": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "55953"}
+
+===== start 22:53:08 =====
+UAT_BOOTSTRAP_READY {"mode": "schema7", "data_dir": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data", "db_file": "C:\\BFO-UAT\\profiles\\t10-14\\profile\\BiliFavOrganizer\\data\\library.sqlite3", "db_exists": true, "database_state": "READY", "vault_complete": true, "vault_locked": false, "port": "50547"}

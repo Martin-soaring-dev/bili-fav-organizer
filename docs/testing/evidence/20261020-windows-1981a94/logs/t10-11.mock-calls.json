@@ -1,0 +1,52 @@
+[
+  {
+    "action": "session_created",
+    "at": 1792507942.3152013
+  },
+  {
+    "action": "get_mid",
+    "at": 1792507942.3157685
+  },
+  {
+    "action": "list_folders",
+    "at": 1792507942.3217745,
+    "count": 2
+  },
+  {
+    "action": "get_folder_resource_ids",
+    "at": 1792507942.3761928,
+    "media_id": "20",
+    "expected": 3
+  },
+  {
+    "action": "iter_folder_videos",
+    "at": 1792507942.393688,
+    "media_id": "20",
+    "expected": 3
+  },
+  {
+    "action": "get_folder_resource_ids",
+    "at": 1792507944.831957,
+    "media_id": "10",
+    "expected": 16
+  },
+  {
+    "action": "iter_folder_videos",
+    "at": 1792507944.8398082,
+    "media_id": "10",
+    "expected": 16
+  },
+  {
+    "action": "session_created",
+    "at": 1792507959.5873113
+  },
+  {
+    "action": "get_mid",
+    "at": 1792507959.588312
+  },
+  {
+    "action": "list_folders",
+    "at": 1792507959.5903115,
+    "count": 2
+  }
+]

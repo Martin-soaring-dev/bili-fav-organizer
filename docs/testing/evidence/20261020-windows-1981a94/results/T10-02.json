@@ -1,0 +1,23 @@
+{
+  "scenario": "T10-02",
+  "status": "PASS",
+  "checks": {
+    "folders_progress": true,
+    "items_progress": true,
+    "checkpoint_line": true,
+    "checkpoint_page": true,
+    "legacy_ratio": true,
+    "paused_status_badge": true,
+    "action_buttons_present": true,
+    "card_count_is_three": true,
+    "api_task_count": true,
+    "no_page_errors": true
+  },
+  "screenshots": [
+    "T10-02-task-center.png"
+  ],
+  "notes": [
+    "加载时弹出扫描异常提示：True"
+  ],
+  "duration_seconds": 10.7
+}
