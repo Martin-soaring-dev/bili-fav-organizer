@@ -12,6 +12,8 @@
 
 本节为当前权威状态。下方较早的执行记录保留用于追溯，不能覆盖本节结论。
 
+**分支收敛目标：**维护者要求最终只保留 `main`。当前 `feat/reliability-scheduler-implementation`、`docs/reliability-scheduler-refactor-plan`、`fix/vault-active-work-barrier` 和 `master` 均无 main 独有提交；旧 `ci/ea-playwright-full-regression-20261019` 的两份 workflow 修改已被 main 中更新、更严格的版本覆盖。删除 `gh-pages` 前须把 dashboard 切换到 main 的 Pages 来源并验证；删除两个 `evidence/*` 分支前须将报告、日志、截图迁入并更新链接；`maintenance/release-pipeline-post-v0209` 与 `new_arch` 含未合并独有内容，须先归档或明确决定舍弃。最终删除前再次核对远端分支列表，确保只剩 `main`。
+
 **用途：**按本清单维护 `bili-fav-organizer`，逐项修复、测试、截图验收并汇报。它把 [维护计划](reliability-maintenance-plan.md) 转成可执行任务卡。
 **更新日期：**2026-10-21
 **状态：**候选已合并；T8/T10/T11a/T11b 已通过，T3 为 PARTIAL，T12 未执行。详细结论见上方“合并后收尾状态”。
