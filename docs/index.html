@@ -5,8 +5,8 @@
 </style><style>
 .exec-layout{display:grid;grid-template-columns:1.05fr 1fr;gap:14px;margin:0 0 14px}.exec-test-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:9px;margin-top:12px}.exec-test{padding:11px;border:1px solid rgba(135,165,185,.22);border-radius:12px;background:rgba(127,154,176,.06)}.exec-test strong{display:block;font-size:19px;color:var(--teal);margin-bottom:4px}.exec-test span,.exec-test small{display:block}.exec-test small{color:var(--muted);margin-top:5px;line-height:1.45}.exec-online{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}.exec-online a{font-weight:700}.exec-online p{margin:6px 0;line-height:1.55}.exec-table-wrap{overflow:auto;margin-top:10px}.exec-table{width:100%;border-collapse:collapse;min-width:790px}.exec-table th,.exec-table td{text-align:left;padding:9px 10px;border-bottom:1px solid rgba(135,165,185,.2);vertical-align:top}.exec-table th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.exec-table td:nth-child(1){white-space:nowrap}.exec-next{margin:6px 0 0;padding-left:20px;line-height:1.75}.exec-note{margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid rgba(224,176,92,.25);background:rgba(224,176,92,.07);line-height:1.65}.exec-caption{font-size:12px;color:var(--muted);line-height:1.6}.exec-table td p{margin:0;line-height:1.55}@media(max-width:850px){.exec-layout{grid-template-columns:1fr}}
 </style></head><body><div class="app"><aside class="sidebar"><div class="logo"><div class="mark">B</div><div><strong>BiliFavOrganizer</strong><small>DELIVERY CONSOLE · V5</small></div></div><div><div class="navlabel">PROJECT WORKSPACE</div><nav class="nav" id="nav"><button class="active" data-page="overview"><span class="num">01</span>项目总览</button><button data-page="roadmap"><span class="num">02</span>路线图与合流</button><button data-page="tasks"><span class="num">03</span>任务与 Codex</button><button data-page="evidence"><span class="num">04</span>CI / 证据</button><button data-page="risk"><span class="num">05</span>风险与门禁</button><button data-page="history"><span class="num">06</span>Focus 演进</button></nav></div><div class="sidefoot"><strong id="sideVersion">状态快照 · 2026-10-19</strong><div>已验证与未完成严格分离。</div><div>HTML 离线可用 · 不自动同步 GitHub</div><div id="sideGit"></div></div></aside><main class="main"><div class="top"><div class="kicker">PROJECT INTELLIGENCE / RELEASE READINESS</div><div class="tools"><span class="pill ok">● T8 / PR CI PASS</span><span class="pill warn">RC 等待 T12 授权</span><button class="btn" id="theme">☀ 切换主题</button><button class="btn" id="copyOverview">复制现状</button><button class="btn accent" id="downloadJSON">导出 JSON</button></div></div><h1>候选验收通过，主线已合并；进入仓库收尾阶段。</h1><p class="intro">首页汇总已合并候选的验收、仍开放的问题，以及将远端分支收敛至 main 前必须保全的内容。</p>
-<section id="page-overview" class="view active"><div class="hero"><div class="kicker" style="color:#94ddd5">CURRENT PROJECT CLOSEOUT · 2026-10-21</div><h2 id="heroTitle"></h2><p id="heroText"></p><div class="tags"><span class="pill ok">PR #22 merged</span><span class="pill ok">T8 330/330 PASS</span><span class="pill ok">T10 14/14 · 39 screenshots</span><span class="pill warn">T3 PARTIAL</span></div></div><div class="sectionhead"><h2>合并后收尾状态 · 2026-10-21</h2><small>候选 1981a94 已并入 main；T12 发布尚未执行</small></div><div id="executionPanel"></div><div class="stats" id="stats"></div><div class="sectionhead"><h2>当前状态</h2><small>已合并候选与 branch consolidation 计划</small></div><div class="pane"><div class="lanes"><div class="trackname">候选验收 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">1981a94</span><span class="arrow">→</span><span class="trackbox passed">T8 330/330</span><span class="arrow">→</span><span class="trackbox passed">T10 14/14</span><span class="arrow">→</span><span class="trackbox passed">T11a / T11b</span><span class="arrow">→</span><span class="trackbox passed">PR #22 merged</span></div><p class="meta">T11b 使用同 SHA 本地 installer；Beta CI artifact 未上传。T3 保持 PARTIAL；T12 等待明确 GO。</p></div><div class="trackname">分支收敛 →</div><div class="track future"><div class="trackbar"><span class="trackbox passed">main 已含候选</span><span class="arrow">→</span><span class="trackbox next">迁移 Pages</span><span class="arrow">→</span><span class="trackbox">归档 evidence / unique commits</span><span class="arrow">→</span><span class="trackbox">仅保留 main</span></div><p class="meta">先保全公开看板、验收证据与非 main 独有提交，再删除其他分支。</p></div></div></div><div class="sectionhead"><h2>收尾与发布门禁</h2><small>查看各阶段证据与尚未授权的操作</small></div><div class="gategrid" id="gateCards"></div><div id="gatePreview"></div><div class="sectionhead"><h2>下一步执行焦点</h2><small>由真实阻塞而不是操作日志决定优先级</small></div><div class="two"><div class="pane"><div class="p-title">当前收尾工作 <span class="pill warn">IN PROGRESS</span></div><ul id="focusTodos" class="cleanlist"></ul></div><div class="pane"><div class="p-title">合并完成后还剩什么？</div><p id="focusWhy" class="meta" style="font-size:12px;line-height:1.9"></p><div class="caution" id="focusBlocked"></div></div></div></section>
-<section id="page-roadmap" class="view"><div class="sectionhead"><h2>验收关口与后续动作</h2><small>T12 需要明确 GO；分支删除前先迁移独有数据</small></div><div class="gategrid" id="roadmapCards"></div><div class="details" id="roadmapDetail"></div><div class="sectionhead"><h2>并行与合流规则</h2><small>避免多个云任务同时修改事务核心</small></div><div class="tasks" id="parallelBlocks"></div><div class="sectionhead"><h2>分支收敛顺序</h2><small>保全内容后再删除远端 refs</small></div><div class="pane"><p><strong>1.</strong> 将公开看板从 <code>gh-pages</code> 迁移到 main 来源并验证线上页面。</p><p><strong>2.</strong> T8/T10/T11b 报告、日志与截图已迁入 main 的证据归档；复核后删除 evidence refs。</p><p><strong>3.</strong> 审阅 release-pipeline 与 new_arch 的独有提交，决定迁入 main 或舍弃。</p><p><strong>4.</strong> 删除其余远端 branch refs，最终核对仅剩 <code>main</code>。</p><p class="meta">feature/docs/fix/master 无 main 独有提交；CI workflow 已被 main 更新覆盖；evidence 已迁入 main。gh-pages 需切换 Pages 来源；maintenance 与 new_arch 需处置独有代码。</p></div></section>
+<section id="page-overview" class="view active"><div class="hero"><div class="kicker" style="color:#94ddd5">CURRENT PROJECT CLOSEOUT · 2026-10-21</div><h2 id="heroTitle"></h2><p id="heroText"></p><div class="tags"><span class="pill ok">PR #22 merged</span><span class="pill ok">T8 330/330 PASS</span><span class="pill ok">T10 14/14 · 39 screenshots</span><span class="pill warn">T3 PARTIAL</span></div></div><div class="sectionhead"><h2>合并后收尾状态 · 2026-10-21</h2><small>候选 1981a94 已并入 main；T12 发布尚未执行</small></div><div id="executionPanel"></div><div class="stats" id="stats"></div><div class="sectionhead"><h2>当前状态</h2><small>已合并候选与 branch consolidation 计划</small></div><div class="pane"><div class="lanes"><div class="trackname">候选验收 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">1981a94</span><span class="arrow">→</span><span class="trackbox passed">T8 330/330</span><span class="arrow">→</span><span class="trackbox passed">T10 14/14</span><span class="arrow">→</span><span class="trackbox passed">T11a / T11b</span><span class="arrow">→</span><span class="trackbox passed">PR #22 merged</span></div><p class="meta">T11b 使用同 SHA 本地 installer；Beta CI artifact 未上传。T3 保持 PARTIAL；T12 等待明确 GO。</p></div><div class="trackname">分支收敛 →</div><div class="track future"><div class="trackbar"><span class="trackbox passed">main 已含候选</span><span class="arrow">→</span><span class="trackbox next">Pages → main/docs</span><span class="arrow">→</span><span class="trackbox">3 个归档 tag</span><span class="arrow">→</span><span class="trackbox">仅保留 main</span></div><p class="meta">先保全公开看板、验收证据与非 main 独有提交，再删除其他分支。</p></div></div></div><div class="sectionhead"><h2>收尾与发布门禁</h2><small>查看各阶段证据与尚未授权的操作</small></div><div class="gategrid" id="gateCards"></div><div id="gatePreview"></div><div class="sectionhead"><h2>下一步执行焦点</h2><small>由真实阻塞而不是操作日志决定优先级</small></div><div class="two"><div class="pane"><div class="p-title">当前收尾工作 <span class="pill warn">IN PROGRESS</span></div><ul id="focusTodos" class="cleanlist"></ul></div><div class="pane"><div class="p-title">合并完成后还剩什么？</div><p id="focusWhy" class="meta" style="font-size:12px;line-height:1.9"></p><div class="caution" id="focusBlocked"></div></div></div></section>
+<section id="page-roadmap" class="view"><div class="sectionhead"><h2>验收关口与后续动作</h2><small>T12 需要明确 GO；分支删除前先迁移独有数据</small></div><div class="gategrid" id="roadmapCards"></div><div class="details" id="roadmapDetail"></div><div class="sectionhead"><h2>并行与合流规则</h2><small>避免多个云任务同时修改事务核心</small></div><div class="tasks" id="parallelBlocks"></div><div class="sectionhead"><h2>分支收敛顺序</h2><small>保全内容后再删除远端 refs</small></div><div class="pane"><p><strong>1.</strong> 把 GitHub Pages source 切换到 <code>main /docs</code>，等待部署并在线核验 dashboard。</p><p><strong>2.</strong> 删除前为 CI（<code>df88174</code>）、maintenance（<code>c4e1d79</code>）、new_arch（<code>52d4f9e</code>）创建 <code>archive/*</code> 归档标签，保留未合入历史。</p><p><strong>3.</strong> 证据文件和 dashboard 已复制到 main；PR #22 merged、PR #21 closed、当前无 open PR。Issue #6 未解决，继续保持 open。</p><p><strong>4.</strong> 删除所有 10 个非 main branch refs，最后重新列出远端 branches，确认只剩 <code>main</code>。</p></div></section>
 <section id="page-tasks" class="view"><div class="sectionhead"><h2>7 项合并收尾工作</h2><small>只展示当前 PR、分支、Issue 与发布收尾事项</small></div><div class="filters"><input class="field search" id="taskSearch" placeholder="搜索编号、标题、模块或下一步"><select class="field" id="taskFilter"><option value="all">全部状态</option><option value="BLOCKED">BLOCKED</option><option value="FAIL">FAIL</option><option value="PASS">PASS</option><option value="NOT_RUN">NOT_RUN</option><option value="PARTIAL">PARTIAL</option><option value="PATCH_TESTED">PATCH_TESTED</option><option value="EA_CI_PASS">EA_CI_PASS</option><option value="PENDING">PENDING</option><option value="OPEN">OPEN</option></select><select class="field" id="taskWave"><option value="all">全部波次</option><option>W0</option><option>W1</option><option>W2</option><option>W3</option><option>W4</option><option>W5</option></select></div><p id="taskCount" class="tasks-note"></p><div class="tasks" id="taskList"></div></section>
 <section id="page-evidence" class="view"><div class="sectionhead"><h2>CI / 质量证据</h2><small>只显示与仓库可追溯的真实结果</small></div><div class="evidence" id="ciPanels"></div><div class="sectionhead"><h2>状态与 GitHub 原始证据</h2><small>以 PR、Run、Issue 和具体 SHA 为准</small></div><div class="pane refs" id="refs"></div><div class="sectionhead"><h2>提交指纹</h2></div><pre id="shaPanel" class="codeish"></pre><div class="caution" style="margin-top:15px">T8/T10/T11a/T11b 已通过并合并；T11b 安装验收使用同 SHA 本地安装包，CI 未上传 artifact。尚未创建 tag 或 Release；T12 需要明确 GO。</div></section>
 <section id="page-risk" class="view"><div class="sectionhead"><h2>阻塞与风险</h2><small>只保留对发布/数据安全有实际影响的事项</small></div><div class="riskgrid" id="riskGrid"></div><div class="sectionhead"><h2>发布前必须满足的门禁</h2></div><div id="riskGates" class="details"></div></section>
@@ -15,13 +15,13 @@
   "name": "BiliFavOrganizer",
   "version": "Status Console V5.2",
   "snapshot_date": "2026-10-21",
-  "snapshot_kind": "post-merge closeout; PR #22 merged; T8/T10/T11a/T11b PASS; T3 PARTIAL; T12 NOT_RUN; branch consolidation to main pending safe migration",
-  "headline": "PR #22 已合并到 main（merge commit 903666a；main 收尾与 evidence 同步提交 9cc4187）。候选 1981a94 的 T8 330/330、T10 14/14（39 张截图）、T11a PR checks、T11b 隔离安装与 schema 7→8 升级均 PASS。T11b 使用同 SHA 本地构建安装包；CI packaging 通过 smoke 但未上传 artifact。T3 维持 PARTIAL；T9 已从当前门禁退休；T12 尚未执行，需明确 GO。旧 PR #21 已关闭。",
-  "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / T12 NOT_RUN",
+  "snapshot_kind": "post-merge closeout; PR #22 merged; T8/T10/T11a/T11b PASS; T3 PARTIAL; T12 NOT_RUN; 10 non-main refs inventoried; Pages switch and branch cleanup pending",
+  "headline": "PR #22 已合并到 main（merge commit 903666a）。候选 1981a94 的 T8 330/330、T10 14/14（39 张截图）、T11a PR checks、T11b 隔离安装与 schema 7→8 升级均 PASS。T11b 使用同 SHA 本地构建安装包；CI packaging 通过 smoke 但未上传 artifact。T3 维持 PARTIAL；T9 已从当前门禁退休；T12 尚未执行，需明确 GO。PR #21 已关闭，目前没有打开的 PR。Issue #6 仍 open，属未修复的独立问题。远端当前 10 个非 main refs；Pages 切换和分支清理尚待完成。",
+  "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / T12 NOT_RUN / 10 NON-MAIN BRANCHES PENDING CLEANUP",
   "repository": {
     "name": "Martin-soaring-dev/bili-fav-organizer",
     "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer",
-    "main_sha": "9cc4187eac3761df39be760096c1398eedcaee87",
+    "main_sha": "82b3ff5bda11e290b4e788280294bacb6c245d75",
     "ea_branch": "feat/reliability-scheduler-implementation",
     "ea_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
     "ci_branch": "ci/ea-playwright-full-regression-20261019",
@@ -42,7 +42,7 @@
     },
     "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
     "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
-    "candidate_state": "PR #22 已将候选 1981a94（tree e943cc30）合并到 main，merge commit 903666a；随后文档同步提交 1d9ce32。T8/T10/T11a/T11b PASS；T3 PARTIAL；T9 退出当前门禁；T12 等待明确 GO。",
+    "candidate_state": "PR #22 将候选 1981a94（tree e943cc30）合并到 main，merge commit 903666a；T8/T10/T11a/T11b PASS；T3 PARTIAL；T9 退出当前门禁；T12 等待明确 GO。文档与证据持续同步至 main。",
     "candidate_branch_head": "1981a94ed750d7be4e3404d6622ad776708f2091",
     "candidate_branch_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
     "merge_sha": "903666a11f3914291f3352bd92e041eaa40f7ce5",
@@ -66,26 +66,56 @@
       "head_sha": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
       "scope": "CI-only / obsolete after PR #22"
     },
-    "branch_goal": "仅保留 main；需先迁移 GitHub Pages、证据和非 main 独有提交",
+    "branch_goal": "最终只保留 main；Pages 已复制到 main/docs，仍需切换 Pages source、保存 3 个独有 branch heads，再删除 10 个非 main refs",
     "branch_cleanup": {
-      "status": "PENDING_PAGES_AND_UNIQUE_CODE",
-      "safe_to_remove_after_verification": [
-        "feat/reliability-scheduler-implementation",
-        "docs/reliability-scheduler-refactor-plan",
-        "fix/vault-active-work-barrier",
-        "master",
-        "ci/ea-playwright-full-regression-20261019",
+      "status": "PENDING_PAGES_SWITCH_AND_REF_DELETION",
+      "remote_branch_count": 11,
+      "non_main_branch_count": 10,
+      "archive_before_delete": [
+        {
+          "branch": "ci/ea-playwright-full-regression-20261019",
+          "head": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
+          "tag": "archive/ci-ea-playwright-full-regression-20261019",
+          "reason": "6 unique commits; workflow changes superseded in main"
+        },
+        {
+          "branch": "maintenance/release-pipeline-post-v0209",
+          "head": "c4e1d79616abd45c8a7776125ecabb6893271e52",
+          "tag": "archive/maintenance-release-pipeline-post-v0209",
+          "reason": "3 unique commits not merged"
+        },
+        {
+          "branch": "new_arch",
+          "head": "52d4f9e5a898a7013724da215cf0caf18b6d7dab",
+          "tag": "archive/new_arch",
+          "reason": "1 unique commit not merged"
+        }
+      ],
+      "evidence_copied_to_main": [
         "evidence/windows-t10-uat-20261020",
         "evidence/windows-owner-lock-20261020"
       ],
-      "preserve_until_migrated_or_decided": [
+      "zero_unique_commits": [
+        "feat/reliability-scheduler-implementation",
+        "docs/reliability-scheduler-refactor-plan",
+        "fix/vault-active-work-barrier",
+        "master"
+      ],
+      "delete_after_pages_switch_and_archive": [
+        "ci/ea-playwright-full-regression-20261019",
+        "docs/reliability-scheduler-refactor-plan",
+        "evidence/windows-owner-lock-20261020",
+        "evidence/windows-t10-uat-20261020",
+        "feat/reliability-scheduler-implementation",
+        "fix/vault-active-work-barrier",
         "gh-pages",
         "maintenance/release-pipeline-post-v0209",
+        "master",
         "new_arch"
       ],
-      "note": "证据目录已复制到 main（commit d74bdb9）并且任务清单链接已更新。gh-pages 仍承载线上页面；release-pipeline 与 new_arch 含 main 未有独有代码。Pages 切换验证及独有代码处置完成后再删剩余 refs。"
+      "note": "main 已收录候选、两条 evidence 分支全部归档文件和 dashboard 副本。远端 compare 以 main 82b3ff5 为基线：4 条分支无独有提交；CI 有 6、maintenance 有 3、new_arch 有 1 个独有提交。切换 Pages 到 main/docs 并在线验证后，先建 archive/* 归档标签保存三个 branch head，再删除其余 10 个 branch refs。Issue #6 保持 open；PR #22 merged、PR #21 closed、当前无 open PR。"
     },
-    "dashboard_main_snapshot_sha": "9cc4187eac3761df39be760096c1398eedcaee87",
+    "dashboard_main_snapshot_sha": "82b3ff5bda11e290b4e788280294bacb6c245d75",
     "dashboard_path_on_main": "docs/index.html",
     "evidence_archive_commit": "d74bdb9c0d7a15860dbe5f39e2b67a4a9d6ed093"
   },
@@ -246,7 +276,7 @@
         "ci/*",
         "maintenance/*"
       ],
-      "note": "验收报告、日志与截图已归档在 main/docs/testing/evidence，两个 evidence refs 可在链接复核后删除。gh-pages 承载线上看板；maintenance/release-pipeline 和 new_arch 有 main 未合入的独有代码。"
+      "note": "证据与 dashboard 已复制到 main。Pages 仍使用 gh-pages；CI、maintenance、new_arch 三个 head 需先建立 archive/* 标签保全，之后删除所有非 main refs。"
     },
     {
       "title": "未关闭的独立事项",
@@ -553,38 +583,39 @@
       "status": "PARTIAL",
       "wave": "W5",
       "priority": "P1",
-      "detail": "Windows T8/T10/T11b evidence 已迁入 main。gh-pages 仍承载公开 dashboard；maintenance/release-pipeline 与 new_arch 仍含 main 未有的独有代码。",
-      "next": "切换 Pages 到 main/docs 并在线验证；对独有代码做处置决定后，再删除剩余 refs。",
+      "detail": "远端确认 10 个非 main refs。候选与 evidence 已归档到 main；feat/docs/fix/master 无独有提交。CI workflow 已被 main 更新版本覆盖；maintenance 与 new_arch 分别有 3、1 个未合入提交。dashboard 已复制到 main/docs，GitHub Pages 仍在 gh-pages。",
+      "next": "把 Pages source 切到 main/docs 并在线验证；为 ci、maintenance、new_arch 建 archive/* 归档标签后，删除全部 10 个非 main refs；最后确认只剩 main。",
       "deps": [],
       "write": [
-        "Pages 配置",
-        "证据归档",
-        "远端 branch refs"
+        "Pages source",
+        "archive tags",
+        "remote branch refs",
+        "docs/index.html"
       ],
       "accept": [
-        "T8/T10/T11b evidence 链接在 main 可用",
-        "公开 dashboard 在 main/docs 来源正常部署",
-        "独有代码均已保全或明确舍弃",
-        "最终分支列表仅 main"
+        "Pages dashboard 由 main/docs 正常提供",
+        "3 个独有 branch head 有 archive/* 标签",
+        "远端分支列表只剩 main"
       ]
     },
     {
       "id": "C07",
       "title": "文档与 dashboard 状态对齐",
       "module": "Docs",
-      "status": "PASS",
+      "status": "PARTIAL",
       "wave": "W5",
       "priority": "P1",
-      "detail": "主线任务清单已更新为合并后状态；dashboard 本轮更新至 PR #22 merged、T8/T10/T11a/T11b PASS、T3 PARTIAL、T12 NOT_RUN。",
-      "next": "验证 Pages 部署结果。",
+      "detail": "main 任务清单与 dashboard 已同步到合并后状态；公开 Pages 仍使用 gh-pages，main/docs 切换后的线上部署尚未验证。",
+      "next": "切换 Pages source 到 main/docs，等待 built，再核验公开 URL 与当前状态。",
       "deps": [],
       "write": [
         "docs/testing/reliability-maintenance-task-list.md",
+        "main:docs/index.html",
         "gh-pages:index.html"
       ],
       "accept": [
-        "主线与公开看板表述一致",
-        "线上页面无合并前过时状态"
+        "main 任务清单与 dashboard 表述一致",
+        "GitHub Pages 从 main/docs 部署并在线验证"
       ]
     }
   ],
@@ -592,11 +623,11 @@
     "C03": "T3 当前为 PARTIAL。若继续，请只补齐按 schema 5/6/7/8 的类型与 NOT NULL 抽样变异、动态枚举 CHECK 约束并逐条证伪、schema<5 普通连接拒绝与人工恢复/导出的自动化路径；任何源码改动都要生成新 SHA 并重跑受影响门禁。",
     "C04": "先独立复现和修复 Issue #6 的收藏夹计数不一致，再按 issue 的验收场景验证。未修复并验收前保持 issue open，不要仅因 PR #22 合并而关闭。",
     "C05": "T12 目前 NOT_RUN。只有维护者明确给出发布 GO 后，才开始检查当前 main、构建候选、创建 tag 或触发发布 workflow。",
-    "C06": "目标是最终仅保留 main。证据已迁入 main；先把 Pages 来源切到 main/docs 并验证，再检查 maintenance/release-pipeline 和 new_arch 的独有代码并迁入或明确舍弃。确认所有链接与部署正常后，删除其他远端 branch refs。"
+    "C06": "最终仅保留 main。将 Pages source 切到 main/docs 并验证；为 df88174、c4e1d79、52d4f9e 三个独有 branch head 创建 archive/* 标签，保留完整历史；然后删除全部 10 个非 main 分支并核验远端仅剩 main。Issue #6 保持 open。"
   },
   "execution_snapshot": {
     "date": "2026-10-21",
-    "hero_title": "PR #22 已合并 main：T8/T10/T11a/T11b PASS；T3 PARTIAL；发布待 T12 GO",
+    "hero_title": "PR #22 已合并 main：T8/T10/T11a/T11b PASS；T3 PARTIAL；branch cleanup 已盘点，待 Pages 切换与归档后删除 refs",
     "candidate": {
       "baseline_sha": "ea4983d2bb9f6d8c0ea54faeddc790a9e096df63",
       "baseline_tree": "939a0607988524b7afec8097fde3e9acda4ec655",
@@ -970,7 +1001,14 @@
       "acceptance_report_status": "PARTIAL",
       "discrepancy": "已对齐；任务清单和验收报告均为 PARTIAL。",
       "next": "按需补齐按版本抽样变异、动态 CHECK 枚举，以及 schema<5 普通连接拒绝/人工恢复导出自动化。"
-    }
+    },
+    "do_now": [
+      "把 GitHub Pages source 切换到 main/docs，等待部署并在线核验 dashboard。",
+      "为 ci、maintenance、new_arch 三个未合入 head 创建 archive/* 归档标签，保留原始 commit 历史。",
+      "删除全部 10 个非 main 分支并再次列出远端 branches，确认只剩 main。",
+      "Issue #6 未修复，继续保持 open；T12 仍需维护者明确 GO。"
+    ],
+    "blocked": "PR #22 已合并；当前无打开的 PR。分支收敛尚待 Pages source 切换、3 个 archive 标签、删除 10 个非 main refs 与最后核验。Issue #6 仍未解决并保持 open；T12 仍需明确 GO。"
   }
 }</script><script>
 (()=>{'use strict';
