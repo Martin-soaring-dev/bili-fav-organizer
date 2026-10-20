@@ -16,12 +16,12 @@
   "version": "Status Console V5.2",
   "snapshot_date": "2026-10-21",
   "snapshot_kind": "post-merge closeout; PR #22 merged; T8/T10/T11a/T11b PASS; T3 PARTIAL; T12 NOT_RUN; branch consolidation to main pending safe migration",
-  "headline": "PR #22 已合并到 main（merge commit 903666a；当前 main 文档同步提交 1d9ce32）。候选 1981a94 的 T8 330/330、T10 14/14（39 张截图）、T11a PR checks、T11b 隔离安装与 schema 7→8 升级均 PASS。T11b 使用同 SHA 本地构建安装包；CI packaging 通过 smoke 但未上传 artifact。T3 维持 PARTIAL；T9 已从当前门禁退休；T12 尚未执行，需明确 GO。旧 PR #21 已关闭。",
+  "headline": "PR #22 已合并到 main（merge commit 903666a；main 收尾文档同步提交 7c81c38）。候选 1981a94 的 T8 330/330、T10 14/14（39 张截图）、T11a PR checks、T11b 隔离安装与 schema 7→8 升级均 PASS。T11b 使用同 SHA 本地构建安装包；CI packaging 通过 smoke 但未上传 artifact。T3 维持 PARTIAL；T9 已从当前门禁退休；T12 尚未执行，需明确 GO。旧 PR #21 已关闭。",
   "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / T12 NOT_RUN",
   "repository": {
     "name": "Martin-soaring-dev/bili-fav-organizer",
     "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer",
-    "main_sha": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3",
+    "main_sha": "7c81c3832a926b8312e7a5916af123256053c7bd",
     "ea_branch": "feat/reliability-scheduler-implementation",
     "ea_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
     "ci_branch": "ci/ea-playwright-full-regression-20261019",
@@ -85,7 +85,7 @@
       ],
       "note": "feature/docs/fix/master 均无 main 独有提交；CI 分支的两份 workflow 修改已被 main 中更严格版本取代，PR #21 保留其历史。gh-pages 承载公开看板；evidence 分支承载验收材料；maintenance 与 new_arch 含未合并独有内容。迁移/归档或明确舍弃前不要删除这些 refs。"
     },
-    "dashboard_main_snapshot_sha": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3",
+    "dashboard_main_snapshot_sha": "7c81c3832a926b8312e7a5916af123256053c7bd",
     "dashboard_path_on_main": "docs/index.html"
   },
   "metrics": [
@@ -212,7 +212,7 @@
   ],
   "focus": {
     "title": "PR #22 已并入 main；当前做分支收尾与发布边界确认",
-    "scope": "候选 1981a94 → merge commit 903666a；状态文档同步 1d9ce32；dashboard 已准备迁入 main/docs",
+    "scope": "候选 1981a94 → merge commit 903666a；状态与分支计划同步至 main 文档提交 7c81c38；dashboard 已准备迁入 main/docs",
     "why": "T8、T10、T11a、T11b 已在同一候选源码上通过；T3 保持 PARTIAL，已明确剩余覆盖缺口且不阻断本次合并。T9 已移出当前发布门禁。仍需把非 main 分支的独有内容与 Pages 看板迁移/归档后，才能安全达成只保留 main 的目标；Issue #6 是独立未解决问题。T12 仍需明确 GO。",
     "do_now": [
       "将公开 dashboard 迁移到 main 并验证 Pages 来源，之后删除 gh-pages。",
@@ -608,7 +608,7 @@
       "parent_sha": "aa9dfb35033186fcb2e04db19cfbc250ecf37873",
       "branch_head_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "branch_head_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
-      "main_head_sha": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3",
+      "main_head_sha": "7c81c3832a926b8312e7a5916af123256053c7bd",
       "merge_commit_sha": "903666a11f3914291f3352bd92e041eaa40f7ce5",
       "merge_candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "merge_candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32"
@@ -714,7 +714,7 @@
         "Windows T8/T10/T11b evidence",
         "non-main CI/release-pipeline commits"
       ],
-      "main_snapshot_sha": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3"
+      "main_snapshot_sha": "7c81c3832a926b8312e7a5916af123256053c7bd"
     },
     "windows_acceptance": {
       "source": "本轮远端候选 1981a94 的 Windows acceptance-report、t8-summary.json、完整原始 T8 日志和逐项 T10 JSON/截图。",
