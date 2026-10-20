@@ -1,0 +1,1015 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a111a"><title>BiliFavOrganizer · Delivery Console V5.1</title>
+<style>
+:root{color-scheme:dark;--bg:#090f18;--side:#0c1520;--pane:#131f2d;--pane2:#18293a;--pane3:#1e3245;--text:#edf5fd;--muted:#9aacc0;--line:#2d4154;--teal:#79d9ca;--blue:#92b8fd;--green:#7ce0a8;--amber:#f5c77c;--red:#f89ca0;--lav:#b8acf6;--shadow:0 14px 35px #02071390}html{scroll-behavior:smooth}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 81% -10%,#20394f 0,transparent 40%),var(--bg);color:var(--text);font:14px/1.65 Inter,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}body.light{color-scheme:light;--bg:#f0f5fa;--side:#e8f0f7;--pane:#fff;--pane2:#eaf2fa;--pane3:#e1eef7;--text:#182e42;--muted:#637c94;--line:#ccd9e6;--teal:#146d71;--blue:#345c9d;--green:#14734f;--amber:#97621a;--red:#ba4451;--lav:#6750a1;--shadow:0 10px 32px #29435a16}a{color:var(--teal);text-decoration:none}a:hover{text-decoration:underline}button,input,select{font:inherit;color:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--teal);outline-offset:3px}.app{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;background:var(--side);border-right:1px solid var(--line);padding:24px 15px;display:flex;flex-direction:column;gap:23px;z-index:5}.logo{display:flex;gap:11px;align-items:center;padding:4px 8px 12px}.mark{display:grid;place-items:center;background:linear-gradient(130deg,#194b51,#263955);border:1px solid #51838d;border-radius:11px;width:39px;height:39px;font-weight:900;color:#a8fff0;font-size:20px}.logo strong{font-size:16px;letter-spacing:-.02em}.logo small{display:block;font-size:10px;letter-spacing:.15em;color:var(--muted)}.navlabel,.kicker{font:800 10px/1.3 ui-monospace,Consolas,monospace;letter-spacing:.17em;color:var(--teal)}.navlabel{margin:0 13px 6px;color:var(--muted)}.nav button{width:100%;text-align:left;display:flex;gap:13px;align-items:center;margin:4px 0;padding:11px 12px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--muted);font-size:13px;transition:.15s}.nav button:hover{background:var(--pane2)}.nav button.active{background:var(--pane3);border-color:#507a8e;color:var(--text)}.nav .num{font:700 10px ui-monospace,monospace;color:var(--teal);min-width:19px}.sidefoot{margin-top:auto;border-top:1px solid var(--line);padding:15px 9px;font-size:11px;color:var(--muted);line-height:1.8}.sidefoot strong{color:var(--text)}.main{max-width:1540px;width:100%;margin:0 auto;padding:27px 36px 60px;min-width:0}.top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.btn{background:var(--pane2);border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:12px}.btn:hover{border-color:var(--teal)}.btn.accent{color:#cffcf2;background:#1b4b4c;border-color:#4a9c98}body.light .btn.accent{color:#fff;background:#186f6f}h1{font-size:clamp(29px,3.35vw,48px);letter-spacing:-.055em;line-height:1.1;margin:22px 0 12px}h2{font-size:20px;letter-spacing:-.03em;margin:0}h3{font-size:16px;line-height:1.45;margin:0}.intro{color:var(--muted);max-width:930px;margin:0 0 25px;line-height:1.9}.view{display:none}.view.active{display:block;animation:rise .24s ease}.hero{position:relative;overflow:hidden;padding:22px 25px;border-radius:18px;background:linear-gradient(115deg,#11343b,#1b3047 58%,#252943);border:1px solid #386d73;color:#eaf7ff}.hero:after{content:"";position:absolute;right:-90px;top:-120px;width:320px;height:320px;border:1px solid #9ce5df22;border-radius:50%;box-shadow:0 0 0 35px #84c9de08,0 0 0 79px #84c9de08;pointer-events:none}.hero h2{font-size:clamp(20px,2.4vw,31px);position:relative;z-index:1;margin:9px 0}.hero p{color:#c7dadd;font-size:13px;max-width:870px;position:relative;z-index:1}.tags{display:flex;gap:8px;flex-wrap:wrap;position:relative;z-index:1}.pill{display:inline-flex;align-items:center;white-space:nowrap;gap:5px;padding:4px 9px;border:1px solid var(--line);background:var(--pane2);border-radius:99px;font-size:10px;font-weight:760;letter-spacing:.02em}.pill.ok{color:var(--green);border-color:#2b795f;background:#13372c}.pill.warn{color:var(--amber);border-color:#82623d;background:#382c22}.pill.fail{color:var(--red);border-color:#87535c;background:#3c2732}.pill.plan{color:var(--blue);border-color:#4c6182;background:#23344b}.pill.neutral{color:var(--muted)}body.light .pill{background:var(--pane2)}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:15px 0 30px}.stat{padding:17px;border:1px solid var(--line);border-radius:13px;background:var(--pane)}.stat .lbl{font-size:11px;color:var(--muted)}.stat .val{font-size:27px;letter-spacing:-.035em;font-weight:830;margin:4px 0}.stat .foot{color:var(--muted);font-size:11px}.stat.pass .val{color:var(--green)}.stat.partial .val{color:var(--amber)}.stat.block .val{color:var(--red)}.sectionhead{display:flex;justify-content:space-between;align-items:end;gap:15px;margin:27px 0 13px}.sectionhead>small{font-size:11px;color:var(--muted)}.pane{min-width:0;background:linear-gradient(145deg,var(--pane),var(--side));border:1px solid var(--line);border-radius:15px;padding:18px 19px;box-shadow:var(--shadow)}body.light .pane{background:var(--pane)}.p-title{font-weight:760;font-size:13px;display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px}.meta{color:var(--muted);font-size:11px}.two{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}.caution{border-left:3px solid var(--amber);background:var(--pane2);padding:11px 14px;border-radius:4px 9px 9px 4px;color:var(--muted);font-size:12px}.lanes{display:grid;grid-template-columns:110px minmax(0,1fr);gap:10px;margin-top:14px}.trackname{display:flex;align-items:center;font-size:11px;color:var(--muted);font-weight:800}.track{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--pane);min-width:0}.track.done{border-color:#326b5c}.track.future{border-color:#735c45}.trackbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.arrow{color:var(--muted);font-size:17px}.trackbox{border-radius:9px;background:var(--pane2);padding:9px 11px;border:1px solid var(--line);font-size:11px;font-weight:700}.trackbox.passed{border-color:#3c866c;color:var(--green)}.trackbox.next{border-color:#8c6b40;color:var(--amber)}.gategrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.gatecard{border:1px solid var(--line);border-radius:12px;background:var(--pane);text-align:left;padding:15px 14px;position:relative;transition:.2s;min-height:146px}.gatecard:hover,.gatecard.selected{border-color:#70b5ba;background:var(--pane2);transform:translateY(-2px)}.gatecard.selected:before{content:"";height:3px;background:var(--teal);position:absolute;top:0;left:0;right:0;border-radius:12px 12px 0 0}.gatecard .gnum{color:var(--teal);font:800 10px ui-monospace,monospace;letter-spacing:.15em}.gatecard strong{display:block;font-size:14px;margin:12px 0 9px}.gatecard p{font-size:11px;line-height:1.6;color:var(--muted);margin:0 0 10px}.gatecard .pill{margin-top:auto}.details{margin-top:12px;border:1px solid var(--line);background:var(--pane);border-radius:14px;padding:20px}.detailtop{display:flex;justify-content:space-between;gap:10px;align-items:start}.detailtop h3{font-size:20px;margin:7px 0}.detailbody{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}.minibox{padding:13px;border:1px solid var(--line);background:var(--pane2);border-radius:11px}.minibox .kicker{margin-bottom:6px}.minibox p{margin:4px 0;color:var(--muted);font-size:12px}.cleanlist{list-style:none;margin:5px 0;padding:0}.cleanlist li{padding:6px 0;display:flex;gap:9px;font-size:12px;line-height:1.6}.cleanlist li:before{content:"↗";color:var(--teal)}.segment{display:flex;flex-wrap:wrap;gap:7px}.segment button{border:1px solid var(--line);border-radius:9px;background:var(--pane2);font-size:12px;padding:8px 12px}.segment button.on{border-color:var(--teal);color:var(--teal);background:var(--pane3)}.filters{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:16px 0}.field{background:var(--pane2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:12px}.search{flex:1;min-width:220px}.tasks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.task{background:var(--pane);border:1px solid var(--line);border-radius:12px;padding:15px;min-width:0}.task header{display:flex;align-items:start;gap:10px;justify-content:space-between}.task .id{font:800 12px ui-monospace,Consolas,monospace;color:var(--teal)}.task h3{margin:5px 0;font-size:13px}.task p{font-size:12px;color:var(--muted);line-height:1.7}.task details{border-top:1px solid var(--line);padding-top:9px}.task summary{cursor:pointer;color:var(--teal);font-size:12px;font-weight:700}.task .op{display:flex;flex-wrap:wrap;gap:7px;padding-top:12px}.task .op button{padding:6px 10px}.tasks-note{color:var(--muted);font-size:12px}.evidence{display:grid;grid-template-columns:repeat(2,1fr);gap:13px}.evidence .value{font-size:26px;font-weight:850;margin:5px 0}.evidence .value.green{color:var(--green)}.evidence ul{margin:10px 0 0;padding-left:18px;font-size:12px;color:var(--muted)}.evidence a{font-size:12px}.refs{display:grid;grid-template-columns:1fr;gap:0}.refline{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:12px 0;border-bottom:1px solid var(--line)}.refline:last-child{border:0}.refline b{font-size:12px}.refline p{margin:2px 0 0;font-size:11px;color:var(--muted)}.codeish{font:12px/1.8 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--pane2);padding:15px;border-radius:10px;border:1px solid var(--line)}.riskgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.risk{padding:16px;background:var(--pane);border:1px solid var(--line);border-radius:13px}.risk header{display:flex;justify-content:space-between;gap:10px;align-items:start}.risk h3{font-size:13px}.risk p{font-size:12px;color:var(--muted);margin:10px 0 4px}.revgrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px}.rev{padding:13px 11px;min-height:118px;border:1px solid var(--line);background:var(--pane);border-radius:10px;text-align:left}.rev strong{display:block;font-size:12px;margin:9px 0 5px}.rev small{font-size:10px;color:var(--muted)}.rev.sel{border-color:var(--teal);background:var(--pane3)}.rev .id{font:800 10px ui-monospace,monospace;color:var(--teal)}.foot{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:22px;margin-top:40px}.foot .flex{display:flex;gap:12px;flex-wrap:wrap}.footer-status{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.toast{position:fixed;right:20px;bottom:20px;z-index:20;background:#1b4951;border:1px solid #78c8bf;color:#eefdfa;padding:11px 17px;border-radius:10px;box-shadow:var(--shadow);font-size:12px;opacity:0;pointer-events:none;transition:.2s}.toast.show{opacity:1}@keyframes rise{from{opacity:.15;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:1120px){.app{grid-template-columns:198px minmax(0,1fr)}.main{padding:23px 22px 55px}.gategrid{grid-template-columns:repeat(2,1fr)}.stats{grid-template-columns:repeat(2,1fr)}.revgrid{grid-template-columns:repeat(3,1fr)}}@media(max-width:830px){.app{display:block}.sidebar{position:static;height:auto;padding:10px 13px;gap:8px}.navlabel,.sidefoot{display:none}.logo{padding:1px 0}.logo small{display:none}.nav{display:flex;overflow:auto;gap:4px}.nav button{width:auto;white-space:nowrap;margin:0}.main{padding:22px 15px 55px}.two,.detailbody{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.trackname{padding-top:8px}.evidence{grid-template-columns:1fr}}@media(max-width:600px){.stats,.gategrid,.tasks,.riskgrid,.revgrid{grid-template-columns:1fr}.main{padding:18px 11px 45px}.hero{padding:20px}.gatecard{min-height:auto}.sectionhead{display:block}.detailtop{display:block}.top{align-items:start}.tools{width:100%}.btn{font-size:11px}.trackbar{gap:5px}.arrow{display:none}.trackbox{font-size:10px}.refline{display:block}.refline a{display:block;margin-top:8px}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style><style>
+.exec-layout{display:grid;grid-template-columns:1.05fr 1fr;gap:14px;margin:0 0 14px}.exec-test-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:9px;margin-top:12px}.exec-test{padding:11px;border:1px solid rgba(135,165,185,.22);border-radius:12px;background:rgba(127,154,176,.06)}.exec-test strong{display:block;font-size:19px;color:var(--teal);margin-bottom:4px}.exec-test span,.exec-test small{display:block}.exec-test small{color:var(--muted);margin-top:5px;line-height:1.45}.exec-online{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}.exec-online a{font-weight:700}.exec-online p{margin:6px 0;line-height:1.55}.exec-table-wrap{overflow:auto;margin-top:10px}.exec-table{width:100%;border-collapse:collapse;min-width:790px}.exec-table th,.exec-table td{text-align:left;padding:9px 10px;border-bottom:1px solid rgba(135,165,185,.2);vertical-align:top}.exec-table th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.exec-table td:nth-child(1){white-space:nowrap}.exec-next{margin:6px 0 0;padding-left:20px;line-height:1.75}.exec-note{margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid rgba(224,176,92,.25);background:rgba(224,176,92,.07);line-height:1.65}.exec-caption{font-size:12px;color:var(--muted);line-height:1.6}.exec-table td p{margin:0;line-height:1.55}@media(max-width:850px){.exec-layout{grid-template-columns:1fr}}
+</style></head><body><div class="app"><aside class="sidebar"><div class="logo"><div class="mark">B</div><div><strong>BiliFavOrganizer</strong><small>DELIVERY CONSOLE · V5</small></div></div><div><div class="navlabel">PROJECT WORKSPACE</div><nav class="nav" id="nav"><button class="active" data-page="overview"><span class="num">01</span>项目总览</button><button data-page="roadmap"><span class="num">02</span>路线图与合流</button><button data-page="tasks"><span class="num">03</span>任务与 Codex</button><button data-page="evidence"><span class="num">04</span>CI / 证据</button><button data-page="risk"><span class="num">05</span>风险与门禁</button><button data-page="history"><span class="num">06</span>Focus 演进</button></nav></div><div class="sidefoot"><strong id="sideVersion">状态快照 · 2026-10-19</strong><div>已验证与未完成严格分离。</div><div>HTML 离线可用 · 不自动同步 GitHub</div><div id="sideGit"></div></div></aside><main class="main"><div class="top"><div class="kicker">PROJECT INTELLIGENCE / RELEASE READINESS</div><div class="tools"><span class="pill ok">● T8 / PR CI PASS</span><span class="pill warn">RC 等待 T12 授权</span><button class="btn" id="theme">☀ 切换主题</button><button class="btn" id="copyOverview">复制现状</button><button class="btn accent" id="downloadJSON">导出 JSON</button></div></div><h1>候选验收通过，主线已合并；进入仓库收尾阶段。</h1><p class="intro">首页汇总已合并候选的验收、仍开放的问题，以及将远端分支收敛至 main 前必须保全的内容。</p>
+<section id="page-overview" class="view active"><div class="hero"><div class="kicker" style="color:#94ddd5">CURRENT PROJECT CLOSEOUT · 2026-10-21</div><h2 id="heroTitle"></h2><p id="heroText"></p><div class="tags"><span class="pill ok">PR #22 merged</span><span class="pill ok">T8 330/330 PASS</span><span class="pill ok">T10 14/14 · 39 screenshots</span><span class="pill warn">T3 PARTIAL</span></div></div><div class="sectionhead"><h2>合并后收尾状态 · 2026-10-21</h2><small>候选 1981a94 已并入 main；T12 发布尚未执行</small></div><div id="executionPanel"></div><div class="stats" id="stats"></div><div class="sectionhead"><h2>当前状态</h2><small>已合并候选与 branch consolidation 计划</small></div><div class="pane"><div class="lanes"><div class="trackname">候选验收 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">1981a94</span><span class="arrow">→</span><span class="trackbox passed">T8 330/330</span><span class="arrow">→</span><span class="trackbox passed">T10 14/14</span><span class="arrow">→</span><span class="trackbox passed">T11a / T11b</span><span class="arrow">→</span><span class="trackbox passed">PR #22 merged</span></div><p class="meta">T11b 使用同 SHA 本地 installer；Beta CI artifact 未上传。T3 保持 PARTIAL；T12 等待明确 GO。</p></div><div class="trackname">分支收敛 →</div><div class="track future"><div class="trackbar"><span class="trackbox passed">main 已含候选</span><span class="arrow">→</span><span class="trackbox next">迁移 Pages</span><span class="arrow">→</span><span class="trackbox">归档 evidence / unique commits</span><span class="arrow">→</span><span class="trackbox">仅保留 main</span></div><p class="meta">先保全公开看板、验收证据与非 main 独有提交，再删除其他分支。</p></div></div></div><div class="sectionhead"><h2>收尾与发布门禁</h2><small>查看各阶段证据与尚未授权的操作</small></div><div class="gategrid" id="gateCards"></div><div id="gatePreview"></div><div class="sectionhead"><h2>下一步执行焦点</h2><small>由真实阻塞而不是操作日志决定优先级</small></div><div class="two"><div class="pane"><div class="p-title">当前收尾工作 <span class="pill warn">IN PROGRESS</span></div><ul id="focusTodos" class="cleanlist"></ul></div><div class="pane"><div class="p-title">合并完成后还剩什么？</div><p id="focusWhy" class="meta" style="font-size:12px;line-height:1.9"></p><div class="caution" id="focusBlocked"></div></div></div></section>
+<section id="page-roadmap" class="view"><div class="sectionhead"><h2>验收关口与后续动作</h2><small>T12 需要明确 GO；分支删除前先迁移独有数据</small></div><div class="gategrid" id="roadmapCards"></div><div class="details" id="roadmapDetail"></div><div class="sectionhead"><h2>并行与合流规则</h2><small>避免多个云任务同时修改事务核心</small></div><div class="tasks" id="parallelBlocks"></div><div class="sectionhead"><h2>分支收敛顺序</h2><small>保全内容后再删除远端 refs</small></div><div class="pane"><p><strong>1.</strong> 将公开看板从 <code>gh-pages</code> 迁移到 main 来源并验证线上页面。</p><p><strong>2.</strong> 将 T8/T10/T11b 报告、日志与截图迁移到 main 的证据归档。</p><p><strong>3.</strong> 审阅 CI 与 release-pipeline 分支的独有提交，确认已保存在 main 或可恢复归档。</p><p><strong>4.</strong> 删除其余远端 branch refs，最终核对仅剩 <code>main</code>。</p><p class="meta">feature/docs/fix/master 无 main 独有提交；CI workflow 已被 main 更新覆盖。gh-pages、evidence、maintenance 与 new_arch 需先迁移或决定如何保留。</p></div></section>
+<section id="page-tasks" class="view"><div class="sectionhead"><h2>7 项合并收尾工作</h2><small>只展示当前 PR、分支、Issue 与发布收尾事项</small></div><div class="filters"><input class="field search" id="taskSearch" placeholder="搜索编号、标题、模块或下一步"><select class="field" id="taskFilter"><option value="all">全部状态</option><option value="BLOCKED">BLOCKED</option><option value="FAIL">FAIL</option><option value="PASS">PASS</option><option value="NOT_RUN">NOT_RUN</option><option value="PARTIAL">PARTIAL</option><option value="PATCH_TESTED">PATCH_TESTED</option><option value="EA_CI_PASS">EA_CI_PASS</option><option value="PENDING">PENDING</option><option value="OPEN">OPEN</option></select><select class="field" id="taskWave"><option value="all">全部波次</option><option>W0</option><option>W1</option><option>W2</option><option>W3</option><option>W4</option><option>W5</option></select></div><p id="taskCount" class="tasks-note"></p><div class="tasks" id="taskList"></div></section>
+<section id="page-evidence" class="view"><div class="sectionhead"><h2>CI / 质量证据</h2><small>只显示与仓库可追溯的真实结果</small></div><div class="evidence" id="ciPanels"></div><div class="sectionhead"><h2>状态与 GitHub 原始证据</h2><small>以 PR、Run、Issue 和具体 SHA 为准</small></div><div class="pane refs" id="refs"></div><div class="sectionhead"><h2>提交指纹</h2></div><pre id="shaPanel" class="codeish"></pre><div class="caution" style="margin-top:15px">T8/T10/T11a/T11b 已通过并合并；T11b 安装验收使用同 SHA 本地安装包，CI 未上传 artifact。尚未创建 tag 或 Release；T12 需要明确 GO。</div></section>
+<section id="page-risk" class="view"><div class="sectionhead"><h2>阻塞与风险</h2><small>只保留对发布/数据安全有实际影响的事项</small></div><div class="riskgrid" id="riskGrid"></div><div class="sectionhead"><h2>发布前必须满足的门禁</h2></div><div id="riskGates" class="details"></div></section>
+<section id="page-history" class="view"><div class="sectionhead"><h2>Focus 演进：从 G0 保全到真实 CI</h2><small>点击状态快照看“为什么改变”，不是让动画伪装进度</small></div><div class="revgrid" id="revisions"></div><div class="filters"><button class="btn" id="prevRev">← 上一版</button><input type="range" id="revSlider" min="0" max="7" value="7" style="flex:1;accent-color:var(--teal)" aria-label="历史快照选择"><button class="btn" id="nextRev">下一版 →</button><button class="btn" id="playRevs">▶ 播放</button></div><div id="revisionDetail" class="details"></div><div class="sectionhead"><h2>状态更新原则</h2></div><div class="caution">下一轮只追加有明确 commit / 测试日志 / 文件哈希 / 验收签字的事实；历史快照不被覆盖。黄色表示待验收，不代表不通过；绿色仅用于证据支持的具体测试或交付项。不要用一项成功的 CI 代替其他安全门禁。</div></section>
+<footer class="foot"><div class="footer-status"><span class="pill ok">T8/T10/T11a/T11b PASS · T3 PARTIAL · T12 NOT_RUN</span><span>Snapshot: <span id="footDate"></span></span><span>Offline read-only</span></div><div class="flex"><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer" target="_blank" rel="noopener">GitHub 仓库 ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22" target="_blank" rel="noopener">PR #22 ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669811" target="_blank" rel="noopener">Windows CI ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669881" target="_blank" rel="noopener">Packaging CI ↗</a></div><p>本页面由静态状态快照构建，没有 GitHub 写权限，也不会自动更新远端。每轮更新请先重新核对事实再重建。</p></footer></main></div><div class="toast" id="toast" aria-live="polite"></div><script type="application/json" id="project-data">{
+  "name": "BiliFavOrganizer",
+  "version": "Status Console V5.2",
+  "snapshot_date": "2026-10-21",
+  "snapshot_kind": "post-merge closeout; PR #22 merged; T8/T10/T11a/T11b PASS; T3 PARTIAL; T12 NOT_RUN; branch consolidation to main pending safe migration",
+  "headline": "PR #22 已合并到 main（merge commit 903666a；当前 main 文档同步提交 1d9ce32）。候选 1981a94 的 T8 330/330、T10 14/14（39 张截图）、T11a PR checks、T11b 隔离安装与 schema 7→8 升级均 PASS。T11b 使用同 SHA 本地构建安装包；CI packaging 通过 smoke 但未上传 artifact。T3 维持 PARTIAL；T9 已从当前门禁退休；T12 尚未执行，需明确 GO。旧 PR #21 已关闭。",
+  "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / T12 NOT_RUN",
+  "repository": {
+    "name": "Martin-soaring-dev/bili-fav-organizer",
+    "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer",
+    "main_sha": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3",
+    "ea_branch": "feat/reliability-scheduler-implementation",
+    "ea_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+    "ci_branch": "ci/ea-playwright-full-regression-20261019",
+    "ci_sha": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
+    "g0_sha": "ef06338c337ddf7ea060b4cc6e4548fe09d6d24b",
+    "g0_scope": "historical local checkpoint, not on origin",
+    "old_pr": {
+      "number": 20,
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/20",
+      "state": "closed",
+      "merged": false
+    },
+    "issue6": {
+      "number": 6,
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/issues/6",
+      "state": "open",
+      "scope": "unrelated unresolved folder snapshot count issue"
+    },
+    "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+    "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+    "candidate_state": "PR #22 已将候选 1981a94（tree e943cc30）合并到 main，merge commit 903666a；随后文档同步提交 1d9ce32。T8/T10/T11a/T11b PASS；T3 PARTIAL；T9 退出当前门禁；T12 等待明确 GO。",
+    "candidate_branch_head": "1981a94ed750d7be4e3404d6622ad776708f2091",
+    "candidate_branch_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+    "merge_sha": "903666a11f3914291f3352bd92e041eaa40f7ce5",
+    "merge_candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+    "merge_candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+    "merged_pr": {
+      "number": 22,
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22",
+      "state": "closed",
+      "draft": false,
+      "merged": true,
+      "head_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "merge_commit_sha": "903666a11f3914291f3352bd92e041eaa40f7ce5"
+    },
+    "closed_pr": {
+      "number": 21,
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/21",
+      "state": "closed",
+      "draft": false,
+      "merged": false,
+      "head_sha": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
+      "scope": "CI-only / obsolete after PR #22"
+    },
+    "branch_goal": "仅保留 main；需先迁移 GitHub Pages、证据和非 main 独有提交",
+    "branch_cleanup": {
+      "status": "PENDING_MIGRATION",
+      "safe_to_remove_after_cleanup": [
+        "feat/reliability-scheduler-implementation",
+        "docs/reliability-scheduler-refactor-plan",
+        "fix/vault-active-work-barrier",
+        "master",
+        "ci/ea-playwright-full-regression-20261019"
+      ],
+      "preserve_until_migrated_or_decided": [
+        "gh-pages",
+        "evidence/windows-t10-uat-20261020",
+        "evidence/windows-owner-lock-20261020",
+        "maintenance/release-pipeline-post-v0209",
+        "new_arch"
+      ],
+      "note": "feature/docs/fix/master 均无 main 独有提交；CI 分支的两份 workflow 修改已被 main 中更严格版本取代，PR #21 保留其历史。gh-pages 承载公开看板；evidence 分支承载验收材料；maintenance 与 new_arch 含未合并独有内容。迁移/归档或明确舍弃前不要删除这些 refs。"
+    },
+    "dashboard_main_snapshot_sha": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3",
+    "dashboard_path_on_main": "docs/index.html"
+  },
+  "metrics": [
+    {
+      "value": "330/330",
+      "label": "候选 Windows 全量回归",
+      "foot": "PR #22 · 1981a94 · 0 FAIL / 0 ERROR / 0 SKIP",
+      "state": "pass"
+    },
+    {
+      "value": "14/14",
+      "label": "Windows T10 实机 UAT",
+      "foot": "同一候选 SHA · 39 张截图",
+      "state": "pass"
+    },
+    {
+      "value": "2/2",
+      "label": "PR #22 checks",
+      "foot": "CI 与 Beta packaging success；CI 安装包 artifact 未上传",
+      "state": "pass"
+    },
+    {
+      "value": "PARTIAL",
+      "label": "T3 schema 契约覆盖",
+      "foot": "余项明确记录；不阻断本次候选合并",
+      "state": "partial"
+    }
+  ],
+  "ci": {
+    "sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+    "scope": "PR #22 / current merged candidate",
+    "windows_tests": {
+      "run_id": 39458669811,
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669811",
+      "status": "completed",
+      "conclusion": "success",
+      "discovered": 330,
+      "passed": 330,
+      "skipped": 0,
+      "duration_text": "PR #22 · 1981a94 · Windows 330/330"
+    },
+    "package": {
+      "run_id": 39458669881,
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669881",
+      "status": "completed",
+      "conclusion": "success",
+      "tests_discovered": 330,
+      "skipped": 0,
+      "frozen_backend": true,
+      "nsis_installer": true,
+      "installer_inspection": true,
+      "electron_smoke": true,
+      "published": false,
+      "artifact_count": 0
+    },
+    "installer_acceptance": {
+      "source": "local build from the same source SHA",
+      "bytes": 140995964,
+      "sha256": "B2853AC38DF8CF6244367724C0B66F8BB31AE89EB71DA5F742650C917684D532",
+      "ci_artifact": false
+    },
+    "warning": "CI Beta packaging workflow did not upload an installer artifact (artifact_count=0); T11b installation/upgrade acceptance used a local installer built from the same source SHA."
+  },
+  "stages": [
+    {
+      "id": "A",
+      "title": "候选与 Windows 隔离",
+      "status": "PASS",
+      "who": "T0 / T1 / T11b",
+      "short": "候选 SHA 固定并已合并；T11b 使用隔离 profile 完成安装、schema 7→8 升级和重启验收。",
+      "exit": "候选 SHA/tree、隔离 profile、历史夹具与数据保全边界均有证据。",
+      "next": "已完成；验收报告保留本地同 SHA 安装包限制。",
+      "tasks": [
+        "T0",
+        "T1",
+        "T11b"
+      ]
+    },
+    {
+      "id": "B",
+      "title": "迁移 / Vault 安全验证",
+      "status": "PARTIAL",
+      "who": "T2–T7",
+      "short": "当前已知 T3 剩余自动化覆盖缺口已列明；不把 330/330 的总数扩大解释为所有专项门禁都已通过。",
+      "exit": "按各专项验收条件核对迁移、拒绝、WAL、锁和回滚证据。",
+      "next": "T3 仍为 PARTIAL；如后续补齐，按新候选重跑受影响验证。",
+      "tasks": [
+        "T2",
+        "T3",
+        "T4",
+        "T5",
+        "T6",
+        "T7"
+      ]
+    },
+    {
+      "id": "C",
+      "title": "候选 CI 与合并",
+      "status": "PASS",
+      "who": "T8 / T11a",
+      "short": "T8 330/330；PR #22 两个 workflow success 并已合并。T9 已由维护者移出当前门禁。",
+      "exit": "同一候选 SHA 的 Windows regression、PR checks 与 merge 状态可复核。",
+      "next": "已完成；不将历史 T9 审计重新当作本轮阻塞项。",
+      "tasks": [
+        "T8",
+        "T9",
+        "T11a"
+      ]
+    },
+    {
+      "id": "D",
+      "title": "实机验收与发布",
+      "status": "PARTIAL",
+      "who": "T10 / T11b / T12",
+      "short": "T10 14/14、T11b 安装升级均 PASS；T12 尚未执行。",
+      "exit": "维护者明确授权后完成发布；发布前再次核对当前 main 与候选源码关系。",
+      "next": "等待明确 T12 GO；没有创建 tag、Release 或触发发布 workflow。",
+      "tasks": [
+        "T10",
+        "T11b",
+        "T12"
+      ]
+    }
+  ],
+  "focus": {
+    "title": "PR #22 已并入 main；当前做分支收尾与发布边界确认",
+    "scope": "候选 1981a94 → merge commit 903666a；状态文档同步 1d9ce32；dashboard 已准备迁入 main/docs",
+    "why": "T8、T10、T11a、T11b 已在同一候选源码上通过；T3 保持 PARTIAL，已明确剩余覆盖缺口且不阻断本次合并。T9 已移出当前发布门禁。仍需把非 main 分支的独有内容与 Pages 看板迁移/归档后，才能安全达成只保留 main 的目标；Issue #6 是独立未解决问题。T12 仍需明确 GO。",
+    "do_now": [
+      "将公开 dashboard 迁移到 main 并验证 Pages 来源，之后删除 gh-pages。",
+      "将 evidence 分支中的验收报告、日志与截图归档到 main，更新其引用后再删 evidence refs。",
+      "确认 maintenance/release-pipeline 与 new_arch 的独有内容如何保留或舍弃。",
+      "保持 Issue #6 open；只有维护者明确 GO 后才执行 T12。"
+    ],
+    "blocked": "PR #22 已成功合并；当前唯一未执行的发布动作是等待明确 T12 GO。只留 main 需要先迁移 Pages、验收证据及非 main 独有提交。"
+  },
+  "parallel": [
+    {
+      "title": "已完成的合并收尾",
+      "subtitle": "主线与 PR",
+      "ids": [
+        "PR #22",
+        "PR #21",
+        "T8",
+        "T10",
+        "T11a",
+        "T11b"
+      ],
+      "note": "PR #22 已合并；旧 CI-only PR #21 已关闭。候选 Windows 回归、UAT、PR checks 与隔离安装升级验收均有记录。"
+    },
+    {
+      "title": "只留 main 的迁移",
+      "subtitle": "分支前先保全数据",
+      "ids": [
+        "gh-pages",
+        "evidence/*",
+        "ci/*",
+        "maintenance/*"
+      ],
+      "note": "feature/docs/fix/master 分支没有 main 独有提交；CI workflow 修改已被 main 中更严格版本取代。gh-pages、evidence、maintenance/release-pipeline 和 new_arch 需迁移或明确处置后才能删除。"
+    },
+    {
+      "title": "未关闭的独立事项",
+      "subtitle": "保持状态准确",
+      "ids": [
+        "Issue #6",
+        "T3",
+        "T12"
+      ],
+      "note": "Issue #6 未解决；T3 PARTIAL；T12 未执行，需明确 GO。T9 已退休，不列为当前阻塞门禁。"
+    }
+  ],
+  "revisions": [
+    {
+      "id": "S0",
+      "title": "G0 文件保全",
+      "date": "10/17",
+      "kind": "历史事实",
+      "focus": "恢复 35 个项目文件、保存断点资料",
+      "change": "恢复输入保全，未能代替业务回归",
+      "evidence": "G0 原始归档和历史恢复报告"
+    },
+    {
+      "id": "S1",
+      "title": "W0/W1 定向验证",
+      "date": "10/18–19",
+      "kind": "历史实测（局部）",
+      "focus": "payload 哈希、WAL、锁、修复工具测试",
+      "change": "定位到恢复包可用、G0 Git 身份仍待核验",
+      "evidence": "局部 CandidateDatabaseTests 13/13; 手动恢复 WAL 补丁 5/5"
+    },
+    {
+      "id": "S2",
+      "title": "EA Windows CI 首轮",
+      "date": "10/19",
+      "kind": "已执行",
+      "focus": "确认真实 GitHub Actions 可以在 Windows 跑通",
+      "change": "253 discovered, 246 passed, 7 UI skipped；暴露 CI 浏览器依赖缺口",
+      "evidence": "Run #39161585201 / #39161585130"
+    },
+    {
+      "id": "S3",
+      "title": "CI 浏览器覆盖补齐",
+      "date": "10/19",
+      "kind": "最新已执行",
+      "focus": "两份工作流修复，真实 Chromium UI 回归进入 CI",
+      "change": "253/253 PASS，0 skipped；Electron 打包及冒烟也完成",
+      "evidence": "PR #21, Run #39161995294 / #39161995307"
+    },
+    {
+      "id": "S4",
+      "title": "真正候选验证",
+      "date": "未来",
+      "kind": "计划 · 不是完成",
+      "focus": "G0 → Vault 事务修复 → 同 SHA CI → Windows UAT",
+      "change": "最终候选独立 SHA 尚未生成，不得冒用 EA CI 的成功",
+      "evidence": "尚无最终候选提交或工作流结果"
+    },
+    {
+      "id": "S5",
+      "title": "可靠性维护测试合流",
+      "date": "10/19",
+      "kind": "本机隔离定向实测 + 线上 EA 基线",
+      "focus": "候选 SHA / T0 Windows 隔离 / schema 1 来源",
+      "change": "Schema/lifecycle 36/36、Vault migration 12/12、release/runner/attribution 26/26 等定向套件通过；EA 基线 Windows CI 253/253、0 skipped，Electron 打包 success。维护候选仍无唯一推送 SHA/tree。",
+      "evidence": "docs/testing/reliability-maintenance-execution-20261019.md；PR #21 head df88174；Actions 39167835259 / 39167835248"
+    },
+    {
+      "id": "S6",
+      "title": "Windows T10 截图 UAT 远端核验（首版）",
+      "date": "10/20",
+      "kind": "实机执行 / 部分验收",
+      "focus": "候选 c75a06b；真实 Chromium 本地 UI；证据独立推送",
+      "change": "证据提交 5fb3151e；发现 T10-03 两截图同 blob，要求补采；目标分支仍在 c75a06b。",
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/screenshots"
+    },
+    {
+      "id": "S7",
+      "title": "T10-03 独立停止状态截图复核",
+      "date": "10/20",
+      "kind": "远端证据核验",
+      "focus": "只重采 T10-03；候选源码与目标分支不变",
+      "change": "证据提交 3a63e169（父提交 5fb3151e，tree f24637f4）；12 个改动全部位于证据目录。stop-requested、after-stop、scan-running 三个截图 blob 不同；逐图核验界面与报告/JSON 一致。T10-14 仍 NOT_RUN，T10 整体 PARTIAL。",
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · commit 3a63e16921171f5b48729ab9a574672ebc7e4500"
+    },
+    {
+      "id": "S8",
+      "title": "T10 14/14 完成与 T9 仓库保护失败",
+      "date": "10/20",
+      "kind": "远端证据核验",
+      "focus": "候选 c75a06b；证据提交 a317a77e；产品分支未移动",
+      "change": "T10 更新为 14/14 PASS、39 张截图；T10-14 以 schema 7→8 迁移后的数据与 UI 结果验收通过，迁移过程 UI 不存在的限制如实保留。T9 管理员权限只读核验确认为 FAIL：Environment、main protection、rulesets、tag protection 缺失。候选分支仍在 c75a06b；T11a/T11b/T12 未完成。",
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md · commit a317a77e9533e9970a226ccbc2678fd9ea0f9f72"
+    },
+    {
+      "id": "S9",
+      "title": "T1 schema 5–8 实现、Windows 328/328 与 T10 复验",
+      "date": "10/20",
+      "kind": "候选更新 / Windows 回归 / 实机 UAT",
+      "focus": "候选 c75a06b（tree be8cef37，parent 4baa66e）",
+      "change": "T1 支持边界定为 schema 5–8，新增 v0.200/schema5 与 v0.203/schema6 历史夹具和 5→8/6→8 数据保全测试。Windows 全量回归报告 328/328 PASS，227.2 秒；T10 在新候选 14/14 PASS、39 张截图。T9 缺少发布保护，维护者接受风险但 T9 仍 FAIL；T3 部分结构契约/恢复路径、T11a/T11b/T12 未完成。远端证据包当前缺 328 项全量原始日志。",
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/c75a06bd008c9f546349f60c7e3a147c266dade2 · https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/acceptance-report.md · T10 report commit 7cd6c49700b7ce3c31afcb4dcc9d71823828fccf · latest evidence branch HEAD 32a178cbee16ef5d69e35d6f9007f649f9215ec7"
+    },
+    {
+      "id": "S10",
+      "title": "T3 schema 契约与 schema<5 fail-closed 自动验证",
+      "date": "10/20",
+      "kind": "候选代码 / Linux 定向测试",
+      "focus": "代码候选 aa9dfb3（tree 8dcc6ded）；文档更新 head 1981a94",
+      "change": "新增逐版本列类型和 NOT NULL 契约、schema 8 所有 remote operation/scheduler CHECK 约束核验；schema 4 拒绝时验证原库哈希不变、RECOVERY_REQUIRED 且普通连接被拒。database/schema migration 20/20，database+lifecycle 42/42；Windows T8/T10 尚未在此 SHA 执行。",
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/aa9dfb35033186fcb2e04db19cfbc250ecf37873 · https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/1981a94ed750d7be4e3404d6622ad776708f2091"
+    },
+    {
+      "id": "S11",
+      "title": "1981a94 Windows T8/T10 复验",
+      "date": "10/20",
+      "kind": "Windows 候选验收",
+      "focus": "候选 1981a94 · T8 330/330、T10 14/14 PASS",
+      "change": "同一候选 SHA 上完成 Windows 全量回归 330/330（0 FAIL/ERROR/SKIP，219.6s）及 T10 实机 UAT 14/14（39 张截图，255.9s）。T9 仍 FAIL（风险已接受），发布 等待 T12 授权。T3 任务清单补充为 PASS、验收报告为 PARTIAL，需统一验收口径。",
+      "evidence": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md · T8 日志 https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt"
+    },
+    {
+      "id": "S12",
+      "title": "PR #22 合并与收尾状态对齐",
+      "date": "10/21",
+      "kind": "已完成 · 合并后收尾",
+      "focus": "候选 1981a94 合入 main；更新任务清单与 dashboard",
+      "change": "PR #22 merged at 903666a；PR #21 关闭。T8/T10/T11a/T11b 结果及 T11b 本地构建件限制统一记录；T3 PARTIAL 对齐；T9 从当前门禁退休；T12 仍等待明确 GO。仅保留 main 的目标需要先迁移 Pages、证据和非 main 独有提交。",
+      "evidence": "PR #22 merge commit 903666a；文档同步提交 1d9ce32；T11b evidence branch commit 42742c8。"
+    }
+  ],
+  "risks": [
+    {
+      "id": "K3",
+      "severity": "MEDIUM",
+      "title": "T3 仍为 PARTIAL",
+      "impact": "T3 的版本契约实现与已有测试通过；按版本抽样变异、动态 CHECK 清点及 schema<5 恢复导出自动化尚缺。该缺口不阻断本候选合并。",
+      "owner": "T3",
+      "action": "如需补齐，单独安排后续自动化覆盖；新代码 SHA 需重新执行受影响门禁。"
+    },
+    {
+      "id": "K11",
+      "severity": "MEDIUM",
+      "title": "T11b 使用同 SHA 本地安装包",
+      "impact": "CI packaging workflow 构建并通过 smoke，但 artifact_count=0；实机安装/升级验收使用同源码 SHA 本地构建件。",
+      "owner": "T11b / release engineering",
+      "action": "报告保留文件大小与 SHA-256；CI artifact 上传可另行安排。"
+    },
+    {
+      "id": "K12",
+      "severity": "HIGH",
+      "title": "T12 发布尚未执行",
+      "impact": "没有 tag、Release 或发布 workflow dispatch。",
+      "owner": "维护者",
+      "action": "收到明确 GO 后再走 T12。"
+    },
+    {
+      "id": "K13",
+      "severity": "MEDIUM",
+      "title": "非 main 独有内容需迁移后再删分支",
+      "impact": "gh-pages 承载看板；evidence 分支承载验收材料；maintenance/release-pipeline 与 new_arch 有 main 不含的独有提交。直接删除这些 refs 会中断看板或丢失证据/代码。",
+      "owner": "仓库维护者",
+      "action": "迁移 Pages 和证据，审阅/归档独有提交，然后清理远端 refs。"
+    },
+    {
+      "id": "K14",
+      "severity": "LOW",
+      "title": "Issue #6 独立保持开放",
+      "impact": "收藏夹快照计数问题尚未由本次合并解决。",
+      "owner": "Issue #6 owner",
+      "action": "问题单独修复并验收后再关闭。"
+    }
+  ],
+  "links": [
+    {
+      "title": "PR #22 · merged into main",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22",
+      "why": "候选 1981a94/tree e943cc30 已合并；merge commit 903666a。"
+    },
+    {
+      "title": "PR #21 · closed obsolete CI-only branch",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/21",
+      "why": "旧 CI-only PR 已关闭；其分支有独有 workflow commits，迁移核对完成前保留。"
+    },
+    {
+      "title": "T11b 安装与升级验收报告",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md",
+      "why": "隔离安装、schema 7→8、重启与数据完整性；明确标注本地同 SHA installer。"
+    },
+    {
+      "title": "T8 Windows 全量日志与汇总",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94",
+      "why": "330/330 PASS，完整原始日志、摘要与 SHA-256 manifest。"
+    },
+    {
+      "title": "PR #22 · Windows CI",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669811",
+      "why": "候选 head 1981a94；Windows CI success。"
+    },
+    {
+      "title": "PR #22 · Beta packaging",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669881",
+      "why": "候选 head 1981a94；packaged smoke success，workflow 未上传二进制 artifact。"
+    },
+    {
+      "title": "Issue #6 · still open",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/issues/6",
+      "why": "收藏夹远端计数与实际枚举不一致的独立问题；PR #22 未修复，不关闭。"
+    },
+    {
+      "title": "当前任务清单与收尾状态",
+      "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/reliability-maintenance-task-list.md",
+      "why": "当前主线状态和历史记录分界。"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "C01",
+      "title": "合并候选 PR #22",
+      "module": "GitHub",
+      "status": "PASS",
+      "wave": "W5",
+      "priority": "P1",
+      "detail": "PR #22 merged；候选 1981a94/tree e943cc30 已进入 main，merge commit 903666a。",
+      "next": "已完成。",
+      "deps": [],
+      "write": [],
+      "accept": [
+        "merge commit 为 903666a",
+        "main 包含候选源码"
+      ]
+    },
+    {
+      "id": "C02",
+      "title": "关闭旧 CI-only PR #21",
+      "module": "GitHub",
+      "status": "PASS",
+      "wave": "W5",
+      "priority": "P1",
+      "detail": "PR #21 已关闭；其分支有独有 workflow commits，保留到迁移核对完成。",
+      "next": "已完成 PR 关闭；分支保全见 C06。",
+      "deps": [],
+      "write": [],
+      "accept": [
+        "PR #21 state=closed"
+      ]
+    },
+    {
+      "id": "C03",
+      "title": "T3 版本契约覆盖",
+      "module": "Database",
+      "status": "PARTIAL",
+      "wave": "W5",
+      "priority": "P2",
+      "detail": "schema 5–8 契约与现有拒绝路径有证据；仍缺版本抽样变异、动态 CHECK 枚举，以及 schema<5 恢复/导出自动化。该状态不阻断本次合并。",
+      "next": "按需另行补齐；这将产生新代码 SHA 并需重跑受影响门禁。",
+      "deps": [],
+      "write": [
+        "tests/database/**"
+      ],
+      "accept": [
+        "对照 T3 验收条件",
+        "新增测试在目标平台执行"
+      ]
+    },
+    {
+      "id": "C04",
+      "title": "Issue #6 收藏夹快照计数",
+      "module": "Issue",
+      "status": "OPEN",
+      "wave": "W5",
+      "priority": "P2",
+      "detail": "独立未解决问题，PR #22 未实现也未验证该 issue 的场景。当前保持 open。",
+      "next": "修复并逐项验收后再关闭 issue。",
+      "deps": [],
+      "write": [
+        "Issue #6 相关代码和测试"
+      ],
+      "accept": [
+        "复现条件修复",
+        "Issue 验收通过后再关闭"
+      ]
+    },
+    {
+      "id": "C05",
+      "title": "T12 Beta / stable 发布",
+      "module": "Release",
+      "status": "NOT_RUN",
+      "wave": "W5",
+      "priority": "P1",
+      "detail": "尚未创建 tag、Release 或触发发布 workflow；需要维护者明确 GO。",
+      "next": "等待明确 GO。",
+      "deps": [],
+      "write": [],
+      "accept": [
+        "当前 main 与 release source SHA 核对",
+        "按 T12 执行并留证"
+      ]
+    },
+    {
+      "id": "C06",
+      "title": "将远端分支收敛到 main",
+      "module": "Repository",
+      "status": "PARTIAL",
+      "wave": "W5",
+      "priority": "P1",
+      "detail": "feature/docs/fix/master 分支没有 main 独有提交；CI workflow 修改已被 main 中更严格版本取代。gh-pages/evidence/maintenance/new_arch 仍承载看板、证据或 main 不含的独有内容。",
+      "next": "先迁移看板与证据；审阅 maintenance/new_arch 的独有提交并决定保留方式，再删除其余远端分支。",
+      "deps": [],
+      "write": [
+        "Pages 配置",
+        "证据归档",
+        "远端 branch refs"
+      ],
+      "accept": [
+        "公开看板在 main 来源正常部署",
+        "证据链接持续可用",
+        "每个独有提交均已保全",
+        "最终分支列表仅 main"
+      ]
+    },
+    {
+      "id": "C07",
+      "title": "文档与 dashboard 状态对齐",
+      "module": "Docs",
+      "status": "PASS",
+      "wave": "W5",
+      "priority": "P1",
+      "detail": "主线任务清单已更新为合并后状态；dashboard 本轮更新至 PR #22 merged、T8/T10/T11a/T11b PASS、T3 PARTIAL、T12 NOT_RUN。",
+      "next": "验证 Pages 部署结果。",
+      "deps": [],
+      "write": [
+        "docs/testing/reliability-maintenance-task-list.md",
+        "gh-pages:index.html"
+      ],
+      "accept": [
+        "主线与公开看板表述一致",
+        "线上页面无合并前过时状态"
+      ]
+    }
+  ],
+  "prompts": {
+    "C03": "T3 当前为 PARTIAL。若继续，请只补齐按 schema 5/6/7/8 的类型与 NOT NULL 抽样变异、动态枚举 CHECK 约束并逐条证伪、schema<5 普通连接拒绝与人工恢复/导出的自动化路径；任何源码改动都要生成新 SHA 并重跑受影响门禁。",
+    "C04": "先独立复现和修复 Issue #6 的收藏夹计数不一致，再按 issue 的验收场景验证。未修复并验收前保持 issue open，不要仅因 PR #22 合并而关闭。",
+    "C05": "T12 目前 NOT_RUN。只有维护者明确给出发布 GO 后，才开始检查当前 main、构建候选、创建 tag 或触发发布 workflow。",
+    "C06": "目标是最终仅保留 main。先将 GitHub Pages 看板、验收证据和非 main 独有提交迁移/归档并验证；在确认内容可访问、可恢复前不要删除相关分支。"
+  },
+  "execution_snapshot": {
+    "date": "2026-10-21",
+    "hero_title": "PR #22 已合并 main：T8/T10/T11a/T11b PASS；T3 PARTIAL；发布待 T12 GO",
+    "candidate": {
+      "baseline_sha": "ea4983d2bb9f6d8c0ea54faeddc790a9e096df63",
+      "baseline_tree": "939a0607988524b7afec8097fde3e9acda4ec655",
+      "maintenance_worktree": "PR #22 merged; dashboard is staged for main/docs Pages migration.",
+      "other_local_sha": "f22965f6477e90335d3cfad12c2e351d1941c69e",
+      "other_local_sha_online": false,
+      "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+      "state": "PR #22 已合并：候选 1981a94/tree e943cc30 → merge commit 903666a；当前 main 为文档同步提交 1d9ce32。T8 330/330、T10 14/14、T11a/T11b PASS；T3 PARTIAL；T9 已退休；T12 NOT_RUN。",
+      "parent_sha": "aa9dfb35033186fcb2e04db19cfbc250ecf37873",
+      "branch_head_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "branch_head_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+      "main_head_sha": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3",
+      "merge_commit_sha": "903666a11f3914291f3352bd92e041eaa40f7ce5",
+      "merge_candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "merge_candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32"
+    },
+    "local_test_groups": [
+      {
+        "value": "330/330",
+        "label": "Windows full regression · 1981a94",
+        "foot": "0 FAIL / 0 ERROR / 0 SKIP · 219.6 秒 · 已归档原始日志与汇总。"
+      },
+      {
+        "value": "14/14",
+        "label": "Windows screenshot UAT · 1981a94",
+        "foot": "39 张截图 · 255.9 秒 · 每场景独立 disposable profile。"
+      },
+      {
+        "value": "T11b PASS",
+        "label": "隔离安装 / 升级 / 重启",
+        "foot": "同 SHA 本地安装包；schema 7→8，数据与关键 ID 保留。"
+      },
+      {
+        "value": "T3 PARTIAL",
+        "label": "数据库契约覆盖",
+        "foot": "剩余项为按版本抽样、动态 CHECK 枚举及 schema<5 恢复流程自动化。"
+      }
+    ],
+    "count_note": "验收绑定候选 1981a94/tree e943cc30；该候选已合并至 main。T11b 使用同 SHA 本地 installer；CI 未上传二进制 artifact。",
+    "online_checks": [
+      {
+        "title": "PR #22 · Windows CI",
+        "value": "330/330 PASS · 0 skipped",
+        "sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+        "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669811",
+        "scope": "pull_request · candidate 1981a94 · success"
+      },
+      {
+        "title": "PR #22 · Beta packaging",
+        "value": "SUCCESS · artifact_count=0",
+        "sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+        "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669881",
+        "scope": "packaged smoke passed; workflow did not upload installer"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "T3",
+        "title": "版本契约与拒绝路径",
+        "status": "PARTIAL",
+        "detail": "schema 5–8 契约与拒绝保全有证据；仍缺按版本抽样类型/NOT NULL 变异、动态 CHECK 枚举，以及 schema<5 普通连接拒绝和人工恢复/导出自动化。"
+      },
+      {
+        "id": "T8",
+        "title": "目标平台全量回归",
+        "status": "PASS",
+        "detail": "候选 1981a94：Windows 330/330 PASS，0 FAIL / 0 ERROR / 0 SKIP；PR #22 CI 同 tree success。"
+      },
+      {
+        "id": "T9",
+        "title": "发布保护审查（已退休）",
+        "status": "RETIRED",
+        "detail": "维护者已将 T9 从当前发布门禁移除；旧只读核验只保留为历史审计，不参与本轮门禁判断。"
+      },
+      {
+        "id": "T10",
+        "title": "Mimo 截图 UAT",
+        "status": "PASS",
+        "detail": "候选 1981a94：14/14 PASS、39 张截图；mock 写入、受控状态注入与无头 Chromium 限制见验收报告。"
+      },
+      {
+        "id": "T11a",
+        "title": "PR checks",
+        "status": "PASS",
+        "detail": "PR #22 CI run 39458669811 与 Beta packaging run 39458669881 均 success；head 1981a94。"
+      },
+      {
+        "id": "T11b",
+        "title": "隔离安装与升级验收",
+        "status": "PASS",
+        "detail": "同 SHA 本地 installer 完成隔离安装、schema 7→8、重启与数据完整性核验；CI 未上传 installer artifact。"
+      },
+      {
+        "id": "T12",
+        "title": "Beta / stable 发布",
+        "status": "NOT_RUN",
+        "detail": "未创建 tag 或 Release，未 dispatch 发布 workflow；需维护者明确 GO。"
+      }
+    ],
+    "next_actions": [
+      "为实现只留 main，先迁移公开 Pages 看板、归档 evidence 分支数据，并确认 CI/release-pipeline 分支的独有提交均已保全。",
+      "Issue #6 是独立未解决的收藏夹快照计数问题，继续保持 open。",
+      "T3 维持 PARTIAL；记录的覆盖缺口不阻断当前已合并候选。",
+      "T12 仍 NOT_RUN；只有维护者明确 GO 后才执行。"
+    ],
+    "record": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md",
+    "target_platform": "Windows",
+    "handoff": {
+      "status": "current closeout",
+      "main_head": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3",
+      "merge_commit": "903666a11f3914291f3352bd92e041eaa40f7ce5",
+      "branch_goal": "main only after data migration",
+      "preserve_before_cleanup": [
+        "gh-pages Pages deployment",
+        "Windows T8/T10/T11b evidence",
+        "non-main CI/release-pipeline commits"
+      ],
+      "main_snapshot_sha": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3"
+    },
+    "windows_acceptance": {
+      "source": "本轮远端候选 1981a94 的 Windows acceptance-report、t8-summary.json、完整原始 T8 日志和逐项 T10 JSON/截图。",
+      "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+      "target_branch_head_after_acceptance": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "total": 330,
+      "passed": 330,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_seconds": 219.6,
+      "independent_full_runs": 1,
+      "chromium_ui_executed": 7,
+      "chromium_ui_passed": 7,
+      "chromium_ui_skipped": 0,
+      "evidence_branch": "evidence/windows-t10-uat-20261020",
+      "evidence_commit": "8fee41fa4946a186735b427f3ac686fa000fa026",
+      "evidence_branch_head": "42742c8f173c68716a773128e032dbb2548e6cef",
+      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
+      "raw_log_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt",
+      "raw_log_sha256": "3c792601…f67c7",
+      "summary_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/t8-summary.json",
+      "raw_log_status": "当前候选 T8 原始日志已归档，SHA-256 记于 acceptance-report/manifest。"
+    },
+    "windows_history": [
+      {
+        "sha": "65ba02e2ff0ea32c3fc27f450567f49bb56560a8",
+        "total": 306,
+        "passed": 261,
+        "failed": 6,
+        "errors": 39,
+        "skipped": 0
+      },
+      {
+        "sha": "ac9da2057f4d7adf7640e16b499e50bd5d5fcbd2",
+        "total": 318,
+        "passed": 298,
+        "failed": 6,
+        "errors": 14,
+        "skipped": 0,
+        "duration_seconds": 171.8
+      },
+      {
+        "sha": "f590ae8cbab2a0c58e3bb90c49550b8bdd67134f",
+        "total": 323,
+        "passed": 322,
+        "failed": 1,
+        "errors": 0,
+        "skipped": 0,
+        "duration_seconds": 215,
+        "chromium_ui_passed": 7
+      },
+      {
+        "sha": "4baa66e628538cfb2762b63bed82facd1b47f28a",
+        "total": 326,
+        "passed": 326,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "duration_seconds": 227,
+        "independent_full_runs": 2,
+        "chromium_ui_passed": 7,
+        "targeted_owner_lock": "3/3",
+        "targeted_server_integration": "4/4",
+        "evidence_commit": "b63573ec6b7875699fea909e33d25f825d412932"
+      },
+      {
+        "sha": "c75a06bd008c9f546349f60c7e3a147c266dade2",
+        "total": 328,
+        "passed": 328,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "duration_seconds": 227.2,
+        "independent_full_runs": 1,
+        "report_commit": "7cd6c49700b7ce3c31afcb4dcc9d71823828fccf"
+      }
+    ],
+    "t10_acceptance": {
+      "status": "PASS",
+      "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+      "target_branch_head": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "evidence_branch": "evidence/windows-t10-uat-20261020",
+      "evidence_commit": "8fee41fa4946a186735b427f3ac686fa000fa026",
+      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
+      "evidence_folder_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94",
+      "screenshots_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/tree/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/screenshots",
+      "screenshots_file_count": 39,
+      "scenarios_pass": 14,
+      "scenarios_fail": 0,
+      "scenarios_blocked": 0,
+      "scenarios_not_run": 0,
+      "duration_seconds": 255.9,
+      "environment": "Windows 11 专业版 build 26300；真实 uvicorn + Chromium 153；1440×900；每场景独立 disposable profile",
+      "network": "外网指向 127.0.0.1:9；B 站调用由记录型假 session 承担；未发真实远端写请求",
+      "scenarios": [
+        {
+          "id": "T10-01",
+          "title": "首次配置",
+          "status": "PASS",
+          "screenshots": 6
+        },
+        {
+          "id": "T10-02",
+          "title": "任务中心",
+          "status": "PASS",
+          "screenshots": 1
+        },
+        {
+          "id": "T10-03",
+          "title": "旧格式计数与停止",
+          "status": "PASS",
+          "screenshots": 4
+        },
+        {
+          "id": "T10-04",
+          "title": "运行中锁库与恢复",
+          "status": "PASS",
+          "screenshots": 4
+        },
+        {
+          "id": "T10-05",
+          "title": "重启中断恢复",
+          "status": "PASS",
+          "screenshots": 2
+        },
+        {
+          "id": "T10-06",
+          "title": "远端写入核对（mock）",
+          "status": "PASS",
+          "screenshots": 3
+        },
+        {
+          "id": "T10-07",
+          "title": "用户停止任务",
+          "status": "PASS",
+          "screenshots": 3
+        },
+        {
+          "id": "T10-08",
+          "title": "空模型配置请求",
+          "status": "PASS",
+          "screenshots": 2
+        },
+        {
+          "id": "T10-09",
+          "title": "已关闭的问题弹窗",
+          "status": "PASS",
+          "screenshots": 4
+        },
+        {
+          "id": "T10-10",
+          "title": "暂停与取消",
+          "status": "PASS",
+          "screenshots": 2
+        },
+        {
+          "id": "T10-11",
+          "title": "进度/检查点/暂停原因",
+          "status": "PASS",
+          "screenshots": 2
+        },
+        {
+          "id": "T10-12",
+          "title": "空 reconciliation",
+          "status": "PASS",
+          "screenshots": 1
+        },
+        {
+          "id": "T10-13",
+          "title": "快速模式任务状态（受控状态注入）",
+          "status": "PASS",
+          "screenshots": 3
+        },
+        {
+          "id": "T10-14",
+          "title": "Schema 7 升级界面路径",
+          "status": "PASS",
+          "screenshots": 2
+        }
+      ],
+      "limitations": [
+        "T10-13 扫描终态由 /api/scan/status 受控输入。",
+        "T10-06 仅 mock 远端写入。",
+        "浏览器为无头 Chromium，不是 Electron 外壳。"
+      ],
+      "current_candidate_status": "1981a94: PASS 14/14; 39 screenshots",
+      "evidence_branch_head": "42742c8f173c68716a773128e032dbb2548e6cef"
+    },
+    "t9_acceptance": {
+      "status": "FAIL",
+      "checked_on": "2026-10-20",
+      "evidence_commit": "7cd6c49700b7ce3c31afcb4dcc9d71823828fccf",
+      "evidence_branch_head": "8fee41fa4946a186735b427f3ac686fa000fa026",
+      "evidence_branch_head_tree": "9ca8f65ee8cd29d17ec23feda7e6a4c35284ba7d",
+      "evidence_branch_head_parent": "7cd6c49700b7ce3c31afcb4dcc9d71823828fccf",
+      "report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md",
+      "admin_read_permission_confirmed": true,
+      "environment_count": 0,
+      "release_approval_environment_exists": false,
+      "main_branch_protection_exists": false,
+      "repository_ruleset_count": 0,
+      "legacy_tag_protection_exists": false,
+      "allowed_actions": "all",
+      "sha_pinning_required": false,
+      "default_workflow_permissions": "read",
+      "publish_job_contents_write": true,
+      "publish_job_environment": "release-approval",
+      "finding": "只读核验确认实际保护缺失，T9 仍为 FAIL；维护者明确接受风险，未修改设置或 dispatch workflow。发布继续 等待 T12 授权。",
+      "decision_commit": "7cd6c49700b7ce3c31afcb4dcc9d71823828fccf",
+      "revisit_if_decision_changes": [
+        "若维护者撤销风险接受，再配置 release-approval、reviewers/prevent self-review、管理员绕过策略和 tag ruleset，并重新只读核验。"
+      ],
+      "current_gate": false,
+      "retired_by_maintainer_on": "2026-10-21",
+      "decision": "Historical audit only; retired from current gate by maintainer. Do not report as a current release blocker."
+    },
+    "t9_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-t10-uat/t9-github-protection-readonly.md",
+    "current_candidate_tests": {
+      "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+      "targeted_suite": "database/lifecycle 42/42 PASS (Linux; T3 scope under reconciliation)",
+      "platform": "Windows 11 Pro build 26300",
+      "windows_t8": "PASS 330/330; 0 FAIL / 0 ERROR / 0 SKIP; 219.6s; exit 0",
+      "t10": "PASS 14/14; 39 screenshots; 255.9s",
+      "evidence_report_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/acceptance-report.md",
+      "raw_log_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/logs/t8-full-regression.raw.log.txt",
+      "summary_url": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/evidence/windows-t10-uat-20261020/docs/testing/evidence/20261020-windows-1981a94/t8-summary.json",
+      "note": "All results bind to current candidate 1981a94; previous c75a06b results remain historical."
+    },
+    "current_candidate_status": {
+      "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
+      "tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+      "t8": "PASS 330/330",
+      "t10": "PASS 14/14 (39 screenshots)",
+      "t3": "PARTIAL",
+      "t9": "retired from current gate",
+      "t11a": "PASS",
+      "t11b": "PASS using local same-SHA installer",
+      "t12": "NOT_RUN; explicit GO required",
+      "merge_commit": "903666a11f3914291f3352bd92e041eaa40f7ce5",
+      "main_head": "1d9ce32b6fc7ff1de4022c00dd12ef622785dfe3"
+    },
+    "t3_acceptance": {
+      "dashboard_status": "PARTIAL",
+      "targeted_tests": "database/lifecycle 42/42 PASS (Linux)",
+      "task_list_status": "PARTIAL",
+      "acceptance_report_status": "PARTIAL",
+      "discrepancy": "已对齐；任务清单和验收报告均为 PARTIAL。",
+      "next": "按需补齐按版本抽样变异、动态 CHECK 枚举，以及 schema<5 普通连接拒绝/人工恢复导出自动化。"
+    }
+  }
+}</script><script>
+(()=>{'use strict';
+const D=JSON.parse(document.getElementById('project-data').textContent);
+const S={page:'overview',stage:0,rev:D.revisions.length-1,playing:null};const el=id=>document.getElementById(id);
+const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cls=s=>s==='BLOCKED'||s==='CRITICAL'||s==='FAIL'?'fail':s==='PENDING'||s==='HIGH'||s==='PARTIAL'||s==='PATCH_TESTED'?'warn':s==='PASS'||s==='EA_CI_PASS'||s==='VERIFIED'?'ok':s==='NOT_RUN'?'neutral':'plan';
+const label=s=>({'BLOCKED':'阻塞','FAIL':'失败','PASS':'通过','NOT_RUN':'未开始','PENDING':'待推进','PARTIAL':'部分完成','PATCH_TESTED':'补丁已测试','EA_CI_PASS':'EA CI 已通过','RETIRED':'已移出当前门禁','OPEN':'仍开放','CRITICAL':'严重','HIGH':'高','MEDIUM':'中'}[s]||s);
+const pill=(s,custom)=>`<span class="pill ${cls(s)}">${esc(custom||label(s))}</span>`;
+const list=a=>`<ul class="cleanlist">${a.map(x=>`<li>${esc(x)}</li>`).join('')}</ul>`;
+let toastTimer=0;function notify(t){clearTimeout(toastTimer);const x=el('toast');x.textContent=t;x.classList.add('show');toastTimer=setTimeout(()=>x.classList.remove('show'),1800)}
+function copy(s){if(navigator.clipboard?.writeText){navigator.clipboard.writeText(s).then(()=>notify('已复制')).catch(()=>fallbackCopy(s))}else fallbackCopy(s)}
+function fallbackCopy(s){const t=document.createElement('textarea');t.value=s;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();notify('已复制')}
+function download(filename,str,mime='text/plain;charset=utf-8'){const b=new Blob([str],{type:mime});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),900)}
+function route(page){S.page=page;document.querySelectorAll('.view').forEach(x=>x.classList.toggle('active',x.id==='page-'+page));document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));if(S.playing){clearInterval(S.playing);S.playing=null;el('playRevs').textContent='▶ 播放';}window.scrollTo(0,0)}
+document.querySelectorAll('#nav button').forEach(b=>b.addEventListener('click',()=>route(b.dataset.page)));
+el('sideVersion').textContent=D.version+' · '+D.snapshot_date;el('sideGit').textContent='CI '+D.ci.sha.slice(0,9);el('footDate').textContent=D.snapshot_date;
+el('heroTitle').textContent=D.execution_snapshot.hero_title;el('heroText').textContent=D.headline;
+el('stats').innerHTML=D.metrics.map(function(m){return '<div class="stat '+esc(m.state)+'"><div class="lbl">'+esc(m.label)+'</div><div class="val">'+esc(m.value)+'</div><div class="foot">'+esc(m.foot)+'</div></div>'}).join('');
+function renderExecution(){
+ const E=D.execution_snapshot;
+ const groups=E.local_test_groups.map(function(t){return '<div class="exec-test"><strong>'+esc(t.value)+'</strong><span>'+esc(t.label)+'</span><small>'+esc(t.foot)+'</small></div>'}).join('');
+ const checks=E.online_checks.map(function(c){return '<div class="pane"><div class="kicker">'+esc(c.title)+'</div><div class="value green">'+esc(c.value)+'</div><p class="exec-caption">SHA '+esc(c.sha.slice(0,12))+' · '+esc(c.scope)+'</p><a href="'+esc(c.url)+'" target="_blank" rel="noopener">查看 GitHub 原始运行 ↗</a></div>'}).join('');
+ const statusLabel={PARTIAL:'部分完成',BLOCKED:'阻塞',NOT_RUN:'未开始',PASS:'通过',RETIRED:'已移出当前门禁'};
+ const rows=E.tasks.map(function(t){return '<tr><td><code>'+esc(t.id)+'</code></td><td><strong>'+esc(t.title)+'</strong></td><td>'+pill(t.status,statusLabel[t.status]||t.status)+'</td><td><p>'+esc(t.detail)+'</p></td></tr>'}).join('');
+ const next=E.next_actions.map(function(x){return '<li>'+esc(x)+'</li>'}).join('');
+ el('executionPanel').innerHTML='<div class="exec-layout"><div class="pane"><div class="p-title">当前结论 '+pill('BLOCKED','RC 等待 T12 授权')+'</div><p>'+esc(E.candidate.state)+'</p><p class="exec-caption">PR #22 merge commit '+esc(E.candidate.baseline_sha)+' · main docs snapshot '+esc(E.candidate.main_head_sha)+'</p><p class="exec-caption">'+esc(E.candidate.maintenance_worktree)+'。候选验收通过，PR #22 已合并。</p><div class="exec-note"><strong>验收平台：</strong>Windows 11。</div></div><div class="pane"><div class="p-title">隔离定向测试（分组统计）</div><div class="exec-test-grid">'+groups+'</div><p class="exec-caption">'+esc(E.count_note)+'</p></div></div><div class="pane"><div class="p-title">PR #22 在线证据</div><div class="exec-online">'+checks+'</div></div><div class="sectionhead"><h3>当前门禁与收尾状态</h3><small>灰色未开始；黄色部分完成；红色阻塞</small></div><div class="pane exec-table-wrap"><table class="exec-table"><thead><tr><th>ID</th><th>任务</th><th>状态</th><th>当前证据 / 剩余项</th></tr></thead><tbody>'+rows+'</tbody></table></div><div class="two" style="margin-top:14px"><div class="pane"><div class="p-title">下一步</div><ul class="exec-next">'+next+'</ul></div><div class="pane"><div class="p-title">验收路径</div><p class="exec-caption">候选 SHA/tree 固定 → Windows 回归和 UAT → PR checks → 隔离安装/升级 → 合并。T12 发布仍需明确 GO；只留 main 前需先迁移 Pages、证据和独有提交。</p></div></div>';
+}
+renderExecution();
+function gates(){const make=(g,i)=>`<button class="gatecard ${S.stage===i?'selected':''}" data-stage="${i}"><span class="gnum">GATE ${g.id}</span><strong>${esc(g.title)}</strong><p>${esc(g.short)}</p>${pill(g.status)}</button>`;el('gateCards').innerHTML=D.stages.map(make).join('');el('roadmapCards').innerHTML=D.stages.map(make).join('');document.querySelectorAll('[data-stage]').forEach(x=>x.addEventListener('click',()=>{S.stage=Number(x.dataset.stage);gates()}));const g=D.stages[S.stage];const details=`<div class="detailtop"><div><div class="kicker">STAGE ${g.id} · ${esc(g.who)}</div><h3>${esc(g.title)}</h3></div>${pill(g.status)}</div><div class="detailbody"><div class="minibox"><div class="kicker">退出条件 / 验收</div><p>${esc(g.exit)}</p></div><div class="minibox"><div class="kicker">当前下一步</div><p>${esc(g.next)}</p></div></div><p class="meta">关联任务：${g.tasks.map(id=>`<code>${esc(id)}</code>`).join(' · ')}</p>`;el('gatePreview').innerHTML='<div class="details">'+details+'</div>';el('roadmapDetail').innerHTML=details;}
+gates();el('focusTodos').innerHTML=list(D.focus.do_now);el('focusWhy').textContent=D.focus.why;el('focusBlocked').textContent=D.focus.blocked;
+el('parallelBlocks').innerHTML=D.parallel.map(p=>`<div class="pane"><div class="kicker">${esc(p.subtitle)}</div><h3 style="margin:7px 0">${esc(p.title)}</h3><div class="tags">${p.ids.map(x=>`<span class="pill plan">${esc(x)}</span>`).join('')}</div><p class="meta" style="margin-top:13px">${esc(p.note)}</p></div>`).join('');
+const prompts=D.prompts||{};
+function renderTasks(){const q=el('taskSearch').value.trim().toLowerCase(),st=el('taskFilter').value,wave=el('taskWave').value;const a=D.tasks.filter(t=>(st==='all'||t.status===st)&&(wave==='all'||t.wave===wave)&&[t.id,t.title,t.module,t.detail,t.next].join(' ').toLowerCase().includes(q));el('taskCount').textContent=`${a.length} / ${D.tasks.length} 项 · 点击展开查看范围、验收记录与下一步`;el('taskList').innerHTML=a.map(t=>`<article class="task"><header><div><div class="id">${esc(t.id)} · ${esc(t.wave)} · ${esc(t.priority)}</div><h3>${esc(t.title)}</h3></div>${pill(t.status)}</header><p>${esc(t.detail)}</p><details><summary>展开任务 · 依赖 / 修改范围 / 提示词</summary><p><strong>下一步：</strong>${esc(t.next)}</p><p><strong>依赖：</strong>${esc(t.deps?.join(', ')||'无')}<br><strong>允许写入：</strong>${esc(t.write?.join(', ')||'仅报告')}<br><strong>验收：</strong>${esc(t.accept?.join('；')||'未指定')}</p><div class="op"><button class="btn" data-copy="${esc(t.id)}">复制 Codex Prompt</button><button class="btn" data-save="${esc(t.id)}">下载 Prompt.md</button></div></details></article>`).join('')||'<div class="pane">没有匹配任务，请清除筛选。</div>';document.querySelectorAll('[data-copy]').forEach(x=>x.addEventListener('click',()=>copy(prompts[x.dataset.copy]||'提示词未内嵌')));document.querySelectorAll('[data-save]').forEach(x=>x.addEventListener('click',()=>download(x.dataset.save+'.md',prompts[x.dataset.save]||'提示词未内嵌')))}
+['taskSearch','taskFilter','taskWave'].forEach(x=>el(x).addEventListener('input',renderTasks));renderTasks();
+const CI=D.ci;el('ciPanels').innerHTML=`<div class="pane"><div class="kicker">CANDIDATE WINDOWS REGRESSION</div><div class="value green">${CI.windows_tests.passed}/${CI.windows_tests.discovered} PASS</div>${pill('PASS','0 skipped · Chromium UI')}<p class="meta">${esc(CI.windows_tests.duration_text)} · candidate SHA ${CI.sha.slice(0,12)}</p><a href="${esc(CI.windows_tests.url)}" target="_blank" rel="noopener">查看完整 Windows CI 日志 ↗</a><ul><li>工作流 success，测试阶段 success</li><li>浏览器 UI 测试实际执行，无关键跳过</li><li>当前候选 SHA 1981a94 的 PR #22 CI 结果</li></ul></div><div class="pane"><div class="kicker">BETA PACKAGING / SMOKE</div><div class="value green">SUCCESS</div>${pill('PASS','packaged smoke PASS')}<p class="meta">Windows frozen backend · NSIS installer · inspect · smoke</p><a href="${esc(CI.package.url)}" target="_blank" rel="noopener">查看打包与冒烟运行 ↗</a><ul><li>后端冻结构建通过</li><li>Electron NSIS 安装包及检查通过</li><li>解包 Electron 前端 + 后端冒烟通过</li><li>artifact_count=0；T11b 使用同 SHA 本地安装包</li><li>未创建 Release</li></ul></div>`;
+el('refs').innerHTML=D.links.map(r=>`<div class="refline"><div><b>${esc(r.title)}</b><p>${esc(r.why)}</p></div><a href="${esc(r.url)}" target="_blank" rel="noopener">查看原始证据 ↗</a></div>`).join('');el('shaPanel').textContent=`main snapshot  ${D.repository.main_sha}\nPR #22 merge   ${D.repository.merge_sha}\ncandidate      ${D.repository.merge_candidate_sha}\ntree           ${D.repository.merge_candidate_tree}\n\nPR #22 merged · PR #21 closed · Issue #6 open · T9 retired · T12 NOT_RUN`;
+el('riskGrid').innerHTML=D.risks.map(r=>`<div class="risk"><header><h3>${esc(r.title)}</h3>${pill(r.severity)}</header><p><strong>影响：</strong>${esc(r.impact)}</p><p><strong>对策：</strong>${esc(r.action)}</p><span class="meta">Owner: ${esc(r.owner)}</span></div>`).join('');el('riskGates').innerHTML=D.stages.map(g=>`<div class="refline"><div><b>${esc(g.id)} · ${esc(g.title)}</b><p>${esc(g.exit)}</p></div>${pill(g.status)}</div>`).join('');
+function renderRevisions(){el('revSlider').max=D.revisions.length-1;el('revisions').innerHTML=D.revisions.map((r,i)=>`<button class="rev ${S.rev===i?'sel':''}" data-rev="${i}"><span class="id">${esc(r.id)} · ${esc(r.date)}</span><strong>${esc(r.title)}</strong><small>${esc(r.kind)}</small></button>`).join('');document.querySelectorAll('[data-rev]').forEach(x=>x.addEventListener('click',()=>{S.rev=Number(x.dataset.rev);renderRevisions()}));el('revSlider').value=S.rev;const r=D.revisions[S.rev];el('revisionDetail').innerHTML=`<div class="kicker">${esc(r.id)} / ${esc(r.kind)} / ${esc(r.date)}</div><h3 style="font-size:23px;margin:11px 0">${esc(r.focus)}</h3><div class="detailbody"><div class="minibox"><div class="kicker">变化及判断依据</div><p>${esc(r.change)}</p></div><div class="minibox"><div class="kicker">证据 / 状态边界</div><p>${esc(r.evidence)}</p></div></div>`}
+renderRevisions();const goRev=d=>{S.rev=Math.min(D.revisions.length-1,Math.max(0,S.rev+d));renderRevisions()};el('prevRev').addEventListener('click',()=>goRev(-1));el('nextRev').addEventListener('click',()=>goRev(1));el('revSlider').addEventListener('input',e=>{S.rev=+e.target.value;renderRevisions()});el('playRevs').addEventListener('click',()=>{if(S.playing){clearInterval(S.playing);S.playing=null;el('playRevs').textContent='▶ 播放';return}S.rev=0;renderRevisions();el('playRevs').textContent='Ⅱ 暂停';S.playing=setInterval(()=>{if(S.rev===D.revisions.length-1){clearInterval(S.playing);S.playing=null;el('playRevs').textContent='▶ 播放'}else{goRev(1)}},1350)});
+el('theme').addEventListener('click',()=>{document.body.classList.toggle('light');el('theme').textContent=document.body.classList.contains('light')?'☾ 深色主题':'☀ 浅色主题'});
+el('downloadJSON').addEventListener('click',()=>{const copyState={...D};delete copyState.prompts;download('bfo-project-status-'+D.snapshot_date.replaceAll('-','')+'.json',JSON.stringify(copyState,null,2),'application/json')});
+el('copyOverview').addEventListener('click',()=>copy(D.name+' · '+D.snapshot_date+' | '+D.headline+' | '+D.decision));
+})();
+</script></body></html>
