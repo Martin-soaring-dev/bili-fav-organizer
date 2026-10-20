@@ -7,7 +7,7 @@
 - **T3：PARTIAL。**schema 5–8 契约及现有拒绝路径有证据；仍缺按版本抽样的类型/NOT NULL 变异、动态枚举 CHECK 的证伪测试，以及 schema<5 普通连接拒绝与人工恢复/导出路径自动化验证。
 - **T9：**维护者已将其从当前发布门禁中退休。旧只读审查仅作历史记录，不参与当前判定。
 - **T12：NOT_RUN。**本轮未创建发布 tag、Release 或发布；发布仍须维护者明确 GO。
-- **PR 清理：**旧 CI-only PR #21 已关闭。Issue [#6](https://github.com/Martin-soaring-dev/bili-fav-organizer/issues/6) 是未解决的收藏夹计数异常问题，不属于 PR #22 的实现范围，继续保持 open。
+- **PR / Issue 清理：**PR #22 已合并，旧 CI-only PR #21 已关闭，目前没有打开的 PR。Issue [#6](https://github.com/Martin-soaring-dev/bili-fav-organizer/issues/6) 已于 2026-10-20 21:47 UTC 关闭；修复由 PR [#7](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/7) 合并，维护者最后反馈“测试未见异常”。此 issue 独立于 PR #22。
 - **当前看板：**[BiliFavOrganizer Delivery Console](https://martin-soaring-dev.github.io/bili-fav-organizer/)。
 
 本节为当前权威状态。下方较早的执行记录保留用于追溯，不能覆盖本节结论。
