@@ -1,10 +1,10 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a111a"><title>BiliFavOrganizer · Delivery Console V5.1</title>
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a111a"><title>BiliFavOrganizer · Delivery Console V5.3</title>
 <style>
 :root{color-scheme:dark;--bg:#090f18;--side:#0c1520;--pane:#131f2d;--pane2:#18293a;--pane3:#1e3245;--text:#edf5fd;--muted:#9aacc0;--line:#2d4154;--teal:#79d9ca;--blue:#92b8fd;--green:#7ce0a8;--amber:#f5c77c;--red:#f89ca0;--lav:#b8acf6;--shadow:0 14px 35px #02071390}html{scroll-behavior:smooth}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 81% -10%,#20394f 0,transparent 40%),var(--bg);color:var(--text);font:14px/1.65 Inter,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}body.light{color-scheme:light;--bg:#f0f5fa;--side:#e8f0f7;--pane:#fff;--pane2:#eaf2fa;--pane3:#e1eef7;--text:#182e42;--muted:#637c94;--line:#ccd9e6;--teal:#146d71;--blue:#345c9d;--green:#14734f;--amber:#97621a;--red:#ba4451;--lav:#6750a1;--shadow:0 10px 32px #29435a16}a{color:var(--teal);text-decoration:none}a:hover{text-decoration:underline}button,input,select{font:inherit;color:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{outline:2px solid var(--teal);outline-offset:3px}.app{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}.sidebar{position:sticky;top:0;height:100vh;background:var(--side);border-right:1px solid var(--line);padding:24px 15px;display:flex;flex-direction:column;gap:23px;z-index:5}.logo{display:flex;gap:11px;align-items:center;padding:4px 8px 12px}.mark{display:grid;place-items:center;background:linear-gradient(130deg,#194b51,#263955);border:1px solid #51838d;border-radius:11px;width:39px;height:39px;font-weight:900;color:#a8fff0;font-size:20px}.logo strong{font-size:16px;letter-spacing:-.02em}.logo small{display:block;font-size:10px;letter-spacing:.15em;color:var(--muted)}.navlabel,.kicker{font:800 10px/1.3 ui-monospace,Consolas,monospace;letter-spacing:.17em;color:var(--teal)}.navlabel{margin:0 13px 6px;color:var(--muted)}.nav button{width:100%;text-align:left;display:flex;gap:13px;align-items:center;margin:4px 0;padding:11px 12px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--muted);font-size:13px;transition:.15s}.nav button:hover{background:var(--pane2)}.nav button.active{background:var(--pane3);border-color:#507a8e;color:var(--text)}.nav .num{font:700 10px ui-monospace,monospace;color:var(--teal);min-width:19px}.sidefoot{margin-top:auto;border-top:1px solid var(--line);padding:15px 9px;font-size:11px;color:var(--muted);line-height:1.8}.sidefoot strong{color:var(--text)}.main{max-width:1540px;width:100%;margin:0 auto;padding:27px 36px 60px;min-width:0}.top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.btn{background:var(--pane2);border:1px solid var(--line);border-radius:9px;padding:8px 12px;font-size:12px}.btn:hover{border-color:var(--teal)}.btn.accent{color:#cffcf2;background:#1b4b4c;border-color:#4a9c98}body.light .btn.accent{color:#fff;background:#186f6f}h1{font-size:clamp(29px,3.35vw,48px);letter-spacing:-.055em;line-height:1.1;margin:22px 0 12px}h2{font-size:20px;letter-spacing:-.03em;margin:0}h3{font-size:16px;line-height:1.45;margin:0}.intro{color:var(--muted);max-width:930px;margin:0 0 25px;line-height:1.9}.view{display:none}.view.active{display:block;animation:rise .24s ease}.hero{position:relative;overflow:hidden;padding:22px 25px;border-radius:18px;background:linear-gradient(115deg,#11343b,#1b3047 58%,#252943);border:1px solid #386d73;color:#eaf7ff}.hero:after{content:"";position:absolute;right:-90px;top:-120px;width:320px;height:320px;border:1px solid #9ce5df22;border-radius:50%;box-shadow:0 0 0 35px #84c9de08,0 0 0 79px #84c9de08;pointer-events:none}.hero h2{font-size:clamp(20px,2.4vw,31px);position:relative;z-index:1;margin:9px 0}.hero p{color:#c7dadd;font-size:13px;max-width:870px;position:relative;z-index:1}.tags{display:flex;gap:8px;flex-wrap:wrap;position:relative;z-index:1}.pill{display:inline-flex;align-items:center;white-space:nowrap;gap:5px;padding:4px 9px;border:1px solid var(--line);background:var(--pane2);border-radius:99px;font-size:10px;font-weight:760;letter-spacing:.02em}.pill.ok{color:var(--green);border-color:#2b795f;background:#13372c}.pill.warn{color:var(--amber);border-color:#82623d;background:#382c22}.pill.fail{color:var(--red);border-color:#87535c;background:#3c2732}.pill.plan{color:var(--blue);border-color:#4c6182;background:#23344b}.pill.neutral{color:var(--muted)}body.light .pill{background:var(--pane2)}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:15px 0 30px}.stat{padding:17px;border:1px solid var(--line);border-radius:13px;background:var(--pane)}.stat .lbl{font-size:11px;color:var(--muted)}.stat .val{font-size:27px;letter-spacing:-.035em;font-weight:830;margin:4px 0}.stat .foot{color:var(--muted);font-size:11px}.stat.pass .val{color:var(--green)}.stat.partial .val{color:var(--amber)}.stat.block .val{color:var(--red)}.sectionhead{display:flex;justify-content:space-between;align-items:end;gap:15px;margin:27px 0 13px}.sectionhead>small{font-size:11px;color:var(--muted)}.pane{min-width:0;background:linear-gradient(145deg,var(--pane),var(--side));border:1px solid var(--line);border-radius:15px;padding:18px 19px;box-shadow:var(--shadow)}body.light .pane{background:var(--pane)}.p-title{font-weight:760;font-size:13px;display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:10px}.meta{color:var(--muted);font-size:11px}.two{display:grid;grid-template-columns:1.2fr 1fr;gap:14px}.caution{border-left:3px solid var(--amber);background:var(--pane2);padding:11px 14px;border-radius:4px 9px 9px 4px;color:var(--muted);font-size:12px}.lanes{display:grid;grid-template-columns:110px minmax(0,1fr);gap:10px;margin-top:14px}.trackname{display:flex;align-items:center;font-size:11px;color:var(--muted);font-weight:800}.track{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--pane);min-width:0}.track.done{border-color:#326b5c}.track.future{border-color:#735c45}.trackbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.arrow{color:var(--muted);font-size:17px}.trackbox{border-radius:9px;background:var(--pane2);padding:9px 11px;border:1px solid var(--line);font-size:11px;font-weight:700}.trackbox.passed{border-color:#3c866c;color:var(--green)}.trackbox.next{border-color:#8c6b40;color:var(--amber)}.gategrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.gatecard{border:1px solid var(--line);border-radius:12px;background:var(--pane);text-align:left;padding:15px 14px;position:relative;transition:.2s;min-height:146px}.gatecard:hover,.gatecard.selected{border-color:#70b5ba;background:var(--pane2);transform:translateY(-2px)}.gatecard.selected:before{content:"";height:3px;background:var(--teal);position:absolute;top:0;left:0;right:0;border-radius:12px 12px 0 0}.gatecard .gnum{color:var(--teal);font:800 10px ui-monospace,monospace;letter-spacing:.15em}.gatecard strong{display:block;font-size:14px;margin:12px 0 9px}.gatecard p{font-size:11px;line-height:1.6;color:var(--muted);margin:0 0 10px}.gatecard .pill{margin-top:auto}.details{margin-top:12px;border:1px solid var(--line);background:var(--pane);border-radius:14px;padding:20px}.detailtop{display:flex;justify-content:space-between;gap:10px;align-items:start}.detailtop h3{font-size:20px;margin:7px 0}.detailbody{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}.minibox{padding:13px;border:1px solid var(--line);background:var(--pane2);border-radius:11px}.minibox .kicker{margin-bottom:6px}.minibox p{margin:4px 0;color:var(--muted);font-size:12px}.cleanlist{list-style:none;margin:5px 0;padding:0}.cleanlist li{padding:6px 0;display:flex;gap:9px;font-size:12px;line-height:1.6}.cleanlist li:before{content:"↗";color:var(--teal)}.segment{display:flex;flex-wrap:wrap;gap:7px}.segment button{border:1px solid var(--line);border-radius:9px;background:var(--pane2);font-size:12px;padding:8px 12px}.segment button.on{border-color:var(--teal);color:var(--teal);background:var(--pane3)}.filters{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:16px 0}.field{background:var(--pane2);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font-size:12px}.search{flex:1;min-width:220px}.tasks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.task{background:var(--pane);border:1px solid var(--line);border-radius:12px;padding:15px;min-width:0}.task header{display:flex;align-items:start;gap:10px;justify-content:space-between}.task .id{font:800 12px ui-monospace,Consolas,monospace;color:var(--teal)}.task h3{margin:5px 0;font-size:13px}.task p{font-size:12px;color:var(--muted);line-height:1.7}.task details{border-top:1px solid var(--line);padding-top:9px}.task summary{cursor:pointer;color:var(--teal);font-size:12px;font-weight:700}.task .op{display:flex;flex-wrap:wrap;gap:7px;padding-top:12px}.task .op button{padding:6px 10px}.tasks-note{color:var(--muted);font-size:12px}.evidence{display:grid;grid-template-columns:repeat(2,1fr);gap:13px}.evidence .value{font-size:26px;font-weight:850;margin:5px 0}.evidence .value.green{color:var(--green)}.evidence ul{margin:10px 0 0;padding-left:18px;font-size:12px;color:var(--muted)}.evidence a{font-size:12px}.refs{display:grid;grid-template-columns:1fr;gap:0}.refline{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:12px 0;border-bottom:1px solid var(--line)}.refline:last-child{border:0}.refline b{font-size:12px}.refline p{margin:2px 0 0;font-size:11px;color:var(--muted)}.codeish{font:12px/1.8 ui-monospace,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--pane2);padding:15px;border-radius:10px;border:1px solid var(--line)}.riskgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.risk{padding:16px;background:var(--pane);border:1px solid var(--line);border-radius:13px}.risk header{display:flex;justify-content:space-between;gap:10px;align-items:start}.risk h3{font-size:13px}.risk p{font-size:12px;color:var(--muted);margin:10px 0 4px}.revgrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px}.rev{padding:13px 11px;min-height:118px;border:1px solid var(--line);background:var(--pane);border-radius:10px;text-align:left}.rev strong{display:block;font-size:12px;margin:9px 0 5px}.rev small{font-size:10px;color:var(--muted)}.rev.sel{border-color:var(--teal);background:var(--pane3)}.rev .id{font:800 10px ui-monospace,monospace;color:var(--teal)}.foot{font-size:11px;color:var(--muted);border-top:1px solid var(--line);padding-top:22px;margin-top:40px}.foot .flex{display:flex;gap:12px;flex-wrap:wrap}.footer-status{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.toast{position:fixed;right:20px;bottom:20px;z-index:20;background:#1b4951;border:1px solid #78c8bf;color:#eefdfa;padding:11px 17px;border-radius:10px;box-shadow:var(--shadow);font-size:12px;opacity:0;pointer-events:none;transition:.2s}.toast.show{opacity:1}@keyframes rise{from{opacity:.15;transform:translateY(7px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:1120px){.app{grid-template-columns:198px minmax(0,1fr)}.main{padding:23px 22px 55px}.gategrid{grid-template-columns:repeat(2,1fr)}.stats{grid-template-columns:repeat(2,1fr)}.revgrid{grid-template-columns:repeat(3,1fr)}}@media(max-width:830px){.app{display:block}.sidebar{position:static;height:auto;padding:10px 13px;gap:8px}.navlabel,.sidefoot{display:none}.logo{padding:1px 0}.logo small{display:none}.nav{display:flex;overflow:auto;gap:4px}.nav button{width:auto;white-space:nowrap;margin:0}.main{padding:22px 15px 55px}.two,.detailbody{grid-template-columns:1fr}.lanes{grid-template-columns:1fr}.trackname{padding-top:8px}.evidence{grid-template-columns:1fr}}@media(max-width:600px){.stats,.gategrid,.tasks,.riskgrid,.revgrid{grid-template-columns:1fr}.main{padding:18px 11px 45px}.hero{padding:20px}.gatecard{min-height:auto}.sectionhead{display:block}.detailtop{display:block}.top{align-items:start}.tools{width:100%}.btn{font-size:11px}.trackbar{gap:5px}.arrow{display:none}.trackbox{font-size:10px}.refline{display:block}.refline a{display:block;margin-top:8px}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 </style><style>
 .exec-layout{display:grid;grid-template-columns:1.05fr 1fr;gap:14px;margin:0 0 14px}.exec-test-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));gap:9px;margin-top:12px}.exec-test{padding:11px;border:1px solid rgba(135,165,185,.22);border-radius:12px;background:rgba(127,154,176,.06)}.exec-test strong{display:block;font-size:19px;color:var(--teal);margin-bottom:4px}.exec-test span,.exec-test small{display:block}.exec-test small{color:var(--muted);margin-top:5px;line-height:1.45}.exec-online{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:10px}.exec-online a{font-weight:700}.exec-online p{margin:6px 0;line-height:1.55}.exec-table-wrap{overflow:auto;margin-top:10px}.exec-table{width:100%;border-collapse:collapse;min-width:790px}.exec-table th,.exec-table td{text-align:left;padding:9px 10px;border-bottom:1px solid rgba(135,165,185,.2);vertical-align:top}.exec-table th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.exec-table td:nth-child(1){white-space:nowrap}.exec-next{margin:6px 0 0;padding-left:20px;line-height:1.75}.exec-note{margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid rgba(224,176,92,.25);background:rgba(224,176,92,.07);line-height:1.65}.exec-caption{font-size:12px;color:var(--muted);line-height:1.6}.exec-table td p{margin:0;line-height:1.55}@media(max-width:850px){.exec-layout{grid-template-columns:1fr}}
-</style></head><body><div class="app"><aside class="sidebar"><div class="logo"><div class="mark">B</div><div><strong>BiliFavOrganizer</strong><small>DELIVERY CONSOLE · V5</small></div></div><div><div class="navlabel">PROJECT WORKSPACE</div><nav class="nav" id="nav"><button class="active" data-page="overview"><span class="num">01</span>项目总览</button><button data-page="roadmap"><span class="num">02</span>路线图与合流</button><button data-page="tasks"><span class="num">03</span>任务与 Codex</button><button data-page="evidence"><span class="num">04</span>CI / 证据</button><button data-page="risk"><span class="num">05</span>风险与门禁</button><button data-page="history"><span class="num">06</span>Focus 演进</button></nav></div><div class="sidefoot"><strong id="sideVersion">状态快照 · 2026-10-19</strong><div>已验证与未完成严格分离。</div><div>HTML 离线可用 · 不自动同步 GitHub</div><div id="sideGit"></div></div></aside><main class="main"><div class="top"><div class="kicker">PROJECT INTELLIGENCE / RELEASE READINESS</div><div class="tools"><span class="pill ok">● T8 / PR CI PASS</span><span class="pill warn">RC 等待 T12 授权</span><button class="btn" id="theme">☀ 切换主题</button><button class="btn" id="copyOverview">复制现状</button><button class="btn accent" id="downloadJSON">导出 JSON</button></div></div><h1>候选验收通过，主线已合并；进入仓库收尾阶段。</h1><p class="intro">首页汇总已合并候选验收、尚未完成的事项，以及将远端分支收敛至 main 前必须保全的内容。</p>
+</style></head><body><div class="app"><aside class="sidebar"><div class="logo"><div class="mark">B</div><div><strong>BiliFavOrganizer</strong><small>DELIVERY CONSOLE · V5</small></div></div><div><div class="navlabel">PROJECT WORKSPACE</div><nav class="nav" id="nav"><button class="active" data-page="overview"><span class="num">01</span>项目总览</button><button data-page="roadmap"><span class="num">02</span>路线图与合流</button><button data-page="tasks"><span class="num">03</span>任务与 Codex</button><button data-page="evidence"><span class="num">04</span>CI / 证据</button><button data-page="risk"><span class="num">05</span>风险与门禁</button><button data-page="history"><span class="num">06</span>Focus 演进</button></nav></div><div class="sidefoot"><strong id="sideVersion">状态快照 · 2026-10-19</strong><div>已验证与未完成严格分离。</div><div>HTML 离线可用 · 不自动同步 GitHub</div><div id="sideGit"></div></div></aside><main class="main"><div class="top"><div class="kicker">PROJECT INTELLIGENCE / RELEASE READINESS</div><div class="tools"><span class="pill ok">● T8 / PR CI PASS</span><span class="pill warn">RC 等待 T12 授权</span><button class="btn" id="theme">☀ 切换主题</button><button class="btn" id="copyOverview">复制现状</button><button class="btn accent" id="downloadJSON">导出 JSON</button></div></div><h1>仓库收尾完成：Pages 已使用 main/docs，远端只保留 main。</h1><p class="intro">PR #22 与验收证据已归档到 main，公开 dashboard 已由 main/docs 部署。T8/T10/T11a/T11b PASS；T3 PARTIAL，T12 NOT_RUN。分支收敛已完成，未创建发布。</p>
 <section id="page-overview" class="view active"><div class="hero"><div class="kicker" style="color:#94ddd5">CURRENT PROJECT CLOSEOUT · 2026-10-21</div><h2 id="heroTitle"></h2><p id="heroText"></p><div class="tags"><span class="pill ok">PR #22 merged</span><span class="pill ok">T8 330/330 PASS</span><span class="pill ok">T10 14/14 · 39 screenshots</span><span class="pill warn">T3 PARTIAL</span></div></div><div class="sectionhead"><h2>合并后收尾状态 · 2026-10-21</h2><small>候选 1981a94 已并入 main；T12 发布尚未执行</small></div><div id="executionPanel"></div><div class="stats" id="stats"></div><div class="sectionhead"><h2>当前状态</h2><small>已合并候选与 branch consolidation 计划</small></div><div class="pane"><div class="lanes"><div class="trackname">候选验收 ✓</div><div class="track done"><div class="trackbar"><span class="trackbox passed">1981a94</span><span class="arrow">→</span><span class="trackbox passed">T8 330/330</span><span class="arrow">→</span><span class="trackbox passed">T10 14/14</span><span class="arrow">→</span><span class="trackbox passed">T11a / T11b</span><span class="arrow">→</span><span class="trackbox passed">PR #22 merged</span></div><p class="meta">T11b 使用同 SHA 本地 installer；Beta CI artifact 未上传。T3 保持 PARTIAL；T12 等待明确 GO。</p></div><div class="trackname">分支收敛 →</div><div class="track future"><div class="trackbar"><span class="trackbox passed">main 已含候选</span><span class="arrow">→</span><span class="trackbox next">Pages → main/docs</span><span class="arrow">→</span><span class="trackbox">3 个归档 tag</span><span class="arrow">→</span><span class="trackbox">仅保留 main</span></div><p class="meta">先保全公开看板、验收证据与非 main 独有提交，再删除其他分支。</p></div></div></div><div class="sectionhead"><h2>收尾与发布门禁</h2><small>查看各阶段证据与尚未授权的操作</small></div><div class="gategrid" id="gateCards"></div><div id="gatePreview"></div><div class="sectionhead"><h2>下一步执行焦点</h2><small>由真实阻塞而不是操作日志决定优先级</small></div><div class="two"><div class="pane"><div class="p-title">当前收尾工作 <span class="pill warn">IN PROGRESS</span></div><ul id="focusTodos" class="cleanlist"></ul></div><div class="pane"><div class="p-title">合并完成后还剩什么？</div><p id="focusWhy" class="meta" style="font-size:12px;line-height:1.9"></p><div class="caution" id="focusBlocked"></div></div></div></section>
 <section id="page-roadmap" class="view"><div class="sectionhead"><h2>验收关口与后续动作</h2><small>T12 需要明确 GO；分支删除前先迁移独有数据</small></div><div class="gategrid" id="roadmapCards"></div><div class="details" id="roadmapDetail"></div><div class="sectionhead"><h2>并行与合流规则</h2><small>避免多个云任务同时修改事务核心</small></div><div class="tasks" id="parallelBlocks"></div><div class="sectionhead"><h2>分支收敛顺序</h2><small>保全内容后再删除远端 refs</small></div><div class="pane"><p><strong>1.</strong> 把 GitHub Pages source 切换到 <code>main /docs</code>，等待部署并在线核验 dashboard。</p><p><strong>2.</strong> 删除前为 CI（<code>df88174</code>）、maintenance（<code>c4e1d79</code>）、new_arch（<code>52d4f9e</code>）创建 <code>archive/*</code> 归档标签，保留未合入历史。</p><p><strong>3.</strong> 证据文件和 dashboard 已复制到 main；PR #22 merged、PR #21 closed、当前无 open PR。Issue #6 已于 2026-10-20 21:47 UTC 关闭；PR #7 已合并，维护者最后反馈“测试未见异常”。</p><p><strong>4.</strong> 删除所有 10 个非 main branch refs，最后重新列出远端 branches，确认只剩 <code>main</code>。</p></div></section>
 <section id="page-tasks" class="view"><div class="sectionhead"><h2>7 项合并收尾工作</h2><small>只展示当前 PR、分支、Issue 与发布收尾事项</small></div><div class="filters"><input class="field search" id="taskSearch" placeholder="搜索编号、标题、模块或下一步"><select class="field" id="taskFilter"><option value="all">全部状态</option><option value="BLOCKED">BLOCKED</option><option value="FAIL">FAIL</option><option value="PASS">PASS</option><option value="NOT_RUN">NOT_RUN</option><option value="PARTIAL">PARTIAL</option><option value="PATCH_TESTED">PATCH_TESTED</option><option value="EA_CI_PASS">EA_CI_PASS</option><option value="PENDING">PENDING</option><option value="OPEN">OPEN</option></select><select class="field" id="taskWave"><option value="all">全部波次</option><option>W0</option><option>W1</option><option>W2</option><option>W3</option><option>W4</option><option>W5</option></select></div><p id="taskCount" class="tasks-note"></p><div class="tasks" id="taskList"></div></section>
@@ -13,18 +13,17 @@
 <section id="page-history" class="view"><div class="sectionhead"><h2>Focus 演进：从 G0 保全到真实 CI</h2><small>点击状态快照看“为什么改变”，不是让动画伪装进度</small></div><div class="revgrid" id="revisions"></div><div class="filters"><button class="btn" id="prevRev">← 上一版</button><input type="range" id="revSlider" min="0" max="7" value="7" style="flex:1;accent-color:var(--teal)" aria-label="历史快照选择"><button class="btn" id="nextRev">下一版 →</button><button class="btn" id="playRevs">▶ 播放</button></div><div id="revisionDetail" class="details"></div><div class="sectionhead"><h2>状态更新原则</h2></div><div class="caution">下一轮只追加有明确 commit / 测试日志 / 文件哈希 / 验收签字的事实；历史快照不被覆盖。黄色表示待验收，不代表不通过；绿色仅用于证据支持的具体测试或交付项。不要用一项成功的 CI 代替其他安全门禁。</div></section>
 <footer class="foot"><div class="footer-status"><span class="pill ok">T8/T10/T11a/T11b PASS · T3 PARTIAL · T12 NOT_RUN</span><span>Snapshot: <span id="footDate"></span></span><span>Offline read-only</span></div><div class="flex"><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer" target="_blank" rel="noopener">GitHub 仓库 ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22" target="_blank" rel="noopener">PR #22 ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669811" target="_blank" rel="noopener">Windows CI ↗</a><a href="https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39458669881" target="_blank" rel="noopener">Packaging CI ↗</a></div><p>本页面由静态状态快照构建，没有 GitHub 写权限，也不会自动更新远端。每轮更新请先重新核对事实再重建。</p></footer></main></div><div class="toast" id="toast" aria-live="polite"></div><script type="application/json" id="project-data">{
   "name": "BiliFavOrganizer",
-  "version": "Status Console V5.2",
+  "version": "Status Console V5.3",
   "snapshot_date": "2026-10-21",
-  "snapshot_kind": "post-merge closeout; PR #22 merged; T8/T10/T11a/T11b PASS; T3 PARTIAL; T12 NOT_RUN; 10 non-main refs inventoried; Pages switch and branch cleanup pending",
-  "headline": "PR #22 已合并到 main（merge commit 903666a）。候选 1981a94 的 T8 330/330、T10 14/14（39 张截图）、T11a PR checks、T11b 隔离安装与 schema 7→8 升级均 PASS。T11b 使用同 SHA 本地构建安装包；CI packaging 通过 smoke 但未上传 artifact。T3 维持 PARTIAL；T9 已从当前门禁退休；T12 尚未执行，需明确 GO。PR #21 已关闭，目前没有打开的 PR。Issue #6 已于 2026-10-20 21:47 UTC 关闭；PR #7 已合并，维护者最后反馈“测试未见异常”。远端当前 10 个非 main refs；Pages 切换和分支清理尚待完成。",
-  "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / T12 NOT_RUN / 10 NON-MAIN BRANCHES PENDING CLEANUP",
+  "snapshot_kind": "closeout complete; Pages main/docs live; only main branch remains; T8/T10/T11a/T11b PASS; T3 PARTIAL; T12 NOT_RUN",
+  "headline": "仓库收尾完成：GitHub Pages 已从 main/docs 提供，远端活动分支只剩 main。PR #22 已合并；T8/T10/T11a/T11b PASS，T3 PARTIAL，T12 NOT_RUN。Issue #6 已关闭；没有创建发布 tag、Release 或触发发布 workflow。",
+  "decision": "PR #22 MERGED / T8 330/330 PASS / T10 14/14 PASS / T11a PASS / T11b PASS (LOCAL SAME-SHA INSTALLER) / T3 PARTIAL / T9 RETIRED FROM CURRENT GATE / T12 NOT_RUN / PAGES main/docs / ONLY MAIN BRANCH",
   "repository": {
     "name": "Martin-soaring-dev/bili-fav-organizer",
     "url": "https://github.com/Martin-soaring-dev/bili-fav-organizer",
-    "main_sha": "82b3ff5bda11e290b4e788280294bacb6c245d75",
-    "ea_branch": "feat/reliability-scheduler-implementation",
+    "ea_branch": "merged into main (source branch deleted after closeout)",
     "ea_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
-    "ci_branch": "ci/ea-playwright-full-regression-20261019",
+    "ci_branch": "deleted after closeout (PR #21 closed)",
     "ci_sha": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
     "g0_sha": "ef06338c337ddf7ea060b4cc6e4548fe09d6d24b",
     "g0_scope": "historical local checkpoint, not on origin",
@@ -67,31 +66,65 @@
       "head_sha": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
       "scope": "CI-only / obsolete after PR #22"
     },
-    "branch_goal": "最终只保留 main；Pages 已复制到 main/docs，仍需切换 Pages source、保存 3 个独有 branch heads，再删除 10 个非 main refs",
+    "branch_goal": "已完成：最终只保留 main；GitHub Pages source 为 main/docs",
     "branch_cleanup": {
-      "status": "PENDING_PAGES_SWITCH_AND_REF_DELETION",
-      "remote_branch_count": 11,
-      "non_main_branch_count": 10,
-      "archive_before_delete": [
+      "status": "COMPLETE",
+      "remote_branch_count": 1,
+      "non_main_branch_count": 0,
+      "deleted_branches": [
         {
           "branch": "ci/ea-playwright-full-regression-20261019",
           "head": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
-          "tag": "archive/ci-ea-playwright-full-regression-20261019",
-          "reason": "6 unique commits; workflow changes superseded in main"
+          "ahead": 6
+        },
+        {
+          "branch": "docs/reliability-scheduler-refactor-plan",
+          "head": "515d277788259d1ef9b04eef8a613cefd36268cf",
+          "ahead": 0
+        },
+        {
+          "branch": "evidence/windows-owner-lock-20261020",
+          "head": "b63573ec6b7875699fea909e33d25f825d412932",
+          "ahead": 1
+        },
+        {
+          "branch": "evidence/windows-t10-uat-20261020",
+          "head": "42742c8f173c68716a773128e032dbb2548e6cef",
+          "ahead": 9
+        },
+        {
+          "branch": "feat/reliability-scheduler-implementation",
+          "head": "1981a94ed750d7be4e3404d6622ad776708f2091",
+          "ahead": 0
+        },
+        {
+          "branch": "fix/vault-active-work-barrier",
+          "head": "1044943cd08a49b5c943b5227e69ae64f862eb43",
+          "ahead": 0
+        },
+        {
+          "branch": "gh-pages",
+          "head": "8e561e3ed7495e89458bcb4915cdc1ac9509b74c",
+          "ahead": 17
         },
         {
           "branch": "maintenance/release-pipeline-post-v0209",
           "head": "c4e1d79616abd45c8a7776125ecabb6893271e52",
-          "tag": "archive/maintenance-release-pipeline-post-v0209",
-          "reason": "3 unique commits not merged"
+          "ahead": 3
+        },
+        {
+          "branch": "master",
+          "head": "4be2354793809ccc08b88338f93183eda11283b8",
+          "ahead": 0
         },
         {
           "branch": "new_arch",
           "head": "52d4f9e5a898a7013724da215cf0caf18b6d7dab",
-          "tag": "archive/new_arch",
-          "reason": "1 unique commit not merged"
+          "ahead": 1
         }
       ],
+      "archive_before_delete": [],
+      "archive_tags_created": [],
       "evidence_copied_to_main": [
         "evidence/windows-t10-uat-20261020",
         "evidence/windows-owner-lock-20261020"
@@ -102,21 +135,40 @@
         "fix/vault-active-work-barrier",
         "master"
       ],
-      "delete_after_pages_switch_and_archive": [
-        "ci/ea-playwright-full-regression-20261019",
-        "docs/reliability-scheduler-refactor-plan",
-        "evidence/windows-owner-lock-20261020",
-        "evidence/windows-t10-uat-20261020",
-        "feat/reliability-scheduler-implementation",
-        "fix/vault-active-work-barrier",
-        "gh-pages",
-        "maintenance/release-pipeline-post-v0209",
-        "master",
-        "new_arch"
+      "unique_history_without_archive_tag": [
+        {
+          "branch": "ci/ea-playwright-full-regression-20261019",
+          "head": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
+          "ahead": 6
+        },
+        {
+          "branch": "evidence/windows-owner-lock-20261020",
+          "head": "b63573ec6b7875699fea909e33d25f825d412932",
+          "ahead": 1
+        },
+        {
+          "branch": "evidence/windows-t10-uat-20261020",
+          "head": "42742c8f173c68716a773128e032dbb2548e6cef",
+          "ahead": 9
+        },
+        {
+          "branch": "gh-pages",
+          "head": "8e561e3ed7495e89458bcb4915cdc1ac9509b74c",
+          "ahead": 17
+        },
+        {
+          "branch": "maintenance/release-pipeline-post-v0209",
+          "head": "c4e1d79616abd45c8a7776125ecabb6893271e52",
+          "ahead": 3
+        },
+        {
+          "branch": "new_arch",
+          "head": "52d4f9e5a898a7013724da215cf0caf18b6d7dab",
+          "ahead": 1
+        }
       ],
-      "note": "main 已收录候选、两条 evidence 分支全部归档文件和 dashboard 副本。远端 compare 以 main 9739c28 为基线：4 条分支无独有提交；CI 有 6、maintenance 有 3、new_arch 有 1 个独有提交。切换 Pages 到 main/docs 并在线验证后，先建 archive/* 归档标签保存三个 branch head，再删除其余 10 个 branch refs。Issue #6 已 closed（PR #7 merged，维护者反馈测试未见异常）；PR #22 merged、PR #21 closed、当前无 open PR。"
+      "note": "All 10 non-main branch refs were deleted after Pages source and evidence paths were checked. No archive tags, Release, or publishing workflow were created. Evidence and dashboard content remain readable in main; divergent commit history on the listed heads is not pinned by a tag. GitHub currently offers Restore for deleted branch rows."
     },
-    "dashboard_main_snapshot_sha": "82b3ff5bda11e290b4e788280294bacb6c245d75",
     "dashboard_path_on_main": "docs/index.html",
     "evidence_archive_commit": "d74bdb9c0d7a15860dbe5f39e2b67a4a9d6ed093"
   },
@@ -243,16 +295,15 @@
     }
   ],
   "focus": {
-    "title": "PR #22 已并入 main；当前做分支收尾与发布边界确认",
-    "scope": "候选 1981a94 → merge commit 903666a；evidence 归档与分支计划同步至 main 9cc4187e；dashboard 已准备迁入 main/docs",
-    "why": "T8、T10、T11a、T11b 已在同一候选源码上通过；T3 保持 PARTIAL，已明确剩余覆盖缺口且不阻断本次合并。T9 已移出当前发布门禁。仍需把非 main 分支的独有内容与 Pages 看板迁移/归档后，才能安全达成只保留 main 的目标；Issue #6 是独立未解决问题。T12 仍需明确 GO。",
+    "title": "仓库收尾已完成：Pages 使用 main/docs，远端只保留 main",
+    "scope": "PR #22 合并到 main；Pages build run #19 成功；公开 dashboard 已刷新验证；10 个非 main branch refs 已删除。",
+    "why": "T8、T10、T11a、T11b 已通过；T3 仍为 PARTIAL，T12 仍为 NOT_RUN 并需明确 GO。分支清理与 Pages 迁移已完成，Issue #6 已关闭。没有创建发布 tag、Release 或 dispatch 发布 workflow。",
     "do_now": [
-      "切换 GitHub Pages 到 main/docs 并在线验证，之后删除 gh-pages。",
-      "验收证据已复制到 main/docs/testing/evidence 并更新 task list；复核后可删除两个 evidence refs。",
-      "审阅 maintenance/release-pipeline 与 new_arch 的独有代码，迁入 main 或明确舍弃后再删分支。",
-      "保持 Issue #6 open；只有维护者明确 GO 后才执行 T12。"
+      "T3 仍有按版本抽样、动态 CHECK 枚举和 schema<5 恢复/导出自动化缺口；如继续补齐，将产生新的代码提交并重跑受影响门禁。",
+      "T12 仍为 NOT_RUN；只有维护者明确 GO 后才执行发布。",
+      "Issue #6 已关闭；只有出现新的复现时才重新打开跟踪。"
     ],
-    "blocked": "PR #22 已成功合并；当前唯一未执行的发布动作是等待明确 T12 GO。只留 main 需要先迁移 Pages、验收证据及非 main 独有提交。"
+    "blocked": "仓库收尾已完成。发布仍需单独的 T12 GO；T3 PARTIAL 是未完成的独立改进项。"
   },
   "parallel": [
     {
@@ -269,15 +320,13 @@
       "note": "PR #22 已合并；旧 CI-only PR #21 已关闭。候选 Windows 回归、UAT、PR checks 与隔离安装升级验收均有记录。"
     },
     {
-      "title": "只留 main 的迁移",
-      "subtitle": "分支前先保全数据",
+      "title": "只留 main 的收尾（已完成）",
+      "note": "GitHub Pages 使用 main/docs，最新部署 run #19 success；远端活动分支 refs 只有 main。10 个非 main refs 已删除。未创建归档 tag、Release 或发布 workflow；T12 仍等待明确 GO。",
       "ids": [
-        "gh-pages",
-        "evidence/*",
-        "ci/*",
-        "maintenance/*"
-      ],
-      "note": "证据与 dashboard 已复制到 main。Pages 仍使用 gh-pages；CI、maintenance、new_arch 三个 head 需先建立 archive/* 标签保全，之后删除所有非 main refs。"
+        "main",
+        "main/docs",
+        "10 deleted branch refs"
+      ]
     },
     {
       "title": "尚未完成的独立事项",
@@ -286,7 +335,7 @@
         "T3",
         "T12"
       ],
-      "note": "T3 维持 PARTIAL；T12 尚未执行，需维护者明确 GO。T9 已退出当前门禁。"
+      "note": "T3 维持 PARTIAL；T12 尚未执行，需维护者明确 GO。T9 已退出当前门禁；Issue #6 已关闭。"
     }
   ],
   "revisions": [
@@ -436,10 +485,10 @@
     {
       "id": "K13",
       "severity": "MEDIUM",
-      "title": "非 main 独有内容需迁移后再删分支",
-      "impact": "公开 dashboard 仍由 gh-pages 提供；maintenance/release-pipeline 与 new_arch 仍有 main 未包含的独有代码。验收 evidence 已迁入 main/docs/testing/evidence。",
+      "title": "已删除分支中的独有提交未创建归档 tag",
+      "impact": "远端只有 main；部分旧分支存在独有 commit 历史，已删除的 head 未由 archive tag 永久锚定。验收证据和 dashboard 文件已在 main。",
       "owner": "仓库维护者",
-      "action": "切换 Pages 来源并验证；对两条含独有代码的分支做迁入或舍弃决定；完成后清理远端 refs。"
+      "action": "GitHub 分支页目前提供 Restore；若需要某个 head，及时恢复该分支并另行建立归档 ref。"
     },
     {
       "id": "K14",
@@ -516,8 +565,8 @@
       "status": "PASS",
       "wave": "W5",
       "priority": "P1",
-      "detail": "PR #21 已关闭；其分支有独有 workflow commits，保留到迁移核对完成。",
-      "next": "已完成 PR 关闭；分支保全见 C06。",
+      "detail": "PR #21 已关闭；其 CI-only 分支已删除，main 中更新后的 workflow 为当前版本。",
+      "next": "已完成；分支收敛状态见 C06。",
       "deps": [],
       "write": [],
       "accept": [
@@ -581,38 +630,38 @@
       "id": "C06",
       "title": "将远端分支收敛到 main",
       "module": "Repository",
-      "status": "PARTIAL",
+      "status": "PASS",
       "wave": "W5",
       "priority": "P1",
-      "detail": "远端确认 10 个非 main refs。候选与 evidence 已归档到 main；feat/docs/fix/master 无独有提交。CI workflow 已被 main 更新版本覆盖；maintenance 与 new_arch 分别有 3、1 个未合入提交。dashboard 已复制到 main/docs，GitHub Pages 仍在 gh-pages。",
-      "next": "把 Pages source 切到 main/docs 并在线验证；为 ci、maintenance、new_arch 建 archive/* 归档标签后，删除全部 10 个非 main refs；最后确认只剩 main。",
+      "detail": "Pages source 已切到 main/docs 并由 run #19 成功部署；公开 dashboard 可加载。远端活动分支 refs 仅 main，10 个非 main refs 已删除。未创建 archive tags、Release 或发布 workflow；部分已删除 branch heads 有独有 commit 历史，未通过 tag 永久保全。",
+      "next": "已完成；T3 与 T12 状态按各自门禁独立跟踪。",
       "deps": [],
       "write": [
         "Pages source",
-        "archive tags",
         "remote branch refs",
-        "docs/index.html"
+        "docs/index.html",
+        "docs/testing/reliability-maintenance-task-list.md"
       ],
       "accept": [
-        "Pages dashboard 由 main/docs 正常提供",
-        "3 个独有 branch head 有 archive/* 标签",
-        "远端分支列表只剩 main"
+        "Pages dashboard 由 main/docs 正常提供（run #19 success）",
+        "远端活动分支列表只剩 main",
+        "未创建 Release 或触发发布 workflow"
       ]
     },
     {
       "id": "C07",
       "title": "文档与 dashboard 状态对齐",
       "module": "Docs",
-      "status": "PARTIAL",
+      "status": "PASS",
       "wave": "W5",
       "priority": "P1",
-      "detail": "main 任务清单与 dashboard 已同步到合并后状态；公开 Pages 仍使用 gh-pages，main/docs 切换后的线上部署尚未验证。",
-      "next": "切换 Pages source 到 main/docs，等待 built，再核验公开 URL 与当前状态。",
+      "detail": "task list 与 dashboard 已同步到分支收敛完成状态；Pages source 为 main/docs，run #19 success，公开 URL 刷新后正常加载。",
+      "next": "已完成。",
       "deps": [],
       "write": [
         "docs/testing/reliability-maintenance-task-list.md",
         "main:docs/index.html",
-        "gh-pages:index.html"
+        "GitHub Pages source"
       ],
       "accept": [
         "main 任务清单与 dashboard 表述一致",
@@ -624,27 +673,27 @@
     "C03": "T3 当前为 PARTIAL。若继续，请只补齐按 schema 5/6/7/8 的类型与 NOT NULL 抽样变异、动态枚举 CHECK 约束并逐条证伪、schema<5 普通连接拒绝与人工恢复/导出的自动化路径；任何源码改动都要生成新 SHA 并重跑受影响门禁。",
     "C04": "Issue #6 已在 PR #7 合并后由维护者关闭，最后测试反馈为“测试未见异常”。如有新的复现，整理环境、步骤与结果后再重新打开跟踪；不要把它与 PR #22 混为一项。",
     "C05": "T12 目前 NOT_RUN。只有维护者明确给出发布 GO 后，才开始检查当前 main、构建候选、创建 tag 或触发发布 workflow。",
-    "C06": "最终仅保留 main。将 Pages source 切到 main/docs 并验证；为 df88174、c4e1d79、52d4f9e 三个独有 branch head 创建 archive/* 标签，保留完整历史；然后删除全部 10 个非 main 分支并核验远端仅剩 main。Issue #6 保持 open。"
+    "C06": "当前 GitHub Pages 从 main/docs 提供，远端活动分支 refs 只有 main；原 10 个非 main refs 已删除。T3 仍为 PARTIAL，T12 为 NOT_RUN，且没有创建 Release 或触发发布 workflow。若要继续，先决定是否补齐 T3；发布必须另行明确 GO。"
   },
   "execution_snapshot": {
     "date": "2026-10-21",
-    "hero_title": "PR #22 已合并 main：T8/T10/T11a/T11b PASS；T3 PARTIAL；branch cleanup 已盘点，待 Pages 切换与归档后删除 refs",
+    "hero_title": "仓库收尾完成：Pages 已切换到 main/docs，远端只保留 main",
     "candidate": {
       "baseline_sha": "ea4983d2bb9f6d8c0ea54faeddc790a9e096df63",
       "baseline_tree": "939a0607988524b7afec8097fde3e9acda4ec655",
-      "maintenance_worktree": "PR #22 merged; Windows acceptance evidence copied to main; dashboard staged in main/docs.",
+      "maintenance_worktree": "PR #22 merged; Windows evidence and dashboard are available from main/docs.",
       "other_local_sha": "f22965f6477e90335d3cfad12c2e351d1941c69e",
       "other_local_sha_online": false,
       "candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
-      "state": "PR #22 已合并：候选 1981a94/tree e943cc30 → merge commit 903666a；收尾与 evidence 同步至 main 9cc4187。T8 330/330、T10 14/14、T11a/T11b PASS；T3 PARTIAL；T9 已退休；T12 NOT_RUN。",
+      "state": "PR #22 已合并；T8/T10/T11a/T11b PASS；T3 PARTIAL；T9 已退休；T12 NOT_RUN。Pages main/docs 构建成功，公开看板可读；远端活动分支仅 main。",
       "parent_sha": "aa9dfb35033186fcb2e04db19cfbc250ecf37873",
       "branch_head_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
       "branch_head_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
-      "main_head_sha": "9cc4187eac3761df39be760096c1398eedcaee87",
       "merge_commit_sha": "903666a11f3914291f3352bd92e041eaa40f7ce5",
       "merge_candidate_sha": "1981a94ed750d7be4e3404d6622ad776708f2091",
-      "merge_candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32"
+      "merge_candidate_tree": "e943cc30ebf0b6dffcf69866c01761fba9928b32",
+      "main_head_at_cleanup": "49e8adae5a89d1504fa17dd819dea284950456c8"
     },
     "local_test_groups": [
       {
@@ -730,25 +779,73 @@
       }
     ],
     "next_actions": [
-      "将 GitHub Pages 来源切换到 main/docs，在线验证公开 dashboard 后删除 gh-pages。",
-      "确认 main 中新增的 evidence archive 可读取，随后删除两个 evidence branches。",
-      "审阅 maintenance/release-pipeline 与 new_arch 的独有代码，决定迁入 main 或舍弃。",
-      "Issue #6 继续 open；T12 需要维护者明确 GO。"
+      "T3 仍有按版本抽样、动态 CHECK 枚举、schema<5 普通连接拒绝和人工恢复/导出自动化缺口。",
+      "T12 为 NOT_RUN；只有维护者明确 GO 后才开始发布流程。",
+      "Issue #6 已关闭；若出现新的复现，再补充证据并重新打开跟踪。"
     ],
     "record": "https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md",
     "target_platform": "Windows",
     "handoff": {
-      "status": "current closeout",
-      "main_head": "9cc4187eac3761df39be760096c1398eedcaee87",
+      "status": "closeout complete; only main branch remains",
+      "main_head": "49e8adae5a89d1504fa17dd819dea284950456c8 (at Pages/branch cleanup; closeout docs follow)",
       "merge_commit": "903666a11f3914291f3352bd92e041eaa40f7ce5",
-      "branch_goal": "main only after data migration",
-      "preserve_before_cleanup": [
-        "gh-pages Pages deployment",
-        "maintenance/release-pipeline unique code",
-        "new_arch unique code"
-      ],
-      "main_snapshot_sha": "9cc4187eac3761df39be760096c1398eedcaee87",
-      "evidence_archive_commit": "d74bdb9c0d7a15860dbe5f39e2b67a4a9d6ed093"
+      "branch_goal": "已完成：远端活动分支只有 main",
+      "preserve_before_cleanup": [],
+      "main_snapshot_sha": "49e8adae5a89d1504fa17dd819dea284950456c8 (at closeout)",
+      "evidence_archive_commit": "d74bdb9c0d7a15860dbe5f39e2b67a4a9d6ed093",
+      "archive_tags_created": [],
+      "deleted_branch_refs": [
+        {
+          "branch": "ci/ea-playwright-full-regression-20261019",
+          "head": "df88174bd606e1ab21bdc0a2b11e0d553a2cbb9a",
+          "ahead": 6
+        },
+        {
+          "branch": "docs/reliability-scheduler-refactor-plan",
+          "head": "515d277788259d1ef9b04eef8a613cefd36268cf",
+          "ahead": 0
+        },
+        {
+          "branch": "evidence/windows-owner-lock-20261020",
+          "head": "b63573ec6b7875699fea909e33d25f825d412932",
+          "ahead": 1
+        },
+        {
+          "branch": "evidence/windows-t10-uat-20261020",
+          "head": "42742c8f173c68716a773128e032dbb2548e6cef",
+          "ahead": 9
+        },
+        {
+          "branch": "feat/reliability-scheduler-implementation",
+          "head": "1981a94ed750d7be4e3404d6622ad776708f2091",
+          "ahead": 0
+        },
+        {
+          "branch": "fix/vault-active-work-barrier",
+          "head": "1044943cd08a49b5c943b5227e69ae64f862eb43",
+          "ahead": 0
+        },
+        {
+          "branch": "gh-pages",
+          "head": "8e561e3ed7495e89458bcb4915cdc1ac9509b74c",
+          "ahead": 17
+        },
+        {
+          "branch": "maintenance/release-pipeline-post-v0209",
+          "head": "c4e1d79616abd45c8a7776125ecabb6893271e52",
+          "ahead": 3
+        },
+        {
+          "branch": "master",
+          "head": "4be2354793809ccc08b88338f93183eda11283b8",
+          "ahead": 0
+        },
+        {
+          "branch": "new_arch",
+          "head": "52d4f9e5a898a7013724da215cf0caf18b6d7dab",
+          "ahead": 1
+        }
+      ]
     },
     "windows_acceptance": {
       "source": "本轮远端候选 1981a94 的 Windows acceptance-report、t8-summary.json、完整原始 T8 日志和逐项 T10 JSON/截图。",
@@ -1004,12 +1101,10 @@
       "next": "按需补齐按版本抽样变异、动态 CHECK 枚举，以及 schema<5 普通连接拒绝/人工恢复导出自动化。"
     },
     "do_now": [
-      "把 GitHub Pages source 切换到 main/docs，等待部署并在线核验 dashboard。",
-      "为 ci、maintenance、new_arch 三个未合入 head 创建 archive/* 归档标签，保留原始 commit 历史。",
-      "删除全部 10 个非 main 分支并再次列出远端 branches，确认只剩 main。",
-      "Issue #6 已在 PR #7 合并后由维护者关闭，最新测试反馈未见异常；若后续复现再重开跟踪。T12 仍需明确 GO。"
+      "如果继续处理 T3，按剩余验收缺口单独安排代码与测试变更。",
+      "发布须等到维护者明确给出 T12 GO。"
     ],
-    "blocked": "PR #22 已合并；当前无打开的 PR。分支收敛尚待 Pages source 切换、3 个 archive 标签、删除 10 个非 main refs 与最后核验。Issue #6 已关闭；T12 仍需明确 GO。"
+    "blocked": "分支清理与 Pages 迁移已完成。T3 PARTIAL 是独立的测试覆盖改进项；T12 NOT_RUN 并需明确 GO。"
   }
 }</script><script>
 (()=>{'use strict';
@@ -1046,7 +1141,7 @@ const prompts=D.prompts||{};
 function renderTasks(){const q=el('taskSearch').value.trim().toLowerCase(),st=el('taskFilter').value,wave=el('taskWave').value;const a=D.tasks.filter(t=>(st==='all'||t.status===st)&&(wave==='all'||t.wave===wave)&&[t.id,t.title,t.module,t.detail,t.next].join(' ').toLowerCase().includes(q));el('taskCount').textContent=`${a.length} / ${D.tasks.length} 项 · 点击展开查看范围、验收记录与下一步`;el('taskList').innerHTML=a.map(t=>`<article class="task"><header><div><div class="id">${esc(t.id)} · ${esc(t.wave)} · ${esc(t.priority)}</div><h3>${esc(t.title)}</h3></div>${pill(t.status)}</header><p>${esc(t.detail)}</p><details><summary>展开任务 · 依赖 / 修改范围 / 提示词</summary><p><strong>下一步：</strong>${esc(t.next)}</p><p><strong>依赖：</strong>${esc(t.deps?.join(', ')||'无')}<br><strong>允许写入：</strong>${esc(t.write?.join(', ')||'仅报告')}<br><strong>验收：</strong>${esc(t.accept?.join('；')||'未指定')}</p><div class="op"><button class="btn" data-copy="${esc(t.id)}">复制 Codex Prompt</button><button class="btn" data-save="${esc(t.id)}">下载 Prompt.md</button></div></details></article>`).join('')||'<div class="pane">没有匹配任务，请清除筛选。</div>';document.querySelectorAll('[data-copy]').forEach(x=>x.addEventListener('click',()=>copy(prompts[x.dataset.copy]||'提示词未内嵌')));document.querySelectorAll('[data-save]').forEach(x=>x.addEventListener('click',()=>download(x.dataset.save+'.md',prompts[x.dataset.save]||'提示词未内嵌')))}
 ['taskSearch','taskFilter','taskWave'].forEach(x=>el(x).addEventListener('input',renderTasks));renderTasks();
 const CI=D.ci;el('ciPanels').innerHTML=`<div class="pane"><div class="kicker">CANDIDATE WINDOWS REGRESSION</div><div class="value green">${CI.windows_tests.passed}/${CI.windows_tests.discovered} PASS</div>${pill('PASS','0 skipped · Chromium UI')}<p class="meta">${esc(CI.windows_tests.duration_text)} · candidate SHA ${CI.sha.slice(0,12)}</p><a href="${esc(CI.windows_tests.url)}" target="_blank" rel="noopener">查看完整 Windows CI 日志 ↗</a><ul><li>工作流 success，测试阶段 success</li><li>浏览器 UI 测试实际执行，无关键跳过</li><li>当前候选 SHA 1981a94 的 PR #22 CI 结果</li></ul></div><div class="pane"><div class="kicker">BETA PACKAGING / SMOKE</div><div class="value green">SUCCESS</div>${pill('PASS','packaged smoke PASS')}<p class="meta">Windows frozen backend · NSIS installer · inspect · smoke</p><a href="${esc(CI.package.url)}" target="_blank" rel="noopener">查看打包与冒烟运行 ↗</a><ul><li>后端冻结构建通过</li><li>Electron NSIS 安装包及检查通过</li><li>解包 Electron 前端 + 后端冒烟通过</li><li>artifact_count=0；T11b 使用同 SHA 本地安装包</li><li>未创建 Release</li></ul></div>`;
-el('refs').innerHTML=D.links.map(r=>`<div class="refline"><div><b>${esc(r.title)}</b><p>${esc(r.why)}</p></div><a href="${esc(r.url)}" target="_blank" rel="noopener">查看原始证据 ↗</a></div>`).join('');el('shaPanel').textContent=`main snapshot  ${D.repository.main_sha}\nPR #22 merge   ${D.repository.merge_sha}\ncandidate      ${D.repository.merge_candidate_sha}\ntree           ${D.repository.merge_candidate_tree}\n\nPR #22 merged · PR #21 closed · Issue #6 open · T9 retired · T12 NOT_RUN`;
+el('refs').innerHTML=D.links.map(r=>`<div class="refline"><div><b>${esc(r.title)}</b><p>${esc(r.why)}</p></div><a href="${esc(r.url)}" target="_blank" rel="noopener">查看原始证据 ↗</a></div>`).join('');el('shaPanel').textContent=`active branches main only\nPages source   main/docs · run #19 success\nPR #22 merge   ${D.repository.merge_sha}\ncandidate      ${D.repository.merge_candidate_sha}\ntree           ${D.repository.merge_candidate_tree}\n\nPR #22 merged · PR #21 closed · Issue #6 closed · T9 retired · T12 NOT_RUN`;
 el('riskGrid').innerHTML=D.risks.map(r=>`<div class="risk"><header><h3>${esc(r.title)}</h3>${pill(r.severity)}</header><p><strong>影响：</strong>${esc(r.impact)}</p><p><strong>对策：</strong>${esc(r.action)}</p><span class="meta">Owner: ${esc(r.owner)}</span></div>`).join('');el('riskGates').innerHTML=D.stages.map(g=>`<div class="refline"><div><b>${esc(g.id)} · ${esc(g.title)}</b><p>${esc(g.exit)}</p></div>${pill(g.status)}</div>`).join('');
 function renderRevisions(){el('revSlider').max=D.revisions.length-1;el('revisions').innerHTML=D.revisions.map((r,i)=>`<button class="rev ${S.rev===i?'sel':''}" data-rev="${i}"><span class="id">${esc(r.id)} · ${esc(r.date)}</span><strong>${esc(r.title)}</strong><small>${esc(r.kind)}</small></button>`).join('');document.querySelectorAll('[data-rev]').forEach(x=>x.addEventListener('click',()=>{S.rev=Number(x.dataset.rev);renderRevisions()}));el('revSlider').value=S.rev;const r=D.revisions[S.rev];el('revisionDetail').innerHTML=`<div class="kicker">${esc(r.id)} / ${esc(r.kind)} / ${esc(r.date)}</div><h3 style="font-size:23px;margin:11px 0">${esc(r.focus)}</h3><div class="detailbody"><div class="minibox"><div class="kicker">变化及判断依据</div><p>${esc(r.change)}</p></div><div class="minibox"><div class="kicker">证据 / 状态边界</div><p>${esc(r.evidence)}</p></div></div>`}
 renderRevisions();const goRev=d=>{S.rev=Math.min(D.revisions.length-1,Math.max(0,S.rev+d));renderRevisions()};el('prevRev').addEventListener('click',()=>goRev(-1));el('nextRev').addEventListener('click',()=>goRev(1));el('revSlider').addEventListener('input',e=>{S.rev=+e.target.value;renderRevisions()});el('playRevs').addEventListener('click',()=>{if(S.playing){clearInterval(S.playing);S.playing=null;el('playRevs').textContent='▶ 播放';return}S.rev=0;renderRevisions();el('playRevs').textContent='Ⅱ 暂停';S.playing=setInterval(()=>{if(S.rev===D.revisions.length-1){clearInterval(S.playing);S.playing=null;el('playRevs').textContent='▶ 播放'}else{goRev(1)}},1350)});
