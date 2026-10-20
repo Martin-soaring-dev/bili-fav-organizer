@@ -2,3 +2,4 @@
 # Starlette TestClient in the pinned FastAPI stack requires httpx2.
 -r requirements.txt
 httpx2
+playwright==1.63.0

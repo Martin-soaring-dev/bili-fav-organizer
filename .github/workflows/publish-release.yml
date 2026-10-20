@@ -1,0 +1,259 @@
+name: Publish verified release
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        type: choice
+        options:
+          - beta
+          - stable
+      tag:
+        description: Existing tag that points to the candidate source commit
+        required: true
+        type: string
+      source_run_id:
+        description: Successful release-candidate build run ID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify-candidate:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      source_attempt: ${{ steps.source.outputs.source_attempt }}
+      source_tree: ${{ steps.source.outputs.source_tree }}
+      workflow_file: ${{ steps.source.outputs.workflow_file }}
+      release_title: ${{ steps.notes.outputs.title }}
+      release_notes_b64: ${{ steps.notes.outputs.notes_b64 }}
+    steps:
+      - name: Check out the dispatch commit from main
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Validate dispatch and release tag
+        id: dispatch
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -ne "refs/heads/main") { throw "Publishing can only be dispatched from main." }
+          if ($env:SOURCE_RUN_ID -notmatch '^[0-9]+$') { throw "source_run_id must be numeric." }
+          if ($env:RELEASE_CHANNEL -eq "beta") {
+            if ($env:RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Invalid beta tag." }
+            $workflowFile = ".github/workflows/release-beta.yml"
+          } elseif ($env:RELEASE_CHANNEL -eq "stable") {
+            if ($env:RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+([.][0-9]+)?$') { throw "Invalid stable tag." }
+            $workflowFile = ".github/workflows/release-stable.yml"
+          } else { throw "Unsupported release channel." }
+          "workflow_file=$workflowFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify successful trusted source run
+        id: source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_WORKFLOW: ${{ steps.dispatch.outputs.workflow_file }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $run = gh api "repos/$repo/actions/runs/$env:SOURCE_RUN_ID" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Could not read source run metadata." }
+          $workflowList = gh api "repos/$repo/actions/workflows?per_page=100" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Could not list repository workflows." }
+          $workflow = $workflowList.workflows | Where-Object { $_.path -eq $env:EXPECTED_WORKFLOW } | Select-Object -First 1
+          if (-not $workflow) { throw "Expected build workflow was not found in this repository." }
+          if ($run.repository.full_name -ne $repo -or $run.head_repository.full_name -ne $repo) { throw "Source run is not from this repository." }
+          if ($run.workflow_id -ne $workflow.id) { throw "Source run used an unexpected workflow." }
+          if ($run.event -ne "workflow_dispatch" -or $run.head_branch -ne "main") { throw "Source run must be manually dispatched from main." }
+          if ($run.status -ne "completed" -or $run.conclusion -ne "success") { throw "Source build run did not complete successfully." }
+          if ([int]$run.run_attempt -lt 1) { throw "Source run attempt is malformed." }
+          if ($run.head_sha -notmatch '^[0-9a-f]{40}$') { throw "Source run SHA is malformed." }
+          $tagFetch = git fetch --no-tags origin "refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw "Release tag does not exist on origin." }
+          $tagSha = (& git rev-parse "FETCH_HEAD^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $tagSha -ne $run.head_sha) { throw "Release tag must point exactly to the source run commit." }
+          $tree = (& git rev-parse "$($run.head_sha)^{tree}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $tree -notmatch '^[0-9a-f]{40}$') { throw "Could not resolve source tree." }
+          "source_sha=$($run.head_sha)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "source_attempt=$($run.run_attempt)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "source_tree=$tree" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "workflow_file=$env:EXPECTED_WORKFLOW" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Download release candidate from trusted source run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate
+          path: candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+
+      - name: Verify manifest and all six assets
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          SOURCE_ATTEMPT: ${{ steps.source.outputs.source_attempt }}
+          SOURCE_TREE: ${{ steps.source.outputs.source_tree }}
+          WORKFLOW_FILE: ${{ steps.source.outputs.workflow_file }}
+        run: |
+          python tools/release_candidate.py verify-manifest `
+            --directory candidate `
+            --channel $env:RELEASE_CHANNEL `
+            --tag $env:RELEASE_TAG `
+            --repository $env:GITHUB_REPOSITORY `
+            --run-id $env:SOURCE_RUN_ID `
+            --run-attempt $env:SOURCE_ATTEMPT `
+            --source-sha $env:SOURCE_SHA `
+            --source-tree $env:SOURCE_TREE `
+            --workflow-file $env:WORKFLOW_FILE
+          if ($LASTEXITCODE -ne 0) { throw "Release candidate integrity verification failed." }
+
+      - name: Resolve release title and notes from the verified source commit
+        id: notes
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: |
+          git checkout --detach $env:SOURCE_SHA
+          if ($LASTEXITCODE -ne 0) { throw "Could not check out verified source commit." }
+          $lines = @(Get-Content -Encoding UTF8 README.md)
+          $start = -1
+          $end = $lines.Count
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            $m = [regex]::Match($lines[$i], '^### \[([^\]]+)\]')
+            if (-not $m.Success) { continue }
+            if ($start -lt 0 -and $m.Groups[1].Value -eq $env:RELEASE_TAG) { $start = $i + 1; continue }
+            if ($start -ge 0) { $end = $i; break }
+          }
+          if ($start -lt 0) { throw "README has no changelog section for $env:RELEASE_TAG." }
+          if ($end -le $start) { throw "README changelog section is empty." }
+          $section = ($lines[$start..($end - 1)] -join "`n").Trim("`r`n ")
+          $bold = [regex]::Match($section, '^\*\*(.+?)\*\*', 'Singleline')
+          if (-not $bold.Success) { throw "README changelog section has no bold summary line." }
+          $title = "$env:RELEASE_TAG $($bold.Groups[1].Value.TrimEnd([char[]]@('。', '.')) )"
+          $notesB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($section))
+          "title=$title" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "notes_b64=$notesB64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+  publish:
+    needs: verify-candidate
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: windows-latest
+    environment: release-approval
+    permissions:
+      contents: write
+      actions: read
+    env:
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SOURCE_SHA: ${{ needs.verify-candidate.outputs.source_sha }}
+      SOURCE_ATTEMPT: ${{ needs.verify-candidate.outputs.source_attempt }}
+      SOURCE_TREE: ${{ needs.verify-candidate.outputs.source_tree }}
+      WORKFLOW_FILE: ${{ needs.verify-candidate.outputs.workflow_file }}
+      RELEASE_TITLE: ${{ needs.verify-candidate.outputs.release_title }}
+      RELEASE_NOTES_B64: ${{ needs.verify-candidate.outputs.release_notes_b64 }}
+    steps:
+      - name: Refuse overwrite and create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $actors = @($env:GITHUB_ACTOR, $env:GITHUB_TRIGGERING_ACTOR) | Select-Object -Unique
+          foreach ($actor in $actors) {
+            if ([string]::IsNullOrWhiteSpace($actor)) { throw "Could not determine both the original and triggering actor." }
+            $permission = (gh api "repos/$env:GITHUB_REPOSITORY/collaborators/$actor/permission" --jq .role_name).Trim()
+            if ($LASTEXITCODE -ne 0) { throw "Could not verify repository permission for actor '$actor'." }
+            if ($permission -notin @("admin", "maintain")) {
+              throw "Publishing requires admin or maintain permission for the original and triggering actors; '$actor' has '$permission'."
+            }
+          }
+
+          gh run download $env:SOURCE_RUN_ID --repo $env:GITHUB_REPOSITORY --name release-candidate --dir candidate
+          if ($LASTEXITCODE -ne 0) { throw "Could not download the verified candidate artifact." }
+          $manifest = Get-Content -Raw -Encoding UTF8 "candidate/release-manifest.json" | ConvertFrom-Json
+          if ($manifest.schema_version -ne 1 -or $manifest.repository -ne $env:GITHUB_REPOSITORY) {
+            throw "Release candidate manifest has an unsupported schema or repository."
+          }
+          if ($manifest.release.channel -ne $env:RELEASE_CHANNEL -or $manifest.release.tag -ne $env:RELEASE_TAG) {
+            throw "Release candidate manifest does not match the requested release."
+          }
+          $source = $manifest.source
+          if ([string]$source.run_id -ne $env:SOURCE_RUN_ID -or
+              [string]$source.run_attempt -ne $env:SOURCE_ATTEMPT -or
+              $source.workflow_file -ne $env:WORKFLOW_FILE -or
+              $source.event -ne "workflow_dispatch" -or $source.ref -ne "refs/heads/main" -or
+              $source.sha -ne $env:SOURCE_SHA -or $source.tree -ne $env:SOURCE_TREE) {
+            throw "Release candidate source metadata does not match the read-only verification job."
+          }
+          if ($env:RELEASE_CHANNEL -eq "beta") {
+            $tagParts = [regex]::Match($env:RELEASE_TAG, '^v([0-9]+)[.]([0-9]+)-beta[.]([0-9]+)$')
+            if (-not $tagParts.Success) { throw "Invalid beta release tag." }
+            $numericTag = "$($tagParts.Groups[1].Value).$($tagParts.Groups[2].Value).0-beta.$($tagParts.Groups[3].Value)"
+          } else {
+            $tagParts = [regex]::Match($env:RELEASE_TAG, '^v([0-9]+)[.]([0-9]+)(?:[.]([0-9]+))?$')
+            if (-not $tagParts.Success) { throw "Invalid stable release tag." }
+            $patch = if ($tagParts.Groups[3].Success) { $tagParts.Groups[3].Value } else { "0" }
+            $numericTag = "$($tagParts.Groups[1].Value).$($tagParts.Groups[2].Value).$patch"
+          }
+          $zipName = "BiliFavOrganizer-Windows-x64-$env:RELEASE_TAG.zip"
+          $setupName = "BiliFavOrganizer-Setup-$env:RELEASE_TAG.exe"
+          $electronName = "BiliFavOrganizer-neo-Setup-$numericTag.exe"
+          $expectedNames = @($zipName, "$zipName.sha256", $setupName, "$setupName.sha256", $electronName, "$electronName.sha256")
+          if ($manifest.assets.Count -ne 6) { throw "Expected exactly six verified assets." }
+          $actualNames = @(Get-ChildItem -File "candidate" | Where-Object { $_.Name -ne "release-manifest.json" } | ForEach-Object { $_.Name })
+          if ($actualNames.Count -ne 6 -or @($actualNames | Where-Object { $_ -notin $expectedNames }).Count -ne 0) {
+            throw "Candidate artifact contains unexpected or missing files."
+          }
+          for ($i = 0; $i -lt 6; $i++) {
+            $asset = $manifest.assets[$i]
+            if ($asset.name -ne $expectedNames[$i] -or $asset.size -le 0) { throw "Candidate manifest asset list is malformed." }
+            $assetPath = Join-Path "candidate" $asset.name
+            $actualHash = (Get-FileHash -Algorithm SHA256 $assetPath).Hash.ToLowerInvariant()
+            if ($asset.sha256 -notmatch '^[0-9a-f]{64}$' -or $actualHash -ne $asset.sha256) {
+              throw "Candidate asset SHA-256 check failed: $($asset.name)"
+            }
+            if ((Get-Item $assetPath).Length -ne $asset.size) { throw "Candidate asset size check failed: $($asset.name)" }
+          }
+          foreach ($index in @(0, 2, 4)) {
+            $binary = $manifest.assets[$index]
+            $checksum = $manifest.assets[$index + 1]
+            $checksumText = (Get-Content -Raw -Encoding Ascii (Join-Path "candidate" $checksum.name)).Trim()
+            if ($checksumText -ne "$($binary.sha256)  $($binary.name)") { throw "Candidate checksum sidecar failed: $($binary.name)" }
+          }
+
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) { throw "A release for $env:RELEASE_TAG already exists; refusing to overwrite it." }
+          $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
+          $assets = @($manifest.assets | ForEach-Object { "candidate/$($_.name)" })
+          $prepublishTagSha = (gh api "repos/$env:GITHUB_REPOSITORY/commits/tags/$env:RELEASE_TAG" --jq .sha).Trim()
+          if ($LASTEXITCODE -ne 0 -or $prepublishTagSha -ne $env:SOURCE_SHA) {
+            throw "Release tag moved after validation; refusing to publish."
+          }
+          if ($env:RELEASE_CHANNEL -eq "beta") {
+            gh release create $env:RELEASE_TAG @assets --verify-tag --prerelease --target $env:SOURCE_SHA --title $env:RELEASE_TITLE --notes $notes
+          } else {
+            gh release create $env:RELEASE_TAG @assets --verify-tag --latest --target $env:SOURCE_SHA --title $env:RELEASE_TITLE --notes $notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw "GitHub Release creation failed." }

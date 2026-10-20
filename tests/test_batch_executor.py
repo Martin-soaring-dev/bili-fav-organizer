@@ -1,8 +1,24 @@
-import time
+import sys
 import unittest
+from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import patch
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import server
+from store_profile_isolation import isolated_store_profile
+
+# 执行体把 running 置回 False 之后，调度器才落终态记录；只等 running 会读到
+# 还没记账完的中间态（apply 现在真的经过调度器排队执行）。
+SETTLED_TASK_STATUSES = frozenset({
+    server.TaskStatus.PAUSED,
+    server.TaskStatus.CANCELLED,
+    server.TaskStatus.INTERRUPTED,
+    server.TaskStatus.NEEDS_RECONCILIATION,
+    server.TaskStatus.COMPLETED,
+    server.TaskStatus.FAILED,
+})
 
 
 class FakeBiliSession:
@@ -33,6 +49,12 @@ class FakeBiliSession:
 
 
 class BatchExecutorTests(unittest.TestCase):
+    def setUp(self):
+        self._stack = ExitStack()
+        self.addCleanup(self._stack.close)
+        # apply_start 需要通过 _ensure_task_scheduler 排队任务，那要求数据库 READY。
+        isolated_store_profile(self._stack)
+
     def _run(self, plan, videos, fake):
         server.APP["session"] = fake
         server.APP["apply_run"] = None
@@ -59,10 +81,12 @@ class BatchExecutorTests(unittest.TestCase):
              patch.object(server, "load_config",
                           return_value={"write_interval": 0, "apply_batch": 1000}):
             result = server.apply_start()
-            deadline = time.time() + 2
-            while (server.APP["apply_run"] and server.APP["apply_run"].get("running")
-                   and time.time() < deadline):
-                time.sleep(0.01)
+            self.assertIsInstance(result, dict, getattr(result, "body", None))
+            scheduler = server._TASK_SCHEDULER
+            self.assertIsNotNone(scheduler, "调度器尚未创建，无法确认任务终态")
+            record = scheduler.wait_for_status(
+                result["task_id"], SETTLED_TASK_STATUSES, timeout=20)
+            self.assertIn(record.status, SETTLED_TASK_STATUSES, record)
         return result
 
     def test_groups_and_executes_in_batches(self):

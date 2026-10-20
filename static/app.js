@@ -87,7 +87,8 @@
         const message = (data && (data.error || data.detail)) || ("HTTP " + res.status);
         const err = new Error(message);
         err.error = message;
-        if (data && data.code === "scan_issue_pending") refreshScanIssues(true);
+        // 这是用户刚触发的操作被扫描异常拦下，属于对本次操作的直接解释，强制弹出。
+        if (data && data.code === "scan_issue_pending") refreshScanIssues(true, true);
         if (data && data.code === "app_locked") {
           const screen = document.getElementById("app-lock-screen");
           if (screen) screen.hidden = false;
@@ -989,9 +990,14 @@
     box.classList.toggle("is-active", model.id === activeModelId);
   }
 
+  // 「配置一次都没读成功」和「读成功但确实没有模型」是两回事。后者如果再被当成
+  // 前者去补拉，refreshModelLamp ↔ loadConfig 就会互相触发，/api/config 无限打。
+  let configLoaded = false;
+
   async function loadConfig() {
     try {
       const c = await api("GET", "/api/config");
+      configLoaded = true;
       providersCache = c.providers || [];
       modelsCache = c.models || [];
       activeModelId = c.active_model_id || "";
@@ -1016,7 +1022,11 @@
       renderManageLists();
       providerPresetsCache = c.provider_presets || [];
       renderPresetList(providerPresetsCache);
-    } catch (e) { log("读取配置失败: " + e.message, "err"); }
+    } catch (e) {
+      // 读失败（例如保险库锁着 403）就回到「没读成功」，解锁后还会再补一次。
+      configLoaded = false;
+      log("读取配置失败: " + e.message, "err");
+    }
   }
 
   $("cfg-provider").addEventListener("change", () => {
@@ -1135,8 +1145,14 @@
   let scanRecoveryBusy = false;
   let scanIssuesRunning = false;
   let scanIssueFocus = null;
-  let lastScanIssuePrompt = "";
+  // 用户关掉弹窗后，同一批异常不再自动抢占界面；新出现的收藏夹异常仍会弹出，
+  // 用户也能用「查看扫描异常」随时主动打开。
+  let dismissedScanIssueSignature = "";
   const scanIssueModal = $("scan-issue-modal");
+
+  function scanIssueSignature() {
+    return scanIssues.map(row => String(row.media_id)).sort().join(",");
+  }
 
   function setScanRecoveryControls() {
     const busy = scanRecoveryBusy || scanIssuesRunning;
@@ -1195,9 +1211,13 @@
     setScanRecoveryControls();
   }
 
-  function showScanIssue() {
+  function showScanIssue(force = false) {
     if (!scanIssues.length) return;
-    lastScanIssuePrompt = scanIssues.map(row => `${row.media_id}:${row.scan_run_id || ""}`).join(",");
+    if (!force && scanIssueSignature() === dismissedScanIssueSignature) {
+      // 用户已经关掉了这批异常：内容继续跟着最新数据走，但不再自动弹出来。
+      if (scanIssueModal.style.display === "flex") renderScanIssue();
+      return;
+    }
     renderScanIssue();
     if (scanIssueModal.style.display !== "flex") {
       scanIssueFocus = document.activeElement;
@@ -1208,12 +1228,13 @@
   }
 
   function closeScanIssue() {
+    dismissedScanIssueSignature = scanIssueSignature();
     scanIssueModal.style.display = "none";
     $("app").inert = false;
     if (scanIssueFocus && scanIssueFocus.isConnected) scanIssueFocus.focus();
   }
 
-  async function refreshScanIssues(open = false) {
+  async function refreshScanIssues(open = false, force = false) {
     try {
       const state = await api("GET", "/api/scan/issues");
       scanIssues = state.issues || [];
@@ -1221,8 +1242,11 @@
       $("scan-issue-banner").hidden = !scanIssues.length;
       $("scan-issue-banner-text").textContent = `${scanIssues.length} 个收藏夹扫描异常，处理后才能继续整理。`;
       if (scanIssues.length) {
-        if (open) showScanIssue();
+        if (open) showScanIssue(force);
         else if (scanIssueModal.style.display === "flex") renderScanIssue();
+      } else {
+        // 异常已全部解决：清掉关闭记录，之后再出现异常仍要能弹出来。
+        dismissedScanIssueSignature = "";
       }
       setScanRecoveryControls();
       return scanIssues;
@@ -1297,7 +1321,7 @@
     }
   }
 
-  $("scan-issue-open").addEventListener("click", () => refreshScanIssues(true).catch(() => {}));
+  $("scan-issue-open").addEventListener("click", () => refreshScanIssues(true, true).catch(() => {}));
   $("scan-issue-close").addEventListener("click", closeScanIssue);
   $("scan-issue-dismiss").addEventListener("click", closeScanIssue);
   $("scan-issue-select").addEventListener("change", () => {
@@ -1611,8 +1635,9 @@
     }).catch(() => setLamp("lamp-login", "err", "B 站登录：状态未知", "状态未知"));
   }
   async function refreshModelLamp() {
-    // 锁屏启动时配置拉不到（403），解锁后没人再拉一次，缓存一直是空的 —— 自己补一次
-    if (!modelsCache.length) {
+    // 锁屏启动时配置拉不到（403），解锁后没人再拉一次，缓存一直是空的 —— 自己补一次。
+    // 只有「从没读成功过」才补拉；已读成功但没有模型属于正常状态，重试一次就够了。
+    if (!configLoaded) {
       try { await loadConfig(); } catch (_) { /* 仍锁着就算了，先显示未知 */ }
     }
     let m = null;
@@ -2170,6 +2195,28 @@
     }, label);
   }
 
+  // 只有扫描明确成功结束才能进入分析阶段：暂停/取消/中断/风控/失败都会留下
+  // 不完整的扫描结果，继续下去会让后续分析和归类建立在残缺数据上。
+  const SCAN_SUCCESS_STATUSES = ["completed", "completed_with_issues"];
+
+  function scanNotCompleteReason(status, error) {
+    const detail = error ? `：${error}` : "";
+    switch (status) {
+      case "paused":
+        return "扫描已暂停，快速模式停止；请在扫描页继续扫描后再重试";
+      case "cancelled":
+        return "扫描已取消，快速模式停止；已完成的收藏夹会保留，可稍后继续扫描";
+      case "interrupted":
+        return "扫描被中断，快速模式停止；请重新开始扫描";
+      case "rate_limited":
+        return `扫描触发风控，快速模式停止${detail}`;
+      case "failed":
+        return `扫描失败，快速模式停止${detail}`;
+      default:
+        return `扫描未正常完成（状态：${status || "未知"}），快速模式停止${detail}`;
+    }
+  }
+
   async function waitScanDone() {
     await waitUntil(async () => {
       const st = await api("GET", "/api/scan/status");
@@ -2178,12 +2225,15 @@
       const issues = await refreshScanIssues();
       if (issues.length) {
         $("fast-status").textContent = "扫描需要处理，解决异常后自动继续";
-        const promptKey = issues.map(row => `${row.media_id}:${row.scan_run_id || ""}`).join(",");
-        if (scanIssueModal.style.display !== "flex" && promptKey !== lastScanIssuePrompt) showScanIssue();
+        showScanIssue();
         return false;
       }
+      const status = String(st.status || "");
       const err = String(st.error || "");
-      if (err.includes("停止")) throw new Error(`扫描已停止：${err}`);
+      // 取消/暂停等终态会带着 error=null，所以不能只看有没有 error。
+      if (!SCAN_SUCCESS_STATUSES.includes(status)) {
+        throw new Error(scanNotCompleteReason(status, err));
+      }
       if (err) throw new Error(`扫描失败：${err}`);
       return true;
     }, "扫描");
@@ -2402,8 +2452,9 @@
       const msg = e && (e.error || e.message || String(e));
       if (String(msg).includes("停止")) {
         setFastStep(fastRun.stepIndex, "fail");
-        $("fast-status").textContent = "已停止";
-        log("快速模式已停止", "warn");
+        // 用户主动停止只显示「已停止」；扫描暂停/取消等终态要说明原因。
+        $("fast-status").textContent = msg === "已停止快速模式" ? "已停止" : msg;
+        log(`快速模式已停止：${msg}`, "warn");
       } else {
         setFastStep(fastRun.stepIndex, "fail");
         $("fast-status").textContent = "失败：" + msg;
@@ -3675,7 +3726,16 @@
         refreshStats();
       }
       if (ev.kind === "scan_end") {
-        $("scan-progress").style.display = "none";
+        const box = $("scan-progress");
+        if (ev.outcome === "paused") {
+          box.style.display = "flex";
+          if (typeof ev.done === "number") setProgress(box, "scan", ev.done, ev.total || 0);
+          const progress = typeof ev.done === "number" && typeof ev.total === "number"
+            ? `（${ev.done}/${ev.total} 条）` : "";
+          $("scan-text").textContent = `扫描已暂停${progress}；可从扫描页继续（未完成的收藏夹会从第 1 页重新读取，已完成的不重复读取）`;
+        } else {
+          box.style.display = "none";
+        }
         refreshStats();
         if (folderProfileListLoaded) loadFolderProfiles();
         refreshOrganizationReadiness();
@@ -4433,6 +4493,488 @@
     refreshModelLamp();      // 顶栏指示灯跟着测试结果走
   });
 
+  // ---------- 统一任务中心 ----------
+  const taskCenterModal = $("task-center-modal");
+  const taskCenterActiveStatuses = new Set([
+    "QUEUED", "RUNNING", "PAUSING", "PAUSED", "RESUMING", "CANCELLING",
+  ]);
+  const taskTypeLabels = {
+    scan: "收藏夹扫描",
+    analyze: "内容分析",
+    folder_profile: "收藏夹画像生成",
+    folder_merge_suggestions: "收藏夹合并建议",
+    apply: "批量整理执行",
+    folder_merge: "收藏夹合并执行",
+  };
+  const taskStatusLabels = {
+    QUEUED: "等待运行", RUNNING: "运行中", PAUSING: "正在暂停",
+    PAUSED: "已暂停", RESUMING: "正在恢复", CANCELLING: "正在取消",
+    CANCELLED: "已取消", INTERRUPTED: "已中断",
+    NEEDS_RECONCILIATION: "等待远端核对", COMPLETED: "已完成", FAILED: "失败",
+  };
+  const operationStatusLabels = {
+    DISPATCHING: "正在发送", NEEDS_RECONCILIATION: "等待核对",
+    NOT_APPLIED: "已核实未生效，可安全重试", MANUAL_REVIEW: "人工复核中",
+  };
+  const reconciliationDecisionLabels = {
+    confirmed: "已确认远端生效", not_applied: "已确认未生效",
+    manual_review: "退回人工复核",
+  };
+  let taskCenterTimer = null;
+  let taskCenterLoading = false;
+  let taskCenterTab = "tasks";
+
+  function taskCenterStatus(text, isError = false) {
+    const status = $("task-center-status");
+    if (!status) return;
+    status.textContent = text || "";
+    status.classList.toggle("error", !!isError);
+  }
+
+  function taskCenterButton(label, className, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = className || "mini";
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  // 每个计数器都带单位名，界面上同一行才不会在「收藏夹数」和「条目数」之间来回跳。
+  const progressUnitLabels = {
+    folders: "收藏夹", items: "条目", groups: "分组", batches: "批次", steps: "步骤",
+  };
+  const checkpointPhaseLabels = {
+    indexed_ids: "ID 清单核对", paged: "分页读取", folder_complete: "收藏夹完成",
+    before_cleanup: "清理前", cleaning: "清理失效内容",
+    suggestions: "生成合并建议", before_suggestions: "生成合并建议前",
+    draft_saved: "合并建议草稿已保存", before_merge_group: "合并分组前",
+    before_source_writes: "写入来源收藏夹前", group_complete: "分组完成",
+    analyze_batch: "分析批次", waiting_for_scan: "等待新扫描内容",
+    before_batch: "执行批次前", batch_done: "批次完成",
+    prepared: "计划已准备", before_new_folder_group: "新建收藏夹前",
+  };
+
+  function readNumber(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function readCounter(value) {
+    if (!value || typeof value !== "object") return null;
+    const done = readNumber(value.done);
+    const total = readNumber(value.total);
+    return done === null || total === null ? null : { done, total };
+  }
+
+  function progressCounterParts(progress) {
+    const parts = [];
+    Object.keys(progressUnitLabels).forEach(unit => {
+      const counter = readCounter(progress[unit]);
+      if (!counter) return;
+      parts.push(`${progressUnitLabels[unit]} ${counter.done}/${counter.total}`);
+    });
+    if (!parts.length) {
+      // 早期任务记录只有 done/total（没有单位）：照旧显示，但不替它猜单位。
+      const legacy = readCounter(progress);
+      if (legacy) {
+        const label = progressUnitLabels[String(progress.unit || "")] || "";
+        parts.push(`${label}${label ? " " : ""}${legacy.done}/${legacy.total}`);
+      }
+    }
+    return parts;
+  }
+
+  function taskProgressText(task) {
+    const progress = (task && task.progress) || {};
+    const parts = progressCounterParts(progress);
+    if (progress.current) parts.push(String(progress.current));
+    const page = readNumber(progress.page);
+    if (page !== null && page > 0) parts.push("第 " + page + " 页");
+    const pending = readNumber(progress.pending);
+    if (pending !== null && pending > 0) parts.push("待处理 " + pending);
+    if (progress.waiting) parts.push("等待新扫描内容");
+    const generated = readNumber(progress.generated);
+    if (generated !== null) parts.push("已生成 " + generated);
+    const failed = readNumber(progress.failed);
+    if (failed !== null && failed > 0) parts.push("失败 " + failed);
+    if (task && task.pause_reason) {
+      const reason = {
+        USER: "用户暂停", VAULT_LOCK: "保险库锁定暂停",
+        SCHEDULER_SHUTDOWN: "应用关闭暂停",
+        RESOURCE_MAINTENANCE: "资源维护暂停",
+      }[task.pause_reason] || task.pause_reason;
+      parts.push(reason);
+    }
+    if (task && task.reconciliation_required) {
+      parts.push(task.reconciliation_reason || "需要核对远端写入结果");
+    }
+    if (task && task.error) {
+      const error = task.error.message || task.error.category || JSON.stringify(task.error);
+      parts.push("错误：" + String(error).slice(0, 240));
+    }
+    if (parts.length) return parts.join(" · ");
+    return "尝试 " + (readNumber(task && task.attempt) || 0) +
+      " · 修订 " + (readNumber(task && task.revision) || 0);
+  }
+
+  function taskCheckpointText(task) {
+    // 检查点字段随任务类型变化，只做「有就显示」的只读汇总；
+    // 字段缺失、类型不对或整个 checkpoint 损坏都不能让卡片渲染失败。
+    const checkpoint = task && task.checkpoint;
+    if (!checkpoint || typeof checkpoint !== "object") return "";
+    const parts = [];
+    try {
+      const phase = String(checkpoint.phase || "").trim();
+      if (phase) parts.push("阶段 " + (checkpointPhaseLabels[phase] || phase));
+      const page = readNumber(checkpoint.page);
+      if (page !== null && page > 0) parts.push("第 " + page + " 页");
+      const folder = String(checkpoint.last_completed_folder || checkpoint.folder_id || "").trim();
+      if (folder) parts.push("收藏夹 " + folder);
+      const done = readNumber(checkpoint.done);
+      const folderDone = readNumber(checkpoint.folder_done);
+      if (done !== null) parts.push("已处理 " + done + " 条");
+      else if (folderDone !== null) parts.push("已完成 " + folderDone + " 个收藏夹");
+      const version = readNumber(checkpoint.version);
+      if (version !== null) parts.push("检查点 v" + version);
+    } catch (_) {
+      return "";
+    }
+    return parts.length ? "检查点：" + parts.join(" · ") : "";
+  }
+
+  function setTaskCenterTab(tab) {
+    taskCenterTab = tab === "operations" ? "operations" : "tasks";
+    document.querySelectorAll("[data-task-center-tab]").forEach(button => {
+      const active = button.dataset.taskCenterTab === taskCenterTab;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    $("task-center-tasks").hidden = taskCenterTab !== "tasks";
+    $("task-center-operations").hidden = taskCenterTab !== "operations";
+  }
+
+  async function runTaskAction(task, action) {
+    if (action === "cancel" &&
+        !confirm("取消此任务？已保存的检查点会保留，未完成的工作不会继续运行。")) return;
+    const labels = { pause: "暂停", resume: "恢复", cancel: "取消" };
+    taskCenterStatus("正在" + labels[action] + "任务…");
+    try {
+      await api("POST", "/api/tasks/" + encodeURIComponent(task.task_id) + "/" + action, {});
+      await refreshTaskCenter();
+    } catch (e) {
+      taskCenterStatus(labels[action] + "失败：" + (e.error || e.message), true);
+      await refreshTaskCenter();
+    }
+  }
+
+  function renderTaskCenterTasks(tasks) {
+    const host = $("task-center-tasks");
+    if (!host) return;
+    host.replaceChildren();
+    if (!tasks.length) {
+      const empty = document.createElement("div");
+      empty.className = "task-center-empty";
+      empty.textContent = "暂无任务记录。";
+      host.appendChild(empty);
+      return;
+    }
+    const ordered = [...tasks].sort((a, b) => {
+      const active = Number(taskCenterActiveStatuses.has(b.status)) -
+        Number(taskCenterActiveStatuses.has(a.status));
+      return active || String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+    });
+    ordered.forEach(task => {
+      const card = document.createElement("article");
+      card.className = "task-center-item";
+      const top = document.createElement("div");
+      top.className = "task-center-item-top";
+      const title = document.createElement("div");
+      title.className = "task-center-item-title";
+      title.textContent = (taskTypeLabels[task.task_type] || task.task_type) +
+        " · " + String(task.task_id).slice(0, 12);
+      const badge = document.createElement("span");
+      badge.className = "task-center-status " + String(task.status || "").toLowerCase();
+      badge.textContent = taskStatusLabels[task.status] || task.status || "未知";
+      top.append(title, badge);
+      card.appendChild(top);
+
+      const detail = document.createElement("div");
+      detail.className = "task-center-item-detail";
+      detail.textContent = taskProgressText(task);
+      card.appendChild(detail);
+      const checkpointText = taskCheckpointText(task);
+      if (checkpointText) {
+        const checkpoint = document.createElement("div");
+        checkpoint.className = "task-center-item-detail";
+        checkpoint.textContent = checkpointText;
+        card.appendChild(checkpoint);
+      }
+      const meta = document.createElement("div");
+      meta.className = "task-center-item-meta";
+      meta.textContent = "开始：" + (task.created_at || "—") +
+        " · 更新：" + (task.updated_at || "—") +
+        " · 执行次数：" + (task.attempt || 0);
+      card.appendChild(meta);
+
+      const actions = document.createElement("div");
+      actions.className = "task-center-item-actions";
+      if (task.status === "RUNNING") {
+        actions.appendChild(taskCenterButton("暂停", "mini", () => runTaskAction(task, "pause")));
+        actions.appendChild(taskCenterButton("取消", "mini danger", () => runTaskAction(task, "cancel")));
+      } else if (task.status === "PAUSED") {
+        actions.appendChild(taskCenterButton("恢复", "mini", () => runTaskAction(task, "resume")));
+        actions.appendChild(taskCenterButton("取消", "mini danger", () => runTaskAction(task, "cancel")));
+      } else if (task.status === "INTERRUPTED") {
+        const interrupted = document.createElement("div");
+        interrupted.className = "task-center-item-detail";
+        interrupted.textContent = "应用重启时任务中断；为避免重复远端写入，不会自动重放。请从对应业务页按已保存进度重新发起。";
+        card.appendChild(interrupted);
+      } else if (["QUEUED", "PAUSING", "RESUMING"].includes(task.status)) {
+        actions.appendChild(taskCenterButton("取消", "mini danger", () => runTaskAction(task, "cancel")));
+      }
+      if (task.status === "NEEDS_RECONCILIATION" || task.reconciliation_required) {
+        actions.appendChild(taskCenterButton("查看远端写入核对", "mini",
+          () => setTaskCenterTab("operations")));
+      }
+      if (actions.childElementCount) card.appendChild(actions);
+      host.appendChild(card);
+    });
+  }
+
+  function submitOperationDecision(operation, decision, evidence, preconditionsValid) {
+    return api("POST",
+      "/api/remote-operations/" + encodeURIComponent(operation.operation_id) + "/reconcile",
+      { decision, evidence, preconditions_valid: preconditionsValid });
+  }
+
+  // 服务端对「还没有核对记录」的操作也会返回 `{}`。空对象不是核对记录，
+  // 之前一律渲染成「已记录核对」，看起来像已经核对过，必须区分开。
+  function readReconciliation(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    let decision = "";
+    let checkedAt = "";
+    let evidence = "";
+    try {
+      decision = String(raw.decision || "").trim();
+      checkedAt = String(raw.checked_at || "").trim();
+      const note = raw.evidence && typeof raw.evidence === "object"
+        ? raw.evidence.user_note : raw.evidence;
+      evidence = note === null || note === undefined ? "" : String(note).trim();
+      if (!evidence && raw.evidence) evidence = JSON.stringify(raw.evidence) || "";
+    } catch (_) {
+      evidence = "";
+    }
+    if (!decision && !checkedAt && !evidence) return null;
+    return {
+      decision: reconciliationDecisionLabels[decision] || decision || "结论未记录",
+      evidence: evidence || "未提供依据",
+      checkedAt: checkedAt || "时间未记录",
+    };
+  }
+
+  function renderRemoteOperationCard(operation) {
+    const card = document.createElement("article");
+    card.className = "task-center-item";
+    const top = document.createElement("div");
+    top.className = "task-center-item-top";
+    const title = document.createElement("div");
+    title.className = "task-center-item-title";
+    const target = operation.target || {};
+    title.textContent = (operation.operation_type || "远端写入") +
+      (target.media_id || target.folder_id ? " · " + (target.media_id || target.folder_id) : "");
+    const badge = document.createElement("span");
+    badge.className = "task-center-status " + String(operation.status || "").toLowerCase();
+    badge.textContent = operationStatusLabels[operation.status] || operation.status || "未知";
+    top.append(title, badge);
+    card.appendChild(top);
+
+    const meta = document.createElement("div");
+    meta.className = "task-center-item-meta";
+    meta.textContent = "操作 ID：" + operation.operation_id +
+      " · 任务：" + operation.task_id +
+      " · 尝试：" + (operation.attempt || 0) +
+      " · 更新：" + (operation.updated_at || "—");
+    card.appendChild(meta);
+    const summary = document.createElement("div");
+    summary.className = "task-center-item-detail";
+    summary.textContent = "前置条件：" + JSON.stringify(operation.preconditions || {}) +
+      "；目标结果：" + JSON.stringify(operation.postconditions || {});
+    card.appendChild(summary);
+    const reconciliation = readReconciliation(operation.reconciliation);
+    if (reconciliation) {
+      const prior = document.createElement("div");
+      prior.className = "task-center-item-detail";
+      prior.textContent = "上次核对：" + reconciliation.decision + " · " +
+        reconciliation.evidence + " · " + reconciliation.checkedAt;
+      card.appendChild(prior);
+    }
+
+    const evidence = document.createElement("textarea");
+    evidence.className = "task-center-operation-summary";
+    evidence.maxLength = 1000;
+    evidence.placeholder = "填写核验依据，例如 B 站页面上的当前简介或收藏夹状态。请勿粘贴 Cookie、token 等凭据。";
+    card.appendChild(evidence);
+
+    let preconditionsCheck = null;
+    if (operation.status === "NEEDS_RECONCILIATION" || operation.status === "MANUAL_REVIEW") {
+      const checkLabel = document.createElement("label");
+      checkLabel.className = "task-center-confirm";
+      preconditionsCheck = document.createElement("input");
+      preconditionsCheck.type = "checkbox";
+      const checkText = document.createElement("span");
+      checkText.textContent = "我已检查 B 站当前状态，原操作前置条件仍然成立；允许系统复用同一操作记录重试。";
+      checkLabel.append(preconditionsCheck, checkText);
+      card.appendChild(checkLabel);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "task-center-item-actions";
+    const addDecision = (label, decision, needsPreconditions = false) => {
+      actions.appendChild(taskCenterButton(label, "mini", async () => {
+        const note = evidence.value.trim();
+        if (!note) {
+          taskCenterStatus("请先填写核验依据。", true);
+          evidence.focus();
+          return;
+        }
+        const preconditionsValid = !!(preconditionsCheck && preconditionsCheck.checked);
+        if (needsPreconditions && !preconditionsValid) {
+          taskCenterStatus("确认未生效并允许重试前，必须勾选已核实前置条件。", true);
+          return;
+        }
+        if (decision === "confirmed" &&
+            !confirm("确认远端已经完成此操作？请确保依据足以证明结果，避免重复执行。")) return;
+        try {
+          taskCenterStatus("正在保存核对结论…");
+          await submitOperationDecision(operation, decision, note, preconditionsValid);
+          await refreshTaskCenter();
+        } catch (e) {
+          taskCenterStatus("核对失败：" + (e.error || e.message), true);
+        }
+      }));
+    };
+
+    if (operation.status === "NEEDS_RECONCILIATION") {
+      addDecision("确认远端已生效", "confirmed");
+      addDecision("确认未生效并允许安全重试", "not_applied", true);
+      addDecision("暂转人工复核", "manual_review");
+    } else if (operation.status === "NOT_APPLIED") {
+      addDecision("转人工复核", "manual_review");
+      const note = document.createElement("div");
+      note.className = "task-center-item-detail";
+      note.textContent = "如需重试，请从原业务页面再次执行同一操作；系统会校验前置条件并复用此操作记录。";
+      card.appendChild(note);
+    } else if (operation.status === "MANUAL_REVIEW") {
+      addDecision("人工确认远端已生效", "confirmed");
+      addDecision("人工确认未生效并允许安全重试", "not_applied", true);
+    } else {
+      const note = document.createElement("div");
+      note.className = "task-center-item-detail";
+      note.textContent = "请求仍在发送或等待返回。请先刷新确认状态，避免重复操作。";
+      card.appendChild(note);
+    }
+    if (actions.childElementCount) card.appendChild(actions);
+    return card;
+  }
+
+  function renderTaskCenterOperations(operations) {
+    const host = $("task-center-operations");
+    if (!host) return;
+    host.replaceChildren();
+    if (!operations.length) {
+      const empty = document.createElement("div");
+      empty.className = "task-center-empty";
+      empty.textContent = "当前没有待核对的远端写入。";
+      host.appendChild(empty);
+      return;
+    }
+    operations.forEach(operation => host.appendChild(renderRemoteOperationCard(operation)));
+  }
+
+  async function refreshTaskBadge() {
+    const badge = $("rail-task-active-count");
+    if (!badge) return;
+    try {
+      const result = await api("GET", "/api/tasks");
+      const count = (result.tasks || []).filter(task => taskCenterActiveStatuses.has(task.status)).length;
+      badge.textContent = count > 99 ? "99+" : String(count);
+      badge.hidden = count === 0;
+    } catch (_) {
+      badge.hidden = true;
+    }
+  }
+
+  async function refreshTaskCenter() {
+    if (taskCenterLoading || !taskCenterModal || taskCenterModal.style.display === "none") return;
+    taskCenterLoading = true;
+    const refresh = $("task-center-refresh");
+    if (refresh) refresh.disabled = true;
+    const [taskResult, operationResult] = await Promise.allSettled([
+      api("GET", "/api/tasks"),
+      api("GET", "/api/remote-operations/unresolved"),
+    ]);
+    taskCenterLoading = false;
+    if (refresh) refresh.disabled = false;
+    if (taskResult.status === "fulfilled") {
+      renderTaskCenterTasks(taskResult.value.tasks || []);
+      const count = (taskResult.value.tasks || []).filter(task => taskCenterActiveStatuses.has(task.status)).length;
+      const badge = $("rail-task-active-count");
+      if (badge) {
+        badge.textContent = count > 99 ? "99+" : String(count);
+        badge.hidden = count === 0;
+      }
+    } else {
+      renderTaskCenterTasks([]);
+    }
+    if (operationResult.status === "fulfilled") {
+      renderTaskCenterOperations(operationResult.value.operations || []);
+    } else {
+      renderTaskCenterOperations([]);
+    }
+    const errors = [];
+    if (taskResult.status === "rejected") {
+      errors.push("任务：" + (taskResult.reason.error || taskResult.reason.message));
+    }
+    if (operationResult.status === "rejected") {
+      errors.push("远端核对：" + (operationResult.reason.error || operationResult.reason.message));
+    }
+    if (errors.length) {
+      taskCenterStatus(errors.join("；"), true);
+    } else {
+      taskCenterStatus("任务 " + (taskResult.value.tasks || []).length +
+        " 项 · 待核对远端写入 " + (operationResult.value.operations || []).length +
+        " 项 · 每 5 秒刷新");
+    }
+  }
+
+  function openTaskCenter() {
+    if (!taskCenterModal) return;
+    taskCenterModal.style.display = "flex";
+    setTaskCenterTab(taskCenterTab);
+    refreshTaskCenter();
+    clearInterval(taskCenterTimer);
+    taskCenterTimer = setInterval(refreshTaskCenter, 5000);
+  }
+  function closeTaskCenter() {
+    if (taskCenterModal) taskCenterModal.style.display = "none";
+    clearInterval(taskCenterTimer);
+    taskCenterTimer = null;
+  }
+  $("rail-tasks")?.addEventListener("click", openTaskCenter);
+  $("task-center-close")?.addEventListener("click", closeTaskCenter);
+  $("task-center-refresh")?.addEventListener("click", refreshTaskCenter);
+  document.querySelectorAll("[data-task-center-tab]").forEach(button => {
+    button.addEventListener("click", () => setTaskCenterTab(button.dataset.taskCenterTab));
+  });
+  taskCenterModal?.addEventListener("click", event => {
+    if (event.target === taskCenterModal) closeTaskCenter();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && taskCenterModal && taskCenterModal.style.display === "flex") closeTaskCenter();
+  });
+
   // ---------- 初始化 ----------
   function init() {
     setMode("fast");
@@ -4450,7 +4992,9 @@
     loadFolderMerge();
     loadFolderProfiles();
     connectEvents();
+    refreshTaskBadge();
     setInterval(checkConn, 10000);   // 仅更新连接指示灯，不写日志
+    setInterval(refreshTaskBadge, 20000);
     log("系统就绪。请先扫码登录（或手动输入 Cookie）→ 扫描 → 分析 → 定案 → 执行。");
   }
 

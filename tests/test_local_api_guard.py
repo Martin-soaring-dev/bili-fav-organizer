@@ -1,9 +1,14 @@
 """本地 API 防护与长任务互斥契约。"""
 import os
+import sys
 import tempfile
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from store_profile_isolation import isolated_store_profile
 
 from fastapi.testclient import TestClient
 
@@ -18,6 +23,10 @@ class LocalApiGuardTests(unittest.TestCase):
     def setUp(self):
         # 本类按生产规则断言；只在用例期间关掉测试钩子，避免拖垮其它 TestClient 套件
         self._prev_insecure = os.environ.pop("BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL", None)
+        # 生产规则包含「数据库未就绪则 503」：本类断言的是 Host/Token，需要真库。
+        self._stack = ExitStack()
+        self.addCleanup(self._stack.close)
+        isolated_store_profile(self._stack)
         # 金库强制 onboarding 会抢先 403；本类测 Host/Token，故预置为已初始化且解锁
         self._prev_vault = server.VAULT
         import tempfile

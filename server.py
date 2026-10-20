@@ -35,6 +35,7 @@ import traceback
 import uuid
 import webbrowser
 import zipfile
+from functools import wraps
 from pathlib import Path, PurePosixPath
 from typing import Optional
 from urllib.parse import urlsplit
@@ -51,6 +52,29 @@ import vault as vault_mod
 import bili_api
 import llm_analyzer
 import store
+from core.database import DatabaseNotInitializedError
+from core.database.profile_lock import ProfileFileLock, ProfileLockTimeoutError
+from core.bili_operation_adapter import BiliOperationAdapter
+from core.remote_operations import (
+    OperationStatus,
+    RemoteOperationCoordinator,
+    SqliteRemoteOperationRepository,
+    redact_sensitive,
+)
+from core.scheduler import (
+    CancelRequested,
+    CheckpointValidation,
+    PauseReason,
+    PauseRequested,
+    ReconciliationResult,
+    ResumeIntent,
+    ResumePolicy,
+    SQLiteTaskStore,
+    TaskContext,
+    TaskRecord,
+    TaskScheduler,
+    TaskStatus,
+)
 
 HERE = Path(__file__).resolve().parent
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else HERE
@@ -102,6 +126,7 @@ _UPDATE_CANCEL = threading.Event()   # 用户点「停止下载」时置位，�
 _SHUTDOWN = threading.Event()        # 更新替换前置位，用来断开 SSE 长连接
 _UPDATE_STATUS_FILE: Path | None = None
 _UVICORN_SERVER = None
+_SERVER_INSTANCE_LEASE = None
 _PROVIDER_BOOT_LOG = ""                  # import 期初始化日志，留到 main() 里 handler 装好后再打
 _APP_PORT = 8080
 
@@ -119,6 +144,12 @@ def _force_exit_if_alive():
     """
     log.warning("服务未在预期时间内退出，强制结束进程以完成更新替换")
     os._exit(0)
+
+
+def _acquire_server_instance_lease(user_data_dir: Path | None = None):
+    """Allow one cooperating service process per vault/config profile."""
+    root = Path(user_data_dir or USER_DATA_DIR)
+    return ProfileFileLock(root / ".bfo-server-instance.lock").acquire_exclusive(timeout=0)
 
 
 def _cleanup_stale_update_leftovers(app_parent: Path, system_temp: Path,
@@ -521,17 +552,238 @@ def _read_device_secret() -> str:
     raw = _dpapi_unprotect(APP_UNLOCK_BLOB.read_bytes())
     if raw == b"app-unlock":
         raise OSError("app_unlock.blob 里是应用密码材料，不是加密库设备 secret")
-    DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
-    DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(raw))
-    return raw.decode("utf-8")
+    secret = raw.decode("utf-8")
+    _write_device_secret(secret)
+    return secret
 
 
 def _write_device_secret(secret: str) -> None:
-    DEVICE_SECRET_BLOB.parent.mkdir(parents=True, exist_ok=True)
-    DEVICE_SECRET_BLOB.write_bytes(_dpapi_protect(secret.encode("utf-8")))
+    vault_mod.Vault._atomic_bytes(
+        DEVICE_SECRET_BLOB, _dpapi_protect(secret.encode("utf-8")))
+
+
+def _optional_file_bytes(path: Path) -> bytes | None:
+    try:
+        return Path(path).read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _restore_optional_file(path: Path, raw: bytes | None) -> None:
+    path = Path(path)
+    if raw is None:
+        path.unlink(missing_ok=True)
+    else:
+        vault_mod.Vault._atomic_bytes(path, raw)
 
 
 SQLITE_MAGIC = b"SQLite format 3\x00"
+
+
+VAULT_LOCK_MANIFEST_VERSION = 1
+VAULT_LOCK_MANIFEST_META_KEY = "lock_manifest_version"
+
+
+def _vault_manifest_paths() -> tuple[Path, Path]:
+    archive_dir = store.DATA_DIR / "vault-archives"
+    return archive_dir, archive_dir / "lock-manifest.enc"
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _vault_verify_sqlite_bytes(raw: bytes) -> None:
+    """Verify a snapshot in a private candidate without changing user data files."""
+    if not raw.startswith(SQLITE_MAGIC):
+        raise vault_mod.VaultError("解密结果不是 SQLite 数据库")
+    store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fd, candidate_name = tempfile.mkstemp(prefix=".vault-verify-", suffix=".sqlite3",
+                                           dir=store.DATA_DIR)
+    candidate = Path(candidate_name)
+    connection = None
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        connection = sqlite3.connect(candidate, timeout=30)
+        # SQLite backup images can retain journal_mode=WAL. A private candidate
+        # needs a local journal while validating, so normalize its mode first.
+        connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        integrity = [str(row[0]) for row in connection.execute("PRAGMA integrity_check")]
+        if integrity != ["ok"]:
+            raise vault_mod.VaultError("SQLite integrity_check 未通过")
+        if connection.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise vault_mod.VaultError("SQLite foreign_key_check 未通过")
+        tables = {str(row[0]) for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"folders", "videos"}.issubset(tables):
+            raise vault_mod.VaultError("解密结果缺少收藏数据表")
+    except sqlite3.DatabaseError as exc:
+        raise vault_mod.VaultError(f"SQLite 快照校验失败：{exc}") from exc
+    finally:
+        if connection is not None:
+            connection.close()
+        for path in (candidate, Path(str(candidate) + "-wal"),
+                     Path(str(candidate) + "-shm"), Path(str(candidate) + "-journal")):
+            path.unlink(missing_ok=True)
+
+
+def _vault_residue_paths() -> list[Path]:
+    """Return interrupted lifecycle candidates; callers must fail closed on any hit."""
+    roots = (store.DATA_DIR, store.LEGACY_DATA_DIR, USER_DATA_DIR)
+    patterns = (
+        ".vault-snapshot-*", ".vault-lock-snapshot-*", ".vault-verify-*",
+        ".vault-restore-*", ".vault-archive-*", ".vault-digest-*",
+        ".library-*.migrating*", ".*.candidate*", ".*.restore*",
+        ".*.failed-candidate*", "*.migrating", "*.candidate",
+        "*.initializing", ".*.tmp",
+    )
+    found: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        if root.is_symlink() or not root.is_dir():
+            found.add(root)
+            continue
+        for pattern in patterns:
+            try:
+                found.update(path for path in root.rglob(pattern) if path.exists())
+            except OSError:
+                found.add(root)
+    return sorted(found, key=lambda path: str(path).casefold())
+
+
+def _vault_assert_no_residue() -> None:
+    residue = _vault_residue_paths()
+    if residue:
+        names = ", ".join(str(path) for path in residue[:5])
+        raise vault_mod.VaultError(f"检测到未完成的临时/候选文件，拒绝继续：{names}")
+
+
+def _vault_cleanup_owned_sqlite_candidate(path: Path) -> None:
+    """Remove only a unique temporary SQLite file created by this operation."""
+    for candidate in (Path(path), Path(str(path) + "-wal"),
+                      Path(str(path) + "-shm"), Path(str(path) + "-journal")):
+        candidate.unlink(missing_ok=True)
+
+
+def _vault_manifest_is_required() -> bool:
+    try:
+        return int(VAULT._meta.get(VAULT_LOCK_MANIFEST_META_KEY) or 0) >= 1
+    except (TypeError, ValueError):
+        return True
+
+
+def _vault_validate_manifest(manifest: dict, *, check_files: bool = True) -> None:
+    if (not isinstance(manifest, dict) or
+            manifest.get("format_version") != VAULT_LOCK_MANIFEST_VERSION or
+            manifest.get("state") not in {"locked", "unlocking", "unlocked"} or
+            not isinstance(manifest.get("entries"), list) or
+            not isinstance(manifest.get("active_snapshot"), dict)):
+        raise vault_mod.VaultError("保险库锁定清单格式无效")
+    active = manifest["active_snapshot"]
+    if (active.get("file") != VAULT_DB_ENC.name or
+            not isinstance(active.get("size"), int) or active["size"] < 0 or
+            not isinstance(active.get("ciphertext_size"), int) or
+            active["ciphertext_size"] < 1 or
+            not re.fullmatch(r"[0-9a-f]{64}", str(active.get("plaintext_sha256") or "")) or
+            not re.fullmatch(r"[0-9a-f]{64}", str(active.get("ciphertext_sha256") or ""))):
+        raise vault_mod.VaultError("保险库活动快照清单无效")
+    archive_dir, manifest_path = _vault_manifest_paths()
+    expected = {manifest_path.name}
+    seen = set()
+    for entry in manifest["entries"]:
+        if not isinstance(entry, dict):
+            raise vault_mod.VaultError("保险库锁定清单条目无效")
+        name = str(entry.get("archive") or "")
+        if (not name.startswith("archive-") or not name.endswith(".enc") or
+                Path(name).name != name or "/" in name or "\\" in name or name in seen or
+                not re.fullmatch(r"[0-9a-f]{64}",
+                                 str(entry.get("plaintext_sha256") or "")) or
+                not re.fullmatch(r"[0-9a-f]{64}",
+                                 str(entry.get("ciphertext_sha256") or "")) or
+                not isinstance(entry.get("size"), int) or entry["size"] < 0 or
+                not isinstance(entry.get("source"), str) or not entry["source"]):
+            raise vault_mod.VaultError("保险库锁定清单归档路径无效")
+        seen.add(name)
+        expected.add(name)
+    if not check_files:
+        return
+    if not archive_dir.is_dir() or archive_dir.is_symlink():
+        raise vault_mod.VaultError("保险库加密归档目录缺失或无效")
+    actual = set()
+    for path in archive_dir.iterdir():
+        if path.is_symlink() or not path.is_file():
+            raise vault_mod.VaultError("保险库归档目录含未知对象，拒绝解锁")
+        actual.add(path.name)
+    if actual != expected:
+        raise vault_mod.VaultError("保险库清单与加密归档文件集不一致")
+    if not VAULT_DB_ENC.is_file() or VAULT_DB_ENC.is_symlink():
+        raise vault_mod.VaultError("保险库活动加密快照缺失")
+    active_ciphertext = VAULT_DB_ENC.read_bytes()
+    active = manifest["active_snapshot"]
+    if (_sha256_bytes(active_ciphertext) != active["ciphertext_sha256"] or
+            len(active_ciphertext) != active["ciphertext_size"]):
+        raise vault_mod.VaultError("保险库活动加密快照与清单不一致")
+    active_plaintext = VAULT.decrypt(active_ciphertext)
+    if (_sha256_bytes(active_plaintext) != active["plaintext_sha256"] or
+            len(active_plaintext) != active["size"]):
+        raise vault_mod.VaultError("保险库活动快照内容与清单不一致")
+    _vault_verify_sqlite_bytes(active_plaintext)
+    for entry in manifest["entries"]:
+        path = archive_dir / entry["archive"]
+        ciphertext = path.read_bytes()
+        if _sha256_bytes(ciphertext) != entry.get("ciphertext_sha256"):
+            raise vault_mod.VaultError("保险库加密归档校验失败")
+        plaintext = VAULT.decrypt(ciphertext)
+        if (_sha256_bytes(plaintext) != entry.get("plaintext_sha256") or
+                len(plaintext) != int(entry.get("size", -1))):
+            raise vault_mod.VaultError("保险库加密归档内容校验失败")
+
+
+def _vault_read_lock_manifest(*, required: bool = False) -> dict | None:
+    archive_dir, path = _vault_manifest_paths()
+    if path.is_symlink() or archive_dir.is_symlink():
+        raise vault_mod.VaultError("保险库清单或归档目录是符号链接，拒绝访问")
+    if not path.is_file():
+        if required or _vault_manifest_is_required():
+            raise vault_mod.VaultError("保险库锁定清单缺失，拒绝解锁")
+        if archive_dir.exists() and any(archive_dir.iterdir()):
+            raise vault_mod.VaultError("保险库清单缺失但存在归档文件，拒绝解锁")
+        return None
+    if not VAULT.is_unlocked():
+        raise vault_mod.VaultError("保险库清单不可读或保险库未解锁")
+    try:
+        decoded = VAULT.decrypt(path.read_bytes())
+        manifest = json.loads(decoded.decode("utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError, vault_mod.VaultError) as exc:
+        raise vault_mod.VaultError("保险库锁定清单认证失败") from exc
+    _vault_validate_manifest(manifest)
+    return manifest
+
+
+def _vault_write_lock_manifest(manifest: dict) -> None:
+    if not VAULT.is_unlocked():
+        raise vault_mod.VaultError("保险库未解锁，无法写入锁定清单")
+    archive_dir, path = _vault_manifest_paths()
+    if archive_dir.is_symlink() or path.is_symlink():
+        raise vault_mod.VaultError("保险库清单或归档目录是符号链接，拒绝写入")
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    _vault_validate_manifest(manifest, check_files=False)
+    raw = json.dumps(manifest, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":")).encode("utf-8")
+    VAULT._atomic_bytes(path, VAULT.encrypt(raw))
+    verified = json.loads(VAULT.decrypt(path.read_bytes()).decode("utf-8"))
+    if verified != manifest:
+        raise vault_mod.VaultError("保险库锁定清单写入后校验失败")
+    _vault_validate_manifest(verified)
+
+
+def _vault_mark_manifest_installed() -> None:
+    VAULT._meta[VAULT_LOCK_MANIFEST_META_KEY] = VAULT_LOCK_MANIFEST_VERSION
+    VAULT.save_meta()
 
 
 def _dek_selftest() -> dict:
@@ -547,8 +799,7 @@ def _dek_selftest() -> dict:
         return {"ok": False, "detail": "encrypted snapshot missing"}
     try:
         raw = VAULT.decrypt(enc.read_bytes())
-        if not raw.startswith(SQLITE_MAGIC):
-            return {"ok": False, "detail": "encrypted snapshot corruption"}
+        _vault_verify_sqlite_bytes(raw)
         return {"ok": True, "detail": "已完整验证加密快照"}
     except (OSError, ValueError, vault_mod.VaultError) as exc:
         log.warning("加密快照认证失败：%s", exc)
@@ -625,6 +876,38 @@ def app_lock_remove(body: AppLockPasswordIn):
 # ---------- Secure Vault（DEK 多 KEK） ----------
 VAULT = vault_mod.Vault(USER_DATA_DIR / "vault.json")
 VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
+VAULT_LOCK_PHASE = {"phase": "idle", "error": "", "updated_at": ""}
+_VAULT_LIFECYCLE_LOCK = threading.RLock()
+_VAULT_RECOVERY_THREAD_LOCK = threading.Lock()
+_VAULT_RECOVERY_THREAD: threading.Thread | None = None
+
+
+def _serialize_vault_lifecycle(handler):
+    """Serialize key/database transitions with lock-barrier recovery."""
+    @wraps(handler)
+    def wrapped(*args, **kwargs):
+        with _VAULT_LIFECYCLE_LOCK:
+            return handler(*args, **kwargs)
+    return wrapped
+
+
+def _serialize_profile_maintenance(handler):
+    """Keep a profile-wide file/database operation exclusive across processes."""
+    @wraps(handler)
+    def wrapped(*args, **kwargs):
+        with store._lifecycle().maintenance(timeout=30.0):
+            return handler(*args, **kwargs)
+    return wrapped
+
+
+def _serialize_profile_vault_lifecycle(handler):
+    """Serialize vault metadata transitions under the SQLite profile lock."""
+    @wraps(handler)
+    def wrapped(*args, **kwargs):
+        with _VAULT_LIFECYCLE_LOCK:
+            with store._lifecycle().maintenance(timeout=30.0):
+                return handler(*args, **kwargs)
+    return wrapped
 
 
 def _vault_status_payload() -> dict:
@@ -638,10 +921,59 @@ def _vault_status_payload() -> dict:
         "has_recovery_wrap": st.has_recovery_wrap,
         "has_device_wrap": st.has_device_wrap,
         "has_account_wrap": st.has_account_wrap,
+        "database_state": store.database_state(),
+        "lock_phase": dict(VAULT_LOCK_PHASE),
     }
 
 
-def _vault_encrypt_consistent_db() -> None:
+def _set_vault_lock_phase(phase: str, error: str = "") -> None:
+    with _VAULT_LIFECYCLE_LOCK:
+        VAULT_LOCK_PHASE.update(phase=str(phase), error=str(error),
+                                updated_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+
+
+def _vault_install_encrypted_snapshot(temporary: Path) -> dict:
+    """Verify a candidate ciphertext completely before atomically replacing the snapshot."""
+    store.validate_database_candidate(temporary)
+    plaintext = temporary.read_bytes()
+    _vault_verify_sqlite_bytes(plaintext)
+    store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    candidate = store.DATA_DIR / f".vault-snapshot-cipher-{uuid.uuid4().hex}.tmp"
+    previous = VAULT_DB_ENC.read_bytes() if VAULT_DB_ENC.is_file() else None
+    installed = False
+    try:
+        VAULT.encrypt_file(temporary, candidate)
+        encrypted_candidate = candidate.read_bytes()
+        decrypted = VAULT.decrypt(encrypted_candidate)
+        if decrypted != plaintext:
+            raise vault_mod.VaultError("加密候选与 SQLite 快照不一致")
+        _vault_verify_sqlite_bytes(decrypted)
+        os.replace(candidate, VAULT_DB_ENC)
+        installed = True
+        installed_ciphertext = VAULT_DB_ENC.read_bytes()
+        installed_plaintext = VAULT.decrypt(installed_ciphertext)
+        if installed_plaintext != plaintext:
+            raise vault_mod.VaultError("安装后的加密快照校验失败")
+        _vault_verify_sqlite_bytes(installed_plaintext)
+        return {
+            "file": VAULT_DB_ENC.name,
+            "size": len(plaintext),
+            "plaintext_sha256": _sha256_bytes(plaintext),
+            "ciphertext_size": len(installed_ciphertext),
+            "ciphertext_sha256": _sha256_bytes(installed_ciphertext),
+        }
+    except Exception:
+        if installed:
+            if previous is None:
+                VAULT_DB_ENC.unlink(missing_ok=True)
+            else:
+                VAULT._atomic_bytes(VAULT_DB_ENC, previous)
+        raise
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
+def _vault_encrypt_consistent_db() -> dict:
     """Encrypt a consistent SQLite backup rather than copying a live WAL database.
 
     Serialize with store transactions, then atomically replace the ciphertext.
@@ -657,47 +989,364 @@ def _vault_encrypt_consistent_db() -> None:
         temporary = Path(temporary_name)
         try:
             store.backup_database(temporary)
-            VAULT.encrypt_file(temporary, VAULT_DB_ENC)
-            if not _dek_selftest().get("ok"):
-                raise vault_mod.VaultError("加密快照完整性验证失败")
+            return _vault_install_encrypted_snapshot(temporary)
         finally:
-            temporary.unlink(missing_ok=True)
+            _vault_cleanup_owned_sqlite_candidate(temporary)
 
 
-def _vault_remove_plaintext() -> None:
-    """Remove plaintext only AFTER a durable and verified encrypted snapshot exists."""
-    for path in (
-        store.DB_FILE,
-        Path(str(store.DB_FILE) + ".plain-backup"),
-        Path(str(store.DB_FILE) + "-wal"),
-        Path(str(store.DB_FILE) + "-shm"),
-        Path(str(store.DB_FILE) + "-journal"),
-    ):
+def _vault_encrypt_drained_db() -> dict:
+    """Stop new lifecycle connections before snapshotting the database for lock."""
+    if not store.DB_FILE.is_file() or not VAULT.is_unlocked():
+        raise vault_mod.VaultError("明文数据库不存在或加密库未解锁")
+    lifecycle = store._lifecycle()
+    with store._lock:
+        store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        fd, temporary_name = tempfile.mkstemp(prefix=".vault-lock-snapshot-",
+                                               suffix=".sqlite3", dir=store.DATA_DIR)
+        os.close(fd)
+        temporary = Path(temporary_name)
+        source = None
+        target = None
+        draining = False
+        try:
+            # Atomically close ordinary access and drain API/task-store reads.
+            # This avoids a new scheduler query slipping between an idle check
+            # and the lock snapshot, which previously made lock retries race.
+            lifecycle.begin_drain(timeout=5.0)
+            draining = True
+            source = lifecycle.connect_for_drain(owner="vault:lock-snapshot")
+            if lifecycle.active_connection_count != 1:
+                raise vault_mod.VaultError(
+                    f"锁定期间仍有 {lifecycle.active_connection_count - 1} 个数据库连接")
+            target = sqlite3.connect(temporary)
+            source.backup(target)
+            target.close()
+            target = None
+            source.close()
+            source = None
+            if lifecycle.active_connection_count:
+                raise vault_mod.VaultError("数据库连接尚未全部释放，拒绝删除明文库")
+            return _vault_install_encrypted_snapshot(temporary)
+        except Exception:
+            if target is not None:
+                target.close()
+            if source is not None:
+                source.close()
+            if draining and store.DB_FILE.is_file():
+                lifecycle.set_state(store.DatabaseState.READY)
+            raise
+        finally:
+            _vault_cleanup_owned_sqlite_candidate(temporary)
+
+
+def _vault_managed_plaintext_sources() -> list[Path]:
+    """Enumerate profile and migration-era plaintext files that lock must seal."""
+    data_dir = store.DATA_DIR
+    legacy_dir = store.LEGACY_DATA_DIR
+    excluded = {VAULT_DB_ENC.resolve(strict=False)}
+    paths: set[Path] = set()
+
+    # The live DB is represented by the consistent encrypted snapshot. Its WAL
+    # sidecars, if any, are separately encrypted because they may contain pages.
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(store.DB_FILE) + suffix)
+        if sidecar.exists():
+            if sidecar.is_symlink():
+                raise vault_mod.VaultError(f"SQLite sidecar 是符号链接：{sidecar}")
+            paths.add(sidecar)
+    plain_backup = Path(str(store.DB_FILE) + ".plain-backup")
+    if plain_backup.exists():
+        if plain_backup.is_symlink():
+            raise vault_mod.VaultError("plain-backup 是符号链接，拒绝锁库")
+        paths.add(plain_backup)
+
+    def add_tree(root: Path) -> None:
+        if not root.exists():
+            return
+        if root.is_symlink() or not root.is_dir():
+            raise vault_mod.VaultError(f"数据源目录不是普通目录：{root}")
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise vault_mod.VaultError(f"检测到符号链接数据源，拒绝锁库：{path}")
+            if path.is_file():
+                if path.is_symlink():
+                    raise vault_mod.VaultError(f"检测到符号链接数据源，拒绝锁库：{path}")
+                paths.add(path)
+
+    # Legacy project-local DB/JSON may survive an upgrade and can be silently
+    # re-imported by older builds, so seal every regular file in that data folder.
+    add_tree(legacy_dir)
+
+    if data_dir.exists():
+        if data_dir.is_symlink() or not data_dir.is_dir():
+            raise vault_mod.VaultError("SQLite 数据目录不是普通目录")
+        for path in data_dir.iterdir():
+            if path == VAULT_DB_ENC or path.resolve(strict=False) in excluded:
+                continue
+            if path.name == "vault-archives":
+                continue
+            # The database manifest is lifecycle metadata (schema/file/updated
+            # time), not a database backup. It stays available to the lifecycle
+            # gate while the DEK is locked and is rewritten on each safe install.
+            if path.name == "database-manifest.json":
+                continue
+            # This file is the stable OS-lock rendezvous point; sealing or
+            # restoring it would split cooperating processes across lock inodes.
+            if path.name == ".bfo-profile.lock":
+                continue
+            if path.name == "backups":
+                if path.is_symlink() or not path.is_dir():
+                    raise vault_mod.VaultError("受管备份目录无效，拒绝锁库")
+                for backup in path.iterdir():
+                    if backup.is_symlink():
+                        raise vault_mod.VaultError("备份目录含符号链接，拒绝锁库")
+                    if backup.is_dir() and not backup.name.startswith(("bili-data-", "pre-sqlite-")):
+                        raise vault_mod.VaultError(f"未知备份目录，拒绝锁库：{backup.name}")
+                    if backup.is_dir():
+                        add_tree(backup)
+                    elif backup.is_file():
+                        paths.add(backup)
+                continue
+            if path.is_symlink():
+                raise vault_mod.VaultError(f"数据目录含符号链接，拒绝锁库：{path.name}")
+            if path.is_file() and path != store.DB_FILE:
+                paths.add(path)
+            elif path.is_dir():
+                raise vault_mod.VaultError(f"数据目录含未识别子目录，拒绝锁库：{path.name}")
+
+    paths.discard(store.DB_FILE)
+    # These files are kernel-lock rendezvous points, not business data. Windows
+    # byte-range locks reject reads through a second handle; replacing/removing
+    # a lock file would also split ownership across different file identities.
+    runtime_locks = {
+        (root / name).resolve(strict=False)
+        for root in (data_dir, legacy_dir)
+        for name in (".bfo-profile.lock", ".scheduler-owner.lock")
+    }
+    runtime_locks.add((USER_DATA_DIR / ".bfo-server-instance.lock").resolve(strict=False))
+    return sorted((path for path in paths
+                   if path.exists() and path.resolve(strict=False) not in runtime_locks),
+                  key=lambda item: str(item).casefold())
+
+
+def _vault_archive_sources(existing_entries: list[dict], sources: list[Path]) -> list[dict]:
+    archive_dir, _ = _vault_manifest_paths()
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    entries_by_key = {(item.get("source"), item.get("plaintext_sha256")): dict(item)
+                      for item in existing_entries}
+    for source in sources:
+        source = Path(source)
+        raw = source.read_bytes()
+        plaintext_hash = _sha256_bytes(raw)
+        source_id = str(source.resolve(strict=False))
+        key = (source_id, plaintext_hash)
+        if key in entries_by_key:
+            continue
+        archive_name = "archive-" + _sha256_bytes(
+            (source_id + "\0" + plaintext_hash).encode("utf-8")) + ".enc"
+        archive_path = archive_dir / archive_name
+        if archive_path.exists():
+            # An unreferenced archive is ambiguous. Never adopt or overwrite it.
+            raise vault_mod.VaultError(f"存在未列入清单的加密归档：{archive_name}")
+        VAULT._atomic_bytes(archive_path, VAULT.encrypt(raw))
+        encrypted = archive_path.read_bytes()
+        if VAULT.decrypt(encrypted) != raw:
+            raise vault_mod.VaultError(f"归档回读验证失败：{source.name}")
+        entries_by_key[key] = {
+            "source": source_id,
+            "archive": archive_name,
+            "size": len(raw),
+            "plaintext_sha256": plaintext_hash,
+            "ciphertext_sha256": _sha256_bytes(encrypted),
+        }
+    return sorted(entries_by_key.values(), key=lambda item: item["archive"])
+
+
+def _vault_remove_plaintext(sources: list[Path], expected_hashes: dict[str, str]) -> None:
+    """Remove only the exact files committed to the verified encrypted manifest."""
+    paths = list(sources) + [store.DB_FILE]
+    for path in paths:
+        path = Path(path)
+        if not path.exists():
+            continue
+        identity = str(path.resolve(strict=False))
+        raw_hash = _sha256_bytes(path.read_bytes())
+        if expected_hashes.get(identity) != raw_hash:
+            raise vault_mod.VaultError(f"锁库期间数据源发生变化，保留明文并拒绝成功：{path}")
         for attempt in range(10):
             try:
-                path.unlink(missing_ok=True)
+                path.unlink()
                 break
             except PermissionError:
-                # Windows holds SQLite handles until they are finalized; do not
-                # lie about a successful lock if the file remains open.
                 if attempt == 9:
                     raise
                 gc.collect()
                 time.sleep(0.10)
 
+    # No known SQLite sidecars or interrupted candidate may survive a successful lock.
+    sidecars = [Path(str(store.DB_FILE) + suffix) for suffix in ("-wal", "-shm", "-journal")]
+    residue = [path for path in sidecars if path.exists()]
+    residue.extend(_vault_residue_paths())
+    if residue:
+        raise vault_mod.VaultError("锁定后仍有明文临时文件或 SQLite sidecar，拒绝报告成功")
+
 
 def _vault_save_db_encrypted() -> None:
-    """Make a verified encrypted snapshot before locking; do not leave a plain DB."""
+    """Seal all managed plaintext sources before locking the DEK."""
+    lifecycle = store._lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        _vault_save_db_encrypted_under_maintenance(lifecycle)
+
+
+def _vault_save_db_encrypted_under_maintenance(lifecycle) -> None:
     with store._lock:
-        _vault_encrypt_consistent_db()
-        _vault_remove_plaintext()
+        _vault_assert_no_residue()
+        previous_manifest = _vault_read_lock_manifest(required=False)
+        old_entries = (previous_manifest or {}).get("entries", [])
+        active_snapshot = _vault_encrypt_drained_db()
+        if lifecycle.active_connection_count:
+            lifecycle.set_state(store.DatabaseState.READY)
+            raise vault_mod.VaultError(
+                f"仍有 {lifecycle.active_connection_count} 个数据库连接，拒绝删除明文库")
+        try:
+            sources = _vault_managed_plaintext_sources()
+            active_raw = VAULT.decrypt(VAULT_DB_ENC.read_bytes())
+            if _vault_digest_database_file(store.DB_FILE) != _vault_digest_database_bytes(active_raw):
+                raise vault_mod.VaultError("活动库在锁定快照后发生变化，保留来源并拒绝锁库")
+            # Read-only SQLite access can materialize active-database WAL/SHM
+            # sidecars. Re-enumerate after the comparison so those plaintext
+            # bytes are included in the encrypted inventory before deletion.
+            sources = _vault_managed_plaintext_sources()
+            source_hashes = {str(path.resolve(strict=False)): _sha256_bytes(path.read_bytes())
+                             for path in sources}
+            source_hashes[str(store.DB_FILE.resolve(strict=False))] = _sha256_bytes(store.DB_FILE.read_bytes())
+            entries = _vault_archive_sources(old_entries, sources)
+            manifest = {
+                "format_version": VAULT_LOCK_MANIFEST_VERSION,
+                "state": "locked",
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "active_snapshot": active_snapshot,
+                "entries": entries,
+            }
+            _vault_write_lock_manifest(manifest)
+            _vault_mark_manifest_installed()
+            _vault_remove_plaintext(sources, source_hashes)
+        except Exception:
+            if store.DB_FILE.is_file():
+                lifecycle.set_state(store.DatabaseState.READY)
+            else:
+                lifecycle.set_state(store.DatabaseState.LOCKED)
+                VAULT.lock()
+            raise
+        lifecycle.set_state(store.DatabaseState.LOCKED)
+
+
+def _resume_vault_paused_tasks(scheduler: TaskScheduler | None = None) -> list[TaskRecord]:
+    """Resume only same-process runners parked by a successful/failed lock attempt."""
+    if store.database_state() != store.DatabaseState.READY.value:
+        return []
+    scheduler = scheduler or _TASK_SCHEDULER
+    if scheduler is None:
+        try:
+            # An encrypted profile cannot recover scheduler rows at process
+            # startup. The first successful unlock is the point where the DB
+            # is ready and stale process-owned rows can be reconciled.
+            scheduler = _ensure_task_scheduler()
+        except Exception:
+            log.exception("数据库已就绪，但无法启动任务调度器以恢复任务状态")
+            return []
+    scheduler.reopen_admission()
+    resumed = []
+    for record in scheduler.list_tasks():
+        if (record.task_id not in _LEGACY_TASKS or
+                record.status not in {TaskStatus.PAUSED, TaskStatus.INTERRUPTED} or
+                record.pause_reason != PauseReason.VAULT_LOCK or
+                record.resume_intent != ResumeIntent.AFTER_VAULT_UNLOCK or
+                record.resume_policy != ResumePolicy.AUTO_SAFE or
+                record.reconciliation_required):
+            continue
+        try:
+            resumed.append(scheduler.resume_task(record.task_id))
+        except Exception as exc:
+            log.warning("无法自动恢复保险库暂停任务 %s：%s", record.task_id, exc)
+    return resumed
+
+
+def _resume_after_failed_vault_barrier(scheduler: TaskScheduler | None) -> None:
+    """Resume a failed barrier's tasks once, after they release their resources."""
+    global _VAULT_RECOVERY_THREAD
+    if scheduler is None:
+        return
+    with _VAULT_RECOVERY_THREAD_LOCK:
+        if _VAULT_RECOVERY_THREAD is not None and _VAULT_RECOVERY_THREAD.is_alive():
+            return
+
+        def recover():
+            global _VAULT_RECOVERY_THREAD
+            try:
+                idle = scheduler.wait_for_idle(timeout=120)
+                if not idle:
+                    log.error("锁定失败后的任务在 120 秒内仍未空闲；跳过后台自动恢复")
+                    return
+                # Every vault route and this recovery action share the same
+                # lock. A delayed recovery from an older failed attempt cannot
+                # reopen scheduler admission during a newer lock barrier.
+                with _VAULT_LIFECYCLE_LOCK:
+                    if (VAULT_LOCK_PHASE.get("phase") == "failed" and
+                            store.database_state() == store.DatabaseState.READY.value):
+                        _resume_vault_paused_tasks(scheduler)
+            finally:
+                with _VAULT_RECOVERY_THREAD_LOCK:
+                    if _VAULT_RECOVERY_THREAD is threading.current_thread():
+                        _VAULT_RECOVERY_THREAD = None
+
+        _VAULT_RECOVERY_THREAD = threading.Thread(
+            target=recover, name="vault-pause-recovery", daemon=True)
+        _VAULT_RECOVERY_THREAD.start()
+
+
+def _vault_pause_tasks_for_lock(timeout: float = 30.0) -> TaskScheduler:
+    """Close task admission and wait until every worker releases DB resources."""
+    if store.database_state() != store.DatabaseState.READY.value:
+        raise vault_mod.VaultError(
+            f"数据库状态为 {store.database_state()}，无法执行锁定")
+    scheduler = _ensure_task_scheduler()
+    scheduler.close_admission()
+    scheduler.request_pause_all(
+        reason=PauseReason.VAULT_LOCK,
+        resume_intent=ResumeIntent.AFTER_VAULT_UNLOCK,
+    )
+    if not scheduler.wait_for_idle(timeout):
+        raise TimeoutError("后台任务尚未到达安全暂停点，请稍后重试锁定")
+    active = store.database_connections()
+    if active:
+        owners = ", ".join(str(item.get("owner", "unknown")) for item in active[:5])
+        raise vault_mod.VaultError(
+            f"仍有 {len(active)} 个数据库连接未释放：{owners}")
+    return scheduler
 
 
 def _vault_migrate_plain_db_if_needed() -> str | None:
     """Convert a legacy plaintext database to a verified encrypted snapshot."""
+    lifecycle = store._lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        return _vault_migrate_plain_db_under_maintenance()
+
+
+def _vault_migrate_plain_db_under_maintenance() -> str | None:
     src = store.DB_FILE
     enc = VAULT_DB_ENC
     if not src.is_file() or not VAULT.is_unlocked():
+        return None
+    # Once a profile has committed to manifest v1, a missing snapshot is an
+    # integrity/recovery condition. Never recreate it from a possibly stale
+    # plaintext copy and thereby bypass the committed encrypted inventory.
+    if _vault_manifest_is_required() and not enc.is_file():
+        return None
+    _, manifest_path = _vault_manifest_paths()
+    if _vault_manifest_is_required() or manifest_path.exists():
+        # A committed manifest makes the encrypted snapshot authoritative. Do not
+        # replace a missing/corrupt snapshot from a stale plaintext remnant.
         return None
     # A valid encrypted copy takes precedence. A leftover interrupted or corrupt
     # encrypted file may be replaced only when the original plaintext still exists.
@@ -723,31 +1372,160 @@ def _vault_migrate_plain_db_if_needed() -> str | None:
         return None
 
 
+def _vault_sqlite_logical_digest(connection: sqlite3.Connection) -> str:
+    tables = [str(row[0]) for row in connection.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name")]
+    logical = {}
+    for table in tables:
+        quoted = '"' + table.replace('"', '""') + '"'
+        rows = [tuple(row) for row in connection.execute(f"SELECT * FROM {quoted}")]
+        rows.sort(key=lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True,
+                                             separators=(",", ":"), default=str))
+        logical[table] = rows
+    raw = json.dumps(logical, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":"), default=str).encode("utf-8")
+    return _sha256_bytes(raw)
+
+
+def _vault_digest_database_file(path: Path) -> str:
+    uri = store.sqlite_uri(path, "ro")
+    connection = sqlite3.connect(uri, uri=True, timeout=30)
+    try:
+        return _vault_sqlite_logical_digest(connection)
+    finally:
+        connection.close()
+
+
+def _vault_digest_database_bytes(raw: bytes) -> str:
+    """Compute a logical digest from a private file-backed SQLite snapshot.
+
+    A deserialized DB image may carry ``journal_mode=WAL`` metadata. SQLite's
+    in-memory deserializer can then try to open a WAL sidecar while reading
+    schema/table pages, which fails with ``unable to open database file``.
+    Normalize a uniquely owned candidate to DELETE mode before querying it.
+    """
+    store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".vault-digest-", suffix=".sqlite3",
+                                dir=store.DATA_DIR)
+    candidate = Path(name)
+    connection = None
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        connection = sqlite3.connect(candidate, timeout=30)
+        connection.execute("PRAGMA journal_mode=DELETE").fetchone()
+        return _vault_sqlite_logical_digest(connection)
+    finally:
+        if connection is not None:
+            connection.close()
+        _vault_cleanup_owned_sqlite_candidate(candidate)
+
+
+def _vault_manifest_set_state(manifest: dict, state: str) -> dict:
+    updated = dict(manifest)
+    updated["state"] = state
+    updated["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    _vault_write_lock_manifest(updated)
+    _vault_mark_manifest_installed()
+    return updated
+
+
 def _vault_restore_db_if_needed() -> bool:
-    """Decrypt only authenticated ciphertext; never create a new empty database."""
+    """Authenticate manifest, decrypt to a candidate, validate, then atomically install."""
+    lifecycle = store._lifecycle()
+    with lifecycle.maintenance(timeout=30.0):
+        return _vault_restore_db_under_maintenance(lifecycle)
+
+
+def _vault_restore_db_under_maintenance(lifecycle) -> bool:
     if not VAULT_DB_ENC.is_file() or not VAULT.is_unlocked():
         return False
-    # A legacy beta might still have a live plaintext DB. Do not overwrite it:
-    # verify the ciphertext separately, preserving the original as recovery data.
-    if store.DB_FILE.is_file():
-        return False
-    if not _dek_selftest().get("ok"):
-        return False
+    candidate = store.DATA_DIR / f".vault-restore-{uuid.uuid4().hex}.sqlite3"
     try:
-        with store._lock:
-            VAULT.decrypt_file(VAULT_DB_ENC, store.DB_FILE)
-            import sqlite3
-            with sqlite3.connect(f"file:{store.DB_FILE.as_posix()}?mode=ro",
-                                 uri=True) as connection:
-                check = connection.execute("PRAGMA quick_check").fetchone()
-            if not check or check[0] != "ok":
-                raise vault_mod.VaultError("恢复的数据库完整性检查失败")
+        _vault_assert_no_residue()
+        if not _dek_selftest().get("ok"):
+            raise vault_mod.VaultError("加密数据库快照未通过完整性校验")
+        manifest = _vault_read_lock_manifest(required=_vault_manifest_is_required())
+        if manifest is None:
+            ciphertext = VAULT_DB_ENC.read_bytes()
+            plaintext = VAULT.decrypt(ciphertext)
+            _vault_verify_sqlite_bytes(plaintext)
+            manifest = {
+                "format_version": VAULT_LOCK_MANIFEST_VERSION,
+                "state": "unlocked",
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "active_snapshot": {
+                    "file": VAULT_DB_ENC.name,
+                    "size": len(plaintext),
+                    "plaintext_sha256": _sha256_bytes(plaintext),
+                    "ciphertext_size": len(ciphertext),
+                    "ciphertext_sha256": _sha256_bytes(ciphertext),
+                },
+                "entries": [],
+            }
+            _vault_write_lock_manifest(manifest)
+            _vault_mark_manifest_installed()
+
+        if manifest["state"] == "locked":
+            sidecars = [Path(str(path) + suffix) for path in
+                        (store.DB_FILE, store.LEGACY_DB_FILE)
+                        for suffix in ("-wal", "-shm", "-journal")]
+            residue = [path for path in sidecars if path.exists()]
+            if residue:
+                names = ", ".join(str(path) for path in residue)
+                raise vault_mod.VaultError(
+                    f"锁定态数据库旁仍有 SQLite sidecar，拒绝恢复：{names}")
+
+        encrypted_plaintext = VAULT.decrypt(VAULT_DB_ENC.read_bytes())
+        _vault_verify_sqlite_bytes(encrypted_plaintext)
+        if store.DB_FILE.is_file():
+            if manifest["state"] in {"locked", "unlocking"}:
+                active_digest = _vault_digest_database_file(store.DB_FILE)
+                snapshot_digest = _vault_digest_database_bytes(encrypted_plaintext)
+                if active_digest != snapshot_digest:
+                    raise vault_mod.VaultError(
+                        "锁定中断后活动库与已封存快照内容不同，保留两者并要求恢复核对")
             store._initialize()
+            _vault_manifest_set_state(manifest, "unlocked")
+            return False
+
+        store.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _vault_manifest_set_state(manifest, "unlocking")
+        with store._lock:
+            VAULT.decrypt_file(VAULT_DB_ENC, candidate)
+            store.validate_database_candidate(candidate)
+            candidate_raw = candidate.read_bytes()
+            _vault_verify_sqlite_bytes(candidate_raw)
+            if candidate_raw != encrypted_plaintext:
+                raise vault_mod.VaultError("解密候选与已验证密文快照不一致")
+            candidate_connection = sqlite3.connect(candidate, timeout=30)
+            try:
+                candidate_connection.row_factory = sqlite3.Row
+                candidate_connection.execute("PRAGMA foreign_keys=ON")
+                store._initialize_schema(candidate_connection)
+                candidate_connection.commit()
+            finally:
+                candidate_connection.close()
+            store.validate_database_candidate(candidate)
+            store.install_database_candidate(candidate)
+            store._initialize()
+        _vault_manifest_set_state(manifest, "unlocked")
         return True
-    except (OSError, ValueError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
-        log.warning("无法解密数据库：%s", exc)
-        _vault_remove_plaintext()
+    except (OSError, ValueError, RuntimeError, vault_mod.VaultError,
+            sqlite3.DatabaseError) as exc:
+        log.warning("无法解密或验证数据库：%s", exc)
+        try:
+            store._lifecycle().set_state(store.DatabaseState.RECOVERY_REQUIRED)
+        except Exception:
+            log.exception("无法将数据库状态切换为 RECOVERY_REQUIRED")
         return False
+    finally:
+        for path in (candidate, Path(str(candidate) + "-wal"),
+                     Path(str(candidate) + "-shm"), Path(str(candidate) + "-journal")):
+            path.unlink(missing_ok=True)
 
 
 class VaultInitIn(BaseModel):
@@ -768,6 +1546,7 @@ def vault_status():
 
 
 @app.post("/api/vault/onboarding")
+@_serialize_profile_vault_lifecycle
 def vault_onboarding(body: VaultInitIn):
     """新用户：绑定 mid + 设密码，返回一次性恢复码明文。"""
     password = body.password or ""
@@ -778,6 +1557,13 @@ def vault_onboarding(body: VaultInitIn):
     if VAULT_DB_ENC.exists():
         return JSONResponse({"ok": False, "error": "已有加密快照，禁止重新初始化保险库"},
                             status_code=409)
+    if not store.DB_FILE.is_file():
+        try:
+            store.initialize_new_database()
+        except (OSError, RuntimeError, sqlite3.DatabaseError) as exc:
+            return JSONResponse({"ok": False,
+                                 "error": f"数据库尚未就绪，不能初始化保险库：{exc}",
+                                 "database_state": store.database_state()}, status_code=409)
     try:
         code = VAULT.initialize(bound_mid=body.bound_mid, password=password)
     except vault_mod.VaultError as exc:
@@ -792,17 +1578,27 @@ def vault_onboarding(body: VaultInitIn):
 
 
 @app.post("/api/vault/unbind-device")
+@_serialize_profile_vault_lifecycle
 def vault_unbind_device():
+    old_meta = json.loads(json.dumps(VAULT._meta))
+    old_meta_bytes = _optional_file_bytes(VAULT.meta_path)
+    old_secret = _optional_file_bytes(DEVICE_SECRET_BLOB)
     try:
         VAULT._pop_wrap("device")
-        VAULT.save_meta()
-    except Exception:
-        pass
-    # 只清加密库自己的设备 secret；app_unlock.blob 是应用密码的材料，不要动
-    try:
         DEVICE_SECRET_BLOB.unlink(missing_ok=True)
-    except OSError:
-        pass
+        VAULT.save_meta()
+    except Exception as exc:
+        VAULT._meta = old_meta
+        try:
+            _restore_optional_file(VAULT.meta_path, old_meta_bytes)
+            _restore_optional_file(DEVICE_SECRET_BLOB, old_secret)
+        except OSError as rollback_exc:
+            log.exception("设备解绑失败且回滚未完成")
+            return JSONResponse(
+                {"ok": False, "error": f"设备解绑失败：{exc}；恢复旧状态也失败：{rollback_exc}"},
+                status_code=500)
+        return JSONResponse({"ok": False, "error": f"设备解绑失败，已恢复原状态：{exc}"},
+                            status_code=500)
     return {"ok": True, **_vault_status_payload()}
 
 
@@ -811,6 +1607,7 @@ class VaultUnlockDeviceIn(BaseModel):
 
 
 @app.post("/api/vault/unlock-device")
+@_serialize_vault_lifecycle
 def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
     """Hello 验证后解锁：无设备包装则现场绑定，再用设备材料解 DEK。"""
     skip_hello = bool(body and body.skip_hello)
@@ -819,94 +1616,156 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
         if not hello.get("ok"):
             return JSONResponse({"ok": False, "error": hello.get("message") or "验证失败"},
                                 status_code=403)
+    was_unlocked = VAULT.is_unlocked()
     try:
-        try:
-            secret = _read_device_secret()
-        except OSError:
-            secret = secrets.token_urlsafe(32)
-            _write_device_secret(secret)
-        if not VAULT.state.has_device_wrap:
-            # 新建包装要拿 DEK，而 DEK 此刻锁着 —— 拿不到就明确告诉用户该做什么
-            if not VAULT.is_unlocked():
-                return JSONResponse(
-                    {"ok": False,
-                     "error": "缺少 Hello 设备密钥：请先用应用密码解锁一次，"
-                              "再到「设置 → 安全」重新绑定 Windows Hello"},
-                    status_code=400)
-            VAULT.bind_device_blob(secret)
-        VAULT.unlock_with_secret("device", secret)
-    except (OSError, ValueError, vault_mod.VaultError) as exc:
-        return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"}, status_code=400)
-    # Verify the authenticated snapshot BEFORE recovering or migrating any data.
-    migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
-    test = _dek_selftest()
-    if not test.get("ok"):
-        VAULT.lock()
-        return JSONResponse({"ok": False,
-                             "error": f"解密自检未通过：{test.get('detail')}",
-                             "selftest": test}, status_code=403)
-    restored = _vault_restore_db_if_needed()
-    if not store.DB_FILE.is_file():
-        VAULT.lock()
-        return JSONResponse({"ok": False, "error": "加密数据库恢复失败"}, status_code=500)
+        # The vault JSON, device secret, encrypted snapshot and database must
+        # describe one serialized transition across every process using this
+        # profile. Release the barrier before resuming workers below: resumed
+        # tasks need ordinary shared database leases.
+        with store._lifecycle().maintenance(timeout=30.0):
+            try:
+                secret = _read_device_secret()
+            except OSError:
+                secret = secrets.token_urlsafe(32)
+                _write_device_secret(secret)
+            if not VAULT.state.has_device_wrap:
+                # 新建包装要拿 DEK，而 DEK 此刻锁着 —— 拿不到就明确告诉用户该做什么
+                if not VAULT.is_unlocked():
+                    return JSONResponse(
+                        {"ok": False,
+                         "error": "缺少 Hello 设备密钥：请先用应用密码解锁一次，"
+                                  "再到「设置 → 安全」重新绑定 Windows Hello"},
+                        status_code=400)
+                VAULT.bind_device_blob(secret)
+            VAULT.unlock_with_secret("device", secret)
+
+            # Verify the authenticated snapshot BEFORE recovering or migrating any data.
+            migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
+            test = _dek_selftest()
+            if not test.get("ok"):
+                VAULT.lock()
+                store._lifecycle().set_state(store.DatabaseState.RECOVERY_REQUIRED)
+                return JSONResponse({"ok": False,
+                                     "error": f"解密自检未通过：{test.get('detail')}",
+                                     "selftest": test}, status_code=403)
+            restored = _vault_restore_db_if_needed()
+            if (not store.DB_FILE.is_file() or
+                    store.database_state() != store.DatabaseState.READY.value):
+                VAULT.lock()
+                return JSONResponse({"ok": False, "error": "加密数据库恢复失败或校验未通过",
+                                     "database_state": store.database_state()}, status_code=500)
+    except (OSError, ValueError, RuntimeError, vault_mod.VaultError,
+            sqlite3.DatabaseError) as exc:
+        if not was_unlocked and VAULT.is_unlocked():
+            VAULT.lock()
+        status = 409 if isinstance(exc, TimeoutError) else 400
+        return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"},
+                            status_code=status)
+    _resume_vault_paused_tasks()
+    _set_vault_lock_phase("idle")
     _APP_LOCK.update(unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
 
 
 @app.post("/api/vault/unlock")
+@_serialize_vault_lifecycle
 def vault_unlock(body: VaultUnlockIn):
+    was_unlocked = VAULT.is_unlocked()
     try:
-        if body.recovery_code:
-            VAULT.unlock_with_recovery(body.recovery_code)
-            if body.password:
-                VAULT.set_password(body.password)
-        elif body.password:
-            VAULT.unlock_with_password(body.password)
-        else:
-            return JSONResponse({"ok": False, "error": "请输入应用密码或恢复码"}, status_code=400)
+        # Keep key rotation, authenticated snapshot checks and database restore
+        # inside one cross-process profile transition. Task resumption happens
+        # after releasing the barrier so its normal connections can proceed.
+        with store._lifecycle().maintenance(timeout=30.0):
+            if body.recovery_code:
+                VAULT.unlock_with_recovery(body.recovery_code)
+                if body.password:
+                    VAULT.set_password(body.password)
+            elif body.password:
+                VAULT.unlock_with_password(body.password)
+            else:
+                return JSONResponse({"ok": False, "error": "请输入应用密码或恢复码"}, status_code=400)
+            migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
+            test = _dek_selftest()
+            if not test.get("ok"):
+                VAULT.lock()
+                store._lifecycle().set_state(store.DatabaseState.RECOVERY_REQUIRED)
+                return JSONResponse({"ok": False,
+                                     "error": f"解密自检未通过：{test.get('detail')}",
+                                     "selftest": test}, status_code=403)
+            restored = _vault_restore_db_if_needed()
+            if (not store.DB_FILE.is_file() or
+                    store.database_state() != store.DatabaseState.READY.value):
+                VAULT.lock()
+                return JSONResponse({"ok": False, "error": "加密数据库恢复失败或校验未通过",
+                                     "database_state": store.database_state()}, status_code=500)
     except vault_mod.VaultError as exc:
+        if not was_unlocked and VAULT.is_unlocked():
+            VAULT.lock()
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=403)
-    migrated = _vault_migrate_plain_db_if_needed() if not VAULT_DB_ENC.exists() else None
-    test = _dek_selftest()
-    if not test.get("ok"):
-        VAULT.lock()
-        return JSONResponse({"ok": False,
-                             "error": f"解密自检未通过：{test.get('detail')}",
-                             "selftest": test}, status_code=403)
-    restored = _vault_restore_db_if_needed()
-    if not store.DB_FILE.is_file():
-        VAULT.lock()
-        return JSONResponse({"ok": False, "error": "加密数据库恢复失败"}, status_code=500)
+    except (OSError, ValueError, RuntimeError, sqlite3.DatabaseError) as exc:
+        if not was_unlocked and VAULT.is_unlocked():
+            VAULT.lock()
+        status = 409 if isinstance(exc, TimeoutError) else 500
+        return JSONResponse({"ok": False, "error": f"解锁未完成：{exc}"}, status_code=status)
+    _resume_vault_paused_tasks()
+    _set_vault_lock_phase("idle")
     _APP_LOCK.update(enabled=False, unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
             **_vault_status_payload()}
 
 
 @app.post("/api/vault/lock")
+@_serialize_vault_lifecycle
 def vault_lock():
+    scheduler = None
     try:
-        _vault_save_db_encrypted()
-    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
-        return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
-                            status_code=500)
-    VAULT.lock()
+        _set_vault_lock_phase("pausing_tasks")
+        scheduler = _vault_pause_tasks_for_lock()
+        with store._lifecycle().maintenance(timeout=30.0):
+            _set_vault_lock_phase("sealing")
+            _vault_save_db_encrypted()
+            VAULT.lock()
+            _set_vault_lock_phase("locked")
+    except (OSError, RuntimeError, vault_mod.VaultError,
+            sqlite3.DatabaseError) as exc:
+        log.exception("锁定加密数据库失败")
+        _set_vault_lock_phase("failed", str(exc))
+        _resume_vault_paused_tasks(scheduler)
+        _resume_after_failed_vault_barrier(scheduler or _TASK_SCHEDULER)
+        status = 409 if isinstance(exc, TimeoutError) else 500
+        return JSONResponse({"ok": False, "error": f"锁定未完成：{exc}",
+                             **_vault_status_payload()}, status_code=status)
     return {"ok": True, **_vault_status_payload()}
 
 
 @app.post("/api/vault/complete-onboarding")
+@_serialize_vault_lifecycle
 def vault_complete_onboarding():
     if not VAULT.is_unlocked():
         return JSONResponse({"ok": False, "error": "加密库未解锁"}, status_code=403)
     # Do not finalize onboarding or claim success unless a verified snapshot is saved.
+    scheduler = None
     try:
-        _vault_save_db_encrypted()
-        VAULT.complete_onboarding()
-    except (OSError, vault_mod.VaultError, sqlite3.DatabaseError) as exc:
-        log.error("初始化后加密数据库失败：%s", exc)
-        return JSONResponse({"ok": False, "error": f"保存加密库失败：{exc}"},
-                            status_code=500)
-    VAULT.lock()
+        _set_vault_lock_phase("pausing_tasks")
+        scheduler = _vault_pause_tasks_for_lock()
+        with store._lifecycle().maintenance(timeout=30.0):
+            _set_vault_lock_phase("sealing")
+            _vault_save_db_encrypted()
+            VAULT.complete_onboarding()
+            VAULT.lock()
+            _set_vault_lock_phase("locked")
+    except (OSError, RuntimeError, vault_mod.VaultError,
+            sqlite3.DatabaseError) as exc:
+        log.exception("初始化后加密数据库失败")
+        if not store.DB_FILE.is_file() and VAULT.is_unlocked():
+            _vault_restore_db_if_needed()
+        _set_vault_lock_phase("failed", str(exc))
+        _resume_vault_paused_tasks(scheduler)
+        _resume_after_failed_vault_barrier(scheduler or _TASK_SCHEDULER)
+        status = 409 if isinstance(exc, TimeoutError) else 500
+        return JSONResponse({"ok": False, "error": f"初始化加密数据库失败：{exc}",
+                             **_vault_status_payload()}, status_code=status)
     return {"ok": True, "locked": True, **_vault_status_payload()}
 
 
@@ -916,6 +1775,7 @@ class VaultSetPasswordIn(BaseModel):
 
 
 @app.post("/api/vault/set-password")
+@_serialize_profile_vault_lifecycle
 def vault_set_password(body: VaultSetPasswordIn):
     password = body.password or ""
     if len(password) < 6:
@@ -935,6 +1795,7 @@ class VaultBindDeviceIn(BaseModel):
 
 
 @app.post("/api/vault/bind-device")
+@_serialize_vault_lifecycle
 def vault_bind_device(body: VaultBindDeviceIn | None = None):
     """绑定 Windows/DPAPI 设备包装（须先有应用密码并解锁）。
 
@@ -952,10 +1813,37 @@ def vault_bind_device(body: VaultBindDeviceIn | None = None):
                                 status_code=403)
     secret = secrets.token_urlsafe(32)
     try:
-        VAULT.bind_device_blob(secret)
-        _write_device_secret(secret)
-    except (vault_mod.VaultError, OSError) as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        with store._lifecycle().maintenance(timeout=30.0):
+            # Recheck after Hello; another process may have locked or reconfigured
+            # this profile while the user was approving the system prompt.
+            if not VAULT.state.password_set:
+                return JSONResponse({"ok": False, "error": "请先设置应用密码"}, status_code=400)
+            if not VAULT.is_unlocked():
+                return JSONResponse({"ok": False, "error": "请先解锁加密库"}, status_code=403)
+            old_meta = json.loads(json.dumps(VAULT._meta))
+            old_meta_bytes = _optional_file_bytes(VAULT.meta_path)
+            old_secret = _optional_file_bytes(DEVICE_SECRET_BLOB)
+            try:
+                # Store the DPAPI material first; only publish a wrap after its
+                # matching local secret is durably installed.
+                _write_device_secret(secret)
+                VAULT.bind_device_blob(secret)
+            except Exception as exc:
+                VAULT._meta = old_meta
+                try:
+                    _restore_optional_file(VAULT.meta_path, old_meta_bytes)
+                    _restore_optional_file(DEVICE_SECRET_BLOB, old_secret)
+                except OSError as rollback_exc:
+                    log.exception("设备绑定失败且回滚未完成")
+                    return JSONResponse(
+                        {"ok": False,
+                         "error": f"设备绑定失败：{exc}；恢复旧状态也失败：{rollback_exc}"},
+                        status_code=500)
+                return JSONResponse({"ok": False, "error": f"设备绑定失败，已恢复原状态：{exc}"},
+                                    status_code=500)
+    except (vault_mod.VaultError, OSError, RuntimeError) as exc:
+        status = 409 if isinstance(exc, TimeoutError) else 500
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=status)
     return {"ok": True, **_vault_status_payload()}
 
 
@@ -1209,6 +2097,446 @@ bili_api.EVENT_HOOK = lambda level, text: emit(level, text)
 bili_api.WRITE_LOG_PATH = store.DATA_DIR / "write_operations.jsonl"
 
 
+def _logged_bili_session(raw_session, task_id: str, *, account_id: str | None = None,
+                        retry_operation_ids=None):
+    """Add a durable intent record around B站 writes; the caller closes the lease."""
+    resolved_account = str(account_id or "").strip()
+    if not resolved_account:
+        getter = getattr(raw_session, "get_mid", None)
+        if callable(getter):
+            resolved_account = str(getter() or "").strip()
+    if not resolved_account:
+        try:
+            cookie = get_session_cookie()
+            resolved_account = str(getattr(cookie, "dedeuserid", "") or
+                                   getattr(cookie, "userid", "") or "").strip()
+        except Exception:
+            resolved_account = ""
+    # The production BiliSession always resolves a numeric mid. Keep a stable
+    # sentinel for test doubles that do not implement get_mid().
+    resolved_account = resolved_account or "unknown-local-account"
+    connection = store._connect(owner=f"task:{task_id}:remote-operation-log")
+    try:
+        repository = SqliteRemoteOperationRepository(connection)
+        coordinator = RemoteOperationCoordinator(repository)
+        adapter = BiliOperationAdapter(raw_session, coordinator, task_id=str(task_id),
+                                       account_id=resolved_account)
+        for operation_id in retry_operation_ids or ():
+            adapter.authorize_retry(operation_id)
+        return adapter, connection
+    except Exception:
+        connection.close()
+        raise
+
+
+_APP_TASK_TYPES = (
+    "scan", "analyze", "folder_profile", "folder_merge_suggestions",
+    "apply", "folder_merge",
+)
+_TASK_SCHEDULER_LOCK = threading.RLock()
+_TASK_SCHEDULER: TaskScheduler | None = None
+_TASK_SCHEDULER_KEY: str | None = None
+_LEGACY_TASKS: dict[str, tuple[dict, object]] = {}
+_TASK_CONTEXTS: dict[str, TaskContext] = {}
+
+
+class _LegacyAppTaskWorker:
+    """Bridge an existing resumable business runner into the durable scheduler."""
+
+    def execute(self, context: TaskContext) -> None:
+        task_id = context.task.task_id
+        entry = _LEGACY_TASKS.get(task_id)
+        if entry is None:
+            raise RuntimeError("此任务的进程内工作器已丢失；请从业务页按持久化进度重新发起")
+        state, runner = entry
+        _TASK_CONTEXTS[task_id] = context
+        state["running"] = True
+        try:
+            runner()
+            if state.get("reconciliation_required"):
+                context.mark_reconciliation_required(
+                    str(state.get("reconciliation_reason") or
+                        "B 站写操作结果尚未核对；请先检查远端状态"))
+            error = state.get("error")
+            if error and not state.get("reconciliation_required"):
+                raise RuntimeError(str(error))
+        finally:
+            _TASK_CONTEXTS.pop(task_id, None)
+            try:
+                # A paused task keeps its runner so the same process can resume
+                # from business checkpoints. Uncertain writes also keep the
+                # runner until their remote intent is reconciled.
+                if (context.task.status != TaskStatus.PAUSING and
+                        not state.get("reconciliation_required")):
+                    _LEGACY_TASKS.pop(task_id, None)
+            except Exception:
+                _LEGACY_TASKS.pop(task_id, None)
+
+    def validate_checkpoint(self, context: TaskContext) -> CheckpointValidation:
+        if context.task.task_id not in _LEGACY_TASKS:
+            return CheckpointValidation.reject(
+                "重启后进程内工作器不可恢复；请从业务页重新发起持久化任务")
+        checkpoint = context.task.checkpoint
+        if checkpoint is None and context.task.attempt == 0:
+            return CheckpointValidation.accept()
+        if not isinstance(checkpoint, dict) or checkpoint.get("version") != 1:
+            return CheckpointValidation.reject("任务检查点版本无效")
+        return CheckpointValidation.accept()
+
+    def reconcile(self, context: TaskContext) -> ReconciliationResult:
+        connection = store._connect(owner=f"task:{context.task.task_id}:reconcile")
+        try:
+            repository = SqliteRemoteOperationRepository(connection)
+            operations = repository.list_operations(task_id=context.task.task_id)
+            blocking = [row for row in operations if row.status in {
+                OperationStatus.DISPATCHING,
+                OperationStatus.NEEDS_RECONCILIATION,
+                OperationStatus.MANUAL_REVIEW,
+            }]
+            if blocking:
+                return ReconciliationResult(
+                    False, False,
+                    f"仍有 {len(blocking)} 项远端操作未解决")
+            if not operations:
+                return ReconciliationResult(False, False, "任务没有可核对的远端操作记录")
+            not_applied = [row.operation_id for row in operations
+                           if row.status is OperationStatus.NOT_APPLIED]
+            state, _runner = _LEGACY_TASKS.get(context.task.task_id, ({}, None))
+            authorized = set(state.get("retry_operation_ids", set()))
+            if not_applied and not set(not_applied).issubset(authorized):
+                return ReconciliationResult(
+                    False, False, "未应用操作尚未获得安全重试授权")
+            state["reconciliation_required"] = False
+            state.pop("reconciliation_reason", None)
+            state.pop("error", None)
+            state["stop"] = False
+            if "status" in state:
+                state["status"] = "running"
+            retry_count = len(state.get("unknown_bvids", []))
+            if retry_count:
+                state["done"] = max(0, int(state.get("done", 0)) - retry_count)
+                state["unknown"] = max(0, int(state.get("unknown", 0)) - retry_count)
+                state["unknown_bvids"].clear()
+            return ReconciliationResult(True, True)
+        finally:
+            connection.close()
+
+
+def _ensure_task_scheduler() -> TaskScheduler:
+    """Start one durable scheduler bound to the current READY DB lifecycle."""
+    global _TASK_SCHEDULER, _TASK_SCHEDULER_KEY
+    if store.database_state() != store.DatabaseState.READY.value:
+        raise RuntimeError(f"数据库状态为 {store.database_state()}，不能启动任务调度器")
+    key = str(store.DB_FILE.resolve())
+    with _TASK_SCHEDULER_LOCK:
+        if _TASK_SCHEDULER is not None and _TASK_SCHEDULER_KEY != key:
+            _TASK_SCHEDULER.shutdown(wait=True, timeout=10, pause_running=False)
+            _TASK_SCHEDULER = None
+            _TASK_SCHEDULER_KEY = None
+        if _TASK_SCHEDULER is None:
+            lifecycle = store._lifecycle()
+            task_store = SQLiteTaskStore.from_lifecycle(
+                lifecycle,
+                owner="task-scheduler",
+                owner_lock_path=store.DATA_DIR / ".scheduler-owner.lock",
+            )
+            _TASK_SCHEDULER = TaskScheduler(
+                task_store,
+                workers={task_type: _LegacyAppTaskWorker for task_type in _APP_TASK_TYPES},
+                max_workers=1,
+                owner_id=f"bfo:{uuid.uuid4().hex}",
+            )
+            _TASK_SCHEDULER.start()
+            _TASK_SCHEDULER_KEY = key
+            connection = store._connect(owner="startup:remote-operation-recovery")
+            try:
+                SqliteRemoteOperationRepository(connection).recover_stranded_dispatches()
+            finally:
+                connection.close()
+        return _TASK_SCHEDULER
+
+
+def _submit_app_task(task_type: str, state: dict, runner, *, parameters: dict | None = None):
+    """Persist a task row before allowing its legacy business runner to execute."""
+    task_id = str(state.get("id") or uuid.uuid4().hex)
+    state["id"] = task_id
+    try:
+        scheduler = _ensure_task_scheduler()
+        _LEGACY_TASKS[task_id] = (state, runner)
+        record = scheduler.submit(
+            task_type,
+            parameters=parameters or {},
+            task_schema_version=1,
+            checkpoint_schema_version=1,
+            resume_policy=ResumePolicy.AUTO_SAFE,
+            resource_keys=("local-library",),
+            idempotency_key=f"legacy:{task_type}:{task_id}",
+            task_id=task_id,
+        )
+        return record, scheduler
+    except Exception as exc:
+        _LEGACY_TASKS.pop(task_id, None)
+        state["running"] = False
+        return JSONResponse({"ok": False, "error": f"任务无法排队：{exc}"}, status_code=503)
+
+
+def _task_safe_point(state: dict, checkpoint: dict, progress: dict | None = None) -> None:
+    context = _TASK_CONTEXTS.get(str(state.get("id") or ""))
+    if context is None:
+        return
+    context.safe_point({"version": 1, **checkpoint}, progress=progress or {})
+
+
+# 任务进度里每个计数器都必须带上自己的单位名，界面上同一行才不会时而表示
+# 收藏夹数、时而表示条目数。扫描同时维护「收藏夹」和「条目」两个计数器。
+_TASK_PROGRESS_UNITS = ("folders", "items", "groups", "batches", "steps")
+
+
+def _progress_counters(**units: tuple[int, int]) -> dict:
+    """Build unit-named progress counters, e.g. ``folders=(3, 10)``."""
+    unknown = sorted(set(units) - set(_TASK_PROGRESS_UNITS))
+    if unknown:
+        # 界面只认这些单位名；写错单位会静默渲染不出来，所以这里直接拒绝。
+        raise ValueError(f"未知的任务进度单位：{unknown}")
+    return {
+        name: {"done": max(0, int(pair[0] or 0)), "total": max(0, int(pair[1] or 0))}
+        for name, pair in units.items()
+    }
+
+
+def _sync_cancelled_state(state: dict | None, record) -> None:
+    """把调度器的取消结果同步回业务状态。
+
+    暂停中的扫描工作器早已退出，不会再有人替它收尾；如果不在这里落到实处，
+    任务中心显示「已取消」而 /api/scan/status 仍停在「已暂停」，两处状态就会打架。
+    仍在运行的工作器自己负责终态写入，因此这里只镜像终态记录。
+    """
+    if state is None:
+        return
+    if record is not None and record.status is TaskStatus.NEEDS_RECONCILIATION:
+        reason = str(record.reconciliation_reason or state.get("reconciliation_reason") or "")
+        state["reconciliation_required"] = True
+        if reason:
+            state["reconciliation_reason"] = reason
+        state["status"] = "needs_reconciliation"
+        return
+    if record is not None and record.status is not TaskStatus.CANCELLED:
+        return
+    state["status"] = "cancelled"
+    state["error"] = None
+    if record is not None:
+        # 工作器不可能再被恢复，留着只会让 /api/tasks/{id}/resume 误报可恢复。
+        _LEGACY_TASKS.pop(record.task_id, None)
+
+
+def _cancel_legacy_state(state: dict | None) -> bool:
+    if not state:
+        return False
+    state["stop"] = True
+    if "continuous" in state:
+        state["continuous"] = False
+    ANALYZE_WAKE.set()
+    task_id = str(state.get("id") or "")
+    scheduler = _TASK_SCHEDULER
+    record = None
+    if task_id and scheduler is not None:
+        try:
+            record = scheduler.cancel_task(task_id)
+        except Exception as exc:
+            log.warning("无法取消任务 %s：%s", task_id, exc)
+    _sync_cancelled_state(state, record)
+    return True
+
+
+class RemoteOperationReconcileIn(BaseModel):
+    decision: str
+    preconditions_valid: bool | None = None
+    evidence: str = ""
+
+
+def _task_error_response(exc: Exception) -> JSONResponse:
+    return JSONResponse({"ok": False, "error": str(exc)}, status_code=409)
+
+
+@app.get("/api/tasks")
+def tasks_list():
+    try:
+        scheduler = _ensure_task_scheduler()
+        return {"tasks": [record.to_public_dict() for record in scheduler.list_tasks()]}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"无法读取任务：{exc}"}, status_code=503)
+
+
+@app.get("/api/tasks/{task_id}")
+def task_get(task_id: str):
+    try:
+        return _ensure_task_scheduler().get_task(task_id).to_public_dict()
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": f"任务不可用：{exc}"}, status_code=404)
+
+
+@app.post("/api/tasks/{task_id}/pause")
+def task_pause(task_id: str):
+    try:
+        record = _ensure_task_scheduler().pause_task(
+            task_id, reason=PauseReason.USER, resume_intent=ResumeIntent.MANUAL)
+        return {"ok": True, "task": record.to_public_dict()}
+    except Exception as exc:
+        return _task_error_response(exc)
+
+
+@app.post("/api/tasks/{task_id}/cancel")
+def task_cancel(task_id: str):
+    try:
+        entry = _LEGACY_TASKS.get(task_id)
+        state = entry[0] if entry else None
+        if state is not None:
+            state["stop"] = True
+            if state.get("continuous") is not None:
+                state["continuous"] = False
+            ANALYZE_WAKE.set()
+        record = _ensure_task_scheduler().cancel_task(task_id)
+        _sync_cancelled_state(state, record)
+        return {"ok": True, "task": record.to_public_dict()}
+    except Exception as exc:
+        return _task_error_response(exc)
+
+
+@app.post("/api/tasks/{task_id}/resume")
+def task_resume(task_id: str):
+    try:
+        if task_id not in _LEGACY_TASKS:
+            return JSONResponse({"ok": False,
+                                 "error": "此任务的进程内工作器已丢失；请从业务页按持久化进度重新发起"},
+                                status_code=409)
+        record = _ensure_task_scheduler().resume_task(task_id)
+        return {"ok": True, "task": record.to_public_dict()}
+    except Exception as exc:
+        return _task_error_response(exc)
+
+
+@app.post("/api/tasks/{task_id}/reconcile")
+def task_reconcile(task_id: str):
+    try:
+        result = _ensure_task_scheduler().reconcile_task(task_id)
+        record = _ensure_task_scheduler().get_task(task_id)
+        return {"ok": result.resolved, "safe_to_resume": result.safe_to_resume,
+                "reason": result.reason, "task": record.to_public_dict()}
+    except Exception as exc:
+        return _task_error_response(exc)
+
+
+def _public_remote_operation(operation) -> dict:
+    return {
+        "operation_id": operation.operation_id,
+        "task_id": operation.task_id,
+        "operation_type": operation.operation_type,
+        "status": operation.status.value,
+        "target": dict(operation.target),
+        "entity_ids": list(operation.entity_ids),
+        "preconditions": dict(operation.preconditions),
+        "postconditions": dict(operation.postconditions),
+        "request_summary": dict(operation.request_summary),
+        "attempt": operation.attempt,
+        "error_code": operation.error_code,
+        "reconciliation": redact_sensitive(dict(operation.reconciliation or {})),
+        "created_at": operation.created_at,
+        "updated_at": operation.updated_at,
+    }
+
+
+@app.get("/api/remote-operations/unresolved")
+def remote_operations_unresolved():
+    connection = None
+    try:
+        _ensure_task_scheduler()
+        connection = store._connect(owner="api:remote-operation-review")
+        repository = SqliteRemoteOperationRepository(connection)
+        operations = repository.list_operations(statuses=[
+            OperationStatus.DISPATCHING,
+            OperationStatus.NEEDS_RECONCILIATION,
+            OperationStatus.NOT_APPLIED,
+            OperationStatus.MANUAL_REVIEW,
+        ])
+        return {"operations": [_public_remote_operation(item) for item in operations]}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=503)
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def _sanitize_review_evidence(value: str) -> str:
+    text = str(value or "").strip()[:1000]
+    return re.sub(
+        r"(?i)\b(sessdata|bili_jct|dedeuserid|csrf|token|cookie|authorization)\b\s*[:=]\s*\S+",
+        r"\1=[REDACTED]", text)
+
+
+@app.post("/api/remote-operations/{operation_id}/reconcile")
+def remote_operation_reconcile(operation_id: str, body: RemoteOperationReconcileIn):
+    connection = None
+    try:
+        if body.decision not in ("confirmed", "not_applied", "manual_review"):
+            return JSONResponse({"ok": False, "error": "不支持的核对结论"}, status_code=400)
+        _ensure_task_scheduler()
+        connection = store._connect(owner="api:remote-operation-reconcile")
+        repository = SqliteRemoteOperationRepository(connection)
+        current = repository.get(operation_id)
+        allowed = {
+            OperationStatus.NEEDS_RECONCILIATION: {
+                "confirmed", "not_applied", "manual_review",
+            },
+            OperationStatus.NOT_APPLIED: {"manual_review"},
+            OperationStatus.MANUAL_REVIEW: {"confirmed", "not_applied"},
+        }
+        if body.decision not in allowed.get(current.status, set()):
+            return JSONResponse({"ok": False,
+                                 "error": f"当前状态为 {current.status.value}，不能执行 {body.decision} 核对"},
+                                status_code=409)
+        evidence = _sanitize_review_evidence(body.evidence)
+        if not evidence:
+            return JSONResponse({"ok": False, "error": "请填写本次人工核对的证据或说明"},
+                                status_code=400)
+        if body.decision == "not_applied" and body.preconditions_valid is not True:
+            return JSONResponse({"ok": False,
+                                 "error": "只有确认重试前置状态仍有效并提供证据后，才能标记为未生效"},
+                                status_code=400)
+        updated = repository.record_reconciliation(
+            operation_id,
+            decision=body.decision,
+            preconditions_valid=body.preconditions_valid,
+            evidence={"user_note": evidence} if evidence else None,
+        )
+        if body.decision == "not_applied":
+            entry = _LEGACY_TASKS.get(updated.task_id)
+            if entry:
+                retry_ids = entry[0].setdefault("retry_operation_ids", [])
+                if operation_id not in retry_ids:
+                    retry_ids.append(operation_id)
+        connection.close()
+        connection = None
+        task_result = None
+        scheduler = _TASK_SCHEDULER
+        if scheduler is not None:
+            try:
+                task = scheduler.get_task(updated.task_id)
+                if task.status is TaskStatus.NEEDS_RECONCILIATION:
+                    task_result = scheduler.reconcile_task(updated.task_id)
+            except Exception as exc:
+                task_result = ReconciliationResult(False, False, str(exc))
+        return {"ok": True, "operation": _public_remote_operation(updated),
+                "task_reconciliation": ({"resolved": task_result.resolved,
+                                         "safe_to_resume": task_result.safe_to_resume,
+                                         "reason": task_result.reason}
+                                        if task_result else None)}
+    except Exception as exc:
+        return _task_error_response(exc)
+    finally:
+        if connection is not None:
+            connection.close()
+
+
 DEFAULT_CONFIG = {
     "base_url": "https://api.deepseek.com/v1",
     "api_key": "",
@@ -1381,7 +2709,13 @@ def save_config(cur: dict):
     USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
     _atomic_write(CONFIG_FILE, pub)
     prev, _ = _read_json_file(SECRETS_FILE)
-    if store.list_providers():
+    try:
+        providers = store.list_providers()
+    except DatabaseNotInitializedError:
+        # QR login can finish before the user creates the first database.
+        # Keep any legacy key in secrets until the providers table is available.
+        providers = None
+    if providers:
         prev.pop("api_key", None)
     prev.update(sec)
     _atomic_write(SECRETS_FILE, prev)
@@ -2478,6 +3812,7 @@ def terminal_exec(body: TermExecIn):
 
 
 @app.get("/api/data/export-zip")
+@_serialize_profile_maintenance
 def data_export_zip():
     """导出整个数据目录为 zip（排除 runtime / backups / shell）。
 
@@ -2498,6 +3833,8 @@ def data_export_zip():
             base = HERE
         for p in base.rglob("*"):
             if not p.is_file():
+                continue
+            if p.name == ".bfo-profile.lock":
                 continue
             rel = p.relative_to(base)
             if any(part in ("runtime", "backups", "shell") for part in rel.parts):
@@ -2541,6 +3878,7 @@ class ZipImportIn(BaseModel):
 
 
 @app.post("/api/data/import-zip")
+@_serialize_profile_maintenance
 def data_import_zip(body: ZipImportIn):
     """导入完整数据目录 zip；明文旧库自动迁移加密。"""
     import base64
@@ -2567,6 +3905,9 @@ def data_import_zip(body: ZipImportIn):
             # shell/ 是 Electron 壳自己的 userData，别让旧包往里写
             if any(part in ("runtime", "shell") for part in rel.parts):
                 continue
+            # The profile lock file is a stable synchronization point, not user data.
+            if rel.name == ".bfo-profile.lock":
+                continue
             dest = USER_DATA_DIR / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(zf.read(name))
@@ -2592,6 +3933,7 @@ def data_export():
 
 
 @app.post("/api/data/import")
+@_serialize_profile_maintenance
 def data_import(body: DataIn):
     """导入项目数据（覆盖当前数据）。导入前自动备份当前数据。"""
     if not body.bundle:
@@ -2606,6 +3948,7 @@ def data_import(body: DataIn):
 
 
 @app.post("/api/data/clear")
+@_serialize_profile_maintenance
 def data_clear(body: DataIn):
     """清除指定范围的数据。scope: scan / analysis / plan / all。清除前**自动备份**。"""
     valid = {"scan", "analysis", "plan", "folder_merge", "folder_profile", "all"}
@@ -2669,6 +4012,21 @@ class ScanRecoveryIn(BaseModel):
     confirmed: bool = False
 
 
+def _folder_count(folder: dict) -> int:
+    """Read the directory count from current or pre-migration folder records."""
+    if not isinstance(folder, dict):
+        return 0
+    for key in ("count", "media_count"):
+        value = folder.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
 def _pending_scan_issues() -> list[dict]:
     """Include pre-upgrade inconsistent scans without treating a gap as invalid content."""
     saved = store.load_scan_issues()
@@ -2680,7 +4038,7 @@ def _pending_scan_issues() -> list[dict]:
     for mid in sorted(ids):
         state, folder = states.get(mid, {}), folders.get(mid, {})
         issue = {"media_id": mid, "title": folder.get("title", mid), "status": "pending",
-                 "expected_count": state.get("expected_count", folder.get("count", 0)),
+                 "expected_count": state.get("expected_count", _folder_count(folder)),
                  "fetched_count": state.get("fetched_count", 0),
                  "unique_count": state.get("fetched_count", 0), "history": [],
                  "last_error": state.get("last_error"), **saved.get(mid, {})}
@@ -2739,6 +4097,16 @@ async def local_api_guard(request, call_next):
         if not vst.unlocked:
             return JSONResponse({"ok": False, "code": "app_locked",
                                  "error": "加密库已锁定，请先解锁"}, status_code=403)
+    # A vault unlock alone is not enough: existing identity evidence with a
+    # missing/corrupt working database must stay in recovery and deny business IO.
+    if (path.startswith("/api/")
+            and not path.startswith(_APP_LOCK_OPEN_PATHS + ("/api/vault/",))):
+        db_state = store.database_state()
+        if db_state != store.DatabaseState.READY.value:
+            return JSONResponse({"ok": False, "code": "database_unavailable",
+                                 "database_state": db_state,
+                                 "error": "本地数据库尚未就绪，请完成初始化或恢复后重试"},
+                                status_code=503)
     need_token = (method not in ("GET", "HEAD", "OPTIONS") or
                   path in ("/api/data/export", "/api/cookie"))
     # 解锁引导路径：仍校验 Origin，但不强制页面 token（锁屏/Hello 在启动瞬间可能尚未同步）
@@ -2788,7 +4156,7 @@ def _folder_view(folders: list) -> dict:
     selected = set(store.load_scan_selection())
     rows = [{**f, "media_id": str(f["media_id"]),
              "done": (states.get(str(f["media_id"]), {}).get("status") == "complete" and
-                     states.get(str(f["media_id"]), {}).get("expected_count") == int(f.get("count", 0) or 0))
+                     states.get(str(f["media_id"]), {}).get("expected_count") == _folder_count(f))
                      or (str(f["media_id"]) in done and not states.get(str(f["media_id"]))),
              "scan_state": states.get(str(f["media_id"]), {}).get("status", "never"),
              "scan_strategy": states.get(str(f["media_id"]), {}).get("strategy"),
@@ -2853,7 +4221,8 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
     """按文件夹选择批量元数据或分页读取，校验后更新该夹快照。"""
     with _scan_start_lock:
         run_id = uuid.uuid4().hex
-        app_state = {"id": run_id, "running": True, "step": "init", "done": 0,
+        app_state = {"id": run_id, "running": True, "status": "running",
+                     "step": "init", "done": 0,
                      "total": 0, "error": None, "strategy": "", "stop": False,
                      "folder_done": 0, "folder_total": 0, "current": "",
                      "recovery_action": recovery}
@@ -2862,11 +4231,15 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
             return conflict
 
     def run():
+        operation_connection = None
         try:
             cfg = load_config()
-            session = bili_api.BiliSession(get_session_cookie())
-            session.read_interval = max(2, int(cfg.get("scan_interval", 2) or 2))
-            APP["session"] = session
+            raw_session = bili_api.BiliSession(get_session_cookie())
+            raw_session.read_interval = max(2, int(cfg.get("scan_interval", 2) or 2))
+            session, operation_connection = _logged_bili_session(
+                raw_session, run_id,
+                retry_operation_ids=app_state.get("retry_operation_ids", set()))
+            APP["session"] = raw_session
             emit("info", f"开始扫描（请求间隔 ≥{session.read_interval} 秒）", kind="scan_start")
 
             if recovery:
@@ -2880,9 +4253,15 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                     session.write_interval = max(2, float(cfg.get("write_interval", 2) or 2))
                     # Persist before sending: a crash/transport failure must never replay this write.
                     store.update_scan_issue(mid, cleanup_unknown=True, event="正在调用 B 站失效内容清理")
+                    _task_safe_point(app_state, {"phase": "before_cleanup", "folder_id": mid},
+                                     {"phase": "cleaning",
+                                      **_progress_counters(steps=(0, 1))})
                     try:
                         session.clean_invalid_folder(mid, should_stop=lambda: app_state["stop"])
                     except (bili_api.RateLimitedError, bili_api.BiliApiError) as exc:
+                        if isinstance(exc, bili_api.WriteUncertainError):
+                            app_state["reconciliation_required"] = True
+                            app_state["reconciliation_reason"] = str(exc)
                         if not isinstance(exc, bili_api.WriteUncertainError):
                             store.update_scan_issue(mid, cleanup_unknown=False)
                         raise
@@ -2902,13 +4281,13 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
             app_state["selected_ids"] = [str(f["media_id"]) for f in picked]
             app_state["mode"] = body.mode if body else "resume"
             app_state["step"] = "videos"
-            app_state["total"] = sum(int(f.get("count", 0) or 0) for f in picked)
+            app_state["total"] = sum(_folder_count(f) for f in picked)
             app_state["folder_total"] = len(picked)
             states = store.load_folder_scan_states()
             rebuild = bool(body and body.mode == "rebuild")
             eligible = [f for f in picked if rebuild or
                         states.get(str(f["media_id"]), {}).get("status") != "complete" or
-                        states.get(str(f["media_id"]), {}).get("expected_count") != int(f.get("count", 0) or 0)]
+                        states.get(str(f["media_id"]), {}).get("expected_count") != _folder_count(f)]
             app_state["folder_done"] = len(picked) - len(eligible)
             done = sum(int(states.get(str(f["media_id"]), {}).get("fetched_count", 0) or 0)
                        for f in picked if f not in eligible)
@@ -2916,12 +4295,11 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
             emit("info", f"扫描范围 {len(picked)} 个夹，{len(eligible)} 个需扫描，目录计数 {app_state['total']} 条")
             should_stop = lambda: bool(app_state.get("stop"))
 
-            for folder in sorted(eligible, key=lambda x: int(x.get("count", 0) or 0)):
+            for folder in sorted(eligible, key=_folder_count):
                 if should_stop():
-                    app_state["error"] = "已手动停止（进度已保存）"
-                    break
+                    raise CancelRequested("扫描已手动停止")
                 mid = str(folder["media_id"])
-                expected = int(folder.get("count", 0) or 0)
+                expected = _folder_count(folder)
                 strategy = ("indexed_ids" if 0 <= expected <= bili_api.FAV_BULK_CANDIDATE_LIMIT
                             else "paged")
                 app_state["current"] = folder["title"]
@@ -2956,7 +4334,7 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                         resource_ids = session.get_folder_resource_ids(mid, expected,
                                                                        should_stop=should_stop)
                         if should_stop():
-                            break
+                            raise CancelRequested("扫描已手动停止")
                         cached = store.load_video_index_for_resources(resource_ids)
                         missing_ids = [resource for resource in resource_ids
                                        if f"{resource['type']}:{resource['id']}" not in cached]
@@ -3006,6 +4384,16 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                              total=app_state["total"], fdone=app_state["folder_done"],
                              ftotal=app_state["folder_total"], current=folder["title"],
                              unique=len(staged), strategy=strategy)
+                        _task_safe_point(
+                            app_state,
+                            {"phase": "indexed_ids", "folder_id": mid,
+                             "folder_done": app_state["folder_done"], "done": done},
+                            {"phase": "indexed_ids", "current": folder["title"],
+                             "unique": len(staged),
+                             **_progress_counters(items=(done, app_state["total"]),
+                                                  folders=(app_state["folder_done"],
+                                                           app_state["folder_total"]))},
+                        )
 
                 if strategy.startswith("paged"):
                     batch = {}
@@ -3033,26 +4421,26 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                                  total=app_state["total"], fdone=app_state["folder_done"],
                                  ftotal=app_state["folder_total"], current=folder["title"],
                                  unique=len(staged), strategy=strategy)
+                            _task_safe_point(
+                                app_state,
+                                {"phase": "paged", "folder_id": mid,
+                                 "page": page_index, "done": done},
+                                {"phase": "paged", "page": page_index,
+                                 "current": folder["title"], "unique": len(staged),
+                                 **_progress_counters(items=(done, app_state["total"]),
+                                                      folders=(app_state["folder_done"],
+                                                               app_state["folder_total"]))},
+                            )
                     if batch:
                         store.save_scan_stage(run_id, mid, batch)
                     if should_stop():
-                        store.update_folder_scan_progress(mid, len(staged), page_index,
-                                                          "用户停止；该夹快照尚未完成")
-                        app_state["error"] = "已手动停止（进度已保存）"
-                        emit("warn", f"已停止；「{folder['title']}」暂存了 {len(staged)} 条，下次重扫该夹",
-                             kind="scan_end")
-                        break
+                        raise CancelRequested("扫描已手动停止")
                     remainder = fetched - max(0, page_index - 1) * bili_api.PAGE_SIZE
                     done += max(0, remainder)
                     app_state["done"] = done
 
                 if should_stop():
-                    store.update_folder_scan_progress(mid, len(staged), None,
-                                                      "用户停止；该夹快照尚未完成")
-                    app_state["error"] = "已手动停止（进度已保存）"
-                    emit("warn", f"已停止；「{folder['title']}」暂存了 {len(staged)} 条，下次重扫该夹",
-                         kind="scan_end")
-                    break
+                    raise CancelRequested("扫描已手动停止")
                 unique_count = len(staged)
                 if fetched != expected or unique_count != expected:
                     error = f"目录计数 {expected}，接口条数 {fetched}，唯一资源 {unique_count}；保留旧完整快照"
@@ -3084,38 +4472,87 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                      kind="scan_progress", done=done, total=app_state["total"],
                      fdone=app_state["folder_done"], ftotal=app_state["folder_total"],
                      current="", unique=unique_count, strategy=strategy)
+                _task_safe_point(
+                    app_state,
+                    {"folder_done": app_state["folder_done"],
+                     "last_completed_folder": mid, "done": done},
+                    {"phase": "folder_complete", "current": "",
+                     **_progress_counters(items=(done, app_state["total"]),
+                                          folders=(app_state["folder_done"],
+                                                   app_state["folder_total"]))},
+                )
 
             app_state["step"] = "done"
             app_state["done"] = done
             if not app_state.get("error"):
+                app_state["status"] = "completed"
                 picked_ids = {str(f["media_id"]) for f in picked}
                 scoped_unique = len([v for v in store.load_videos()
                                      if picked_ids.intersection(str(x) for x in v.get("folder_ids", []))])
                 emit("ok", f"扫描完成：当前范围共 {scoped_unique} 条去重内容（目录计数 {done} 条）",
-                     kind="scan_end", unique=scoped_unique, done=done)
+                     kind="scan_end", outcome="completed", run_id=run_id,
+                     unique=scoped_unique, done=done, total=app_state["total"])
             else:
-                emit("warn", f"扫描结束但有未完整收藏夹：{app_state['error']}", kind="scan_end")
+                app_state["status"] = "completed_with_issues"
+                emit("warn", f"扫描结束但有未完整收藏夹：{app_state['error']}",
+                     kind="scan_end", outcome="completed_with_issues", run_id=run_id,
+                     done=app_state["done"], total=app_state["total"])
+        except PauseRequested:
+            app_state["status"] = "paused"
+            emit("warn", "扫描已暂停；已完成的收藏夹保留，下次可继续扫描",
+                 kind="scan_end", outcome="paused", run_id=run_id,
+                 done=app_state["done"], total=app_state["total"])
+            raise
+        except CancelRequested:
+            app_state["status"] = "cancelled"
+            emit("warn", "扫描已取消；已完成的收藏夹保留，下次可继续扫描",
+                 kind="scan_end", outcome="cancelled", run_id=run_id,
+                 done=app_state["done"], total=app_state["total"])
+            raise
         except bili_api.RateLimitedError as exc:
+            if app_state.get("stop") or "已手动停止" in str(exc):
+                app_state["status"] = "cancelled"
+                emit("warn", "扫描已取消；已完成的收藏夹保留，下次可继续扫描",
+                     kind="scan_end", outcome="cancelled", run_id=run_id,
+                     done=app_state["done"], total=app_state["total"])
+                raise CancelRequested("扫描已手动停止") from exc
+            app_state["status"] = "rate_limited"
             app_state["error"] = f"风控：{exc}"
-            emit("err", f"风控：{exc}", kind="scan_end")
+            emit("err", f"风控：{exc}", kind="scan_end", outcome="rate_limited",
+                 run_id=run_id, done=app_state["done"], total=app_state["total"])
         except bili_api.BiliApiError as exc:
+            app_state["status"] = "failed"
             app_state["error"] = str(exc)
-            emit("err", f"扫描出错：{exc}", kind="scan_end")
+            emit("err", f"扫描出错：{exc}", kind="scan_end", outcome="failed",
+                 run_id=run_id, done=app_state["done"], total=app_state["total"])
         except Exception as exc:
+            app_state["status"] = "failed"
             app_state["error"] = f"{exc}\n{traceback.format_exc()}"
-            emit("err", f"扫描异常：{exc}", kind="scan_end")
+            emit("err", f"扫描异常：{exc}", kind="scan_end", outcome="failed",
+                 run_id=run_id, done=app_state["done"], total=app_state["total"])
         finally:
             if recovery and app_state.get("error"):
                 mid = body.folder_ids[0]
                 store.update_scan_issue(mid, last_error=app_state["error"].split("\n")[0],
                                         event=app_state["error"].split("\n")[0])
+            if operation_connection is not None:
+                operation_connection.close()
             app_state["running"] = False
             app_state["current"] = ""
             ANALYZE_WAKE.set()
-            emit("progress", "", kind="scan_idle")
+            emit("progress", "", kind="scan_idle", run_id=run_id,
+                 outcome=app_state.get("status"))
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "run_id": run_id}
+    submission = _submit_app_task(
+        "scan", app_state, run,
+        parameters={"folder_ids": list(body.folder_ids or []) if body else [],
+                    "mode": body.mode if body else "resume", "recovery": recovery},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "run_id": run_id,
+            "task_id": record.task_id}
 
 @app.get("/api/scan/status")
 def scan_status():
@@ -3125,7 +4562,7 @@ def scan_status():
 @app.post("/api/scan/stop")
 def scan_stop():
     if APP["scan_run"]:
-        APP["scan_run"]["stop"] = True
+        _cancel_legacy_state(APP["scan_run"])
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的扫描"}
 
@@ -3142,16 +4579,16 @@ def scan_tree():
         for sid in {str(x) for x in memberships}:
             counts[sid] = counts.get(sid, 0) + 1
     tree = []
-    for f in sorted(folders, key=lambda x: int(x.get("count", 0))):
+    for f in sorted(folders, key=_folder_count):
         mid = f["media_id"]
         tree.append({
             "media_id": mid,
             "title": f["title"],
-            "expected": int(f["count"]),
+            "expected": _folder_count(f),
             "scanned": max(counts.get(str(mid), 0),
                             int(states.get(str(mid), {}).get("fetched_count", 0) or 0)),
             "done": (states.get(str(mid), {}).get("status") == "complete" and
-                     states.get(str(mid), {}).get("expected_count") == int(f.get("count", 0) or 0)),
+                     states.get(str(mid), {}).get("expected_count") == _folder_count(f)),
             "status": states.get(str(mid), {}).get("status", "never"),
             "strategy": states.get(str(mid), {}).get("strategy", ""),
             "scanned_at": states.get(str(mid), {}).get("snapshot_completed_at"),
@@ -3247,7 +4684,7 @@ def folder_organize_suggest():
         return JSONResponse({"ok": False,
                              "error": readiness["message"] + extra,
                              "readiness": readiness}, status_code=409)
-    folders = [f for f in store.load_folders() if int(f.get("count", 0) or 0) > 0]
+    folders = [f for f in store.load_folders() if _folder_count(f) > 0]
     videos = store.load_videos()
     current_profiles = {row["id"]: row for row in _current_folder_profile_contexts()}
     all_profile_ids = sorted(current_profiles)
@@ -3257,7 +4694,7 @@ def folder_organize_suggest():
     llm_cfg = make_llm_config()
     if not llm_cfg.configured:
         return JSONResponse({"ok": False, "error": "LLM 未配置"}, status_code=400)
-    state = {"running": True, "error": None, "count": 0}
+    state = {"id": uuid.uuid4().hex, "running": True, "error": None, "count": 0}
     conflict = _begin_job("folder_merge_ai_run", state, error="AI 合并分析已在运行")
     if conflict:
         return conflict
@@ -3296,7 +4733,7 @@ def folder_organize_suggest():
                     elif fid == right: overlaps.append({"folder_id": left, "count": n})
                 overlaps.sort(key=lambda x: x["count"], reverse=True)
                 profile_row = {"id": fid, "name": f["title"],
-                               "count": int(f.get("count", 0) or 0),
+                               "count": _folder_count(f),
                                "samples": spread_samples(by_folder.get(fid, [])),
                                "overlaps": overlaps[:8]}
                 saved_profile = current_profiles.get(fid)
@@ -3310,6 +4747,9 @@ def folder_organize_suggest():
                         "confidence": saved_profile.get("confidence"),
                     }
                 profiles.append(profile_row)
+            _task_safe_point(state, {"phase": "before_suggestions"},
+                             {"phase": "suggestions",
+                              **_progress_counters(steps=(0, 1))})
             raw_groups = llm_analyzer.suggest_folder_merges(llm_cfg, profiles)
             known = {str(f["media_id"]): f for f in folders}
             used = set()
@@ -3347,6 +4787,11 @@ def folder_organize_suggest():
             state["count"] = len(groups)
             emit("ok", f"AI 合并分析完成：生成 {len(groups)} 个候选组",
                  phase="folder_merge_ai", kind="folder_merge_ai_end")
+            _task_safe_point(state, {"draft_saved": True, "count": len(groups)},
+                             {"phase": "draft_saved", "suggested_groups": len(groups),
+                              **_progress_counters(steps=(1, 1))})
+        except (PauseRequested, CancelRequested):
+            raise
         except Exception as e:
             state["error"] = str(e)
             emit("err", f"AI 合并分析失败：{e}", phase="folder_merge_ai",
@@ -3354,8 +4799,14 @@ def folder_organize_suggest():
         finally:
             state["running"] = False
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True}
+    submission = _submit_app_task(
+        "folder_merge_suggestions", state, run,
+        parameters={"folder_ids": [str(f["media_id"]) for f in folders]},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id}
 
 
 @app.put("/api/folder-organize/draft")
@@ -3471,14 +4922,14 @@ def folder_organize_start():
            for g in pending):
         return JSONResponse({"ok": False, "error": "合并方案使用的画像版本已变化，请重新生成并提交合并建议"}, status_code=409)
     try:
-        session = bili_api.BiliSession(get_session_cookie())
+        raw_session = bili_api.BiliSession(get_session_cookie())
         cfg = load_config()
-        session.read_interval = int(cfg.get("scan_interval", 2) or 2)
-        session.write_interval = float(cfg.get("folder_merge_interval", 2) or 2)
-        owner_mid = session.get_mid()
+        raw_session.read_interval = int(cfg.get("scan_interval", 2) or 2)
+        raw_session.write_interval = float(cfg.get("folder_merge_interval", 2) or 2)
+        owner_mid = raw_session.get_mid()
     except Exception as e:
         return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
-    state = {"running": True, "stop": False, "done": 0,
+    state = {"id": uuid.uuid4().hex, "running": True, "stop": False, "done": 0,
              "total": len(pending), "error": None, "status": "running"}
     conflict = _begin_job("folder_merge_run", state, error="收藏夹合并已在运行")
     if conflict:
@@ -3493,7 +4944,13 @@ def folder_organize_start():
             yield items[i:i + size]
 
     def run():
+        operation_connection = None
         try:
+            session, operation_connection = _logged_bili_session(
+                raw_session, state["id"], account_id=owner_mid,
+                retry_operation_ids=state.get("retry_operation_ids", set()))
+            pending[:] = [group for group in pending
+                          if group.get("status") in ("pending", "unknown")]
             # 先把远端目录变化同步到 SQLite，并在所有写请求之前重验画像版本。
             live_folders = session.list_folders()
             store.save_folders(live_folders)
@@ -3514,6 +4971,12 @@ def folder_organize_start():
             emit("info", f"开始收藏夹合并：{len(pending)} 组", phase="folder_merge")
             for group in pending:
                 if state["stop"]: break
+                _task_safe_point(
+                    state,
+                    {"phase": "before_merge_group", "group_done": state["done"]},
+                    {"phase": "before_merge_group",
+                     **_progress_counters(groups=(state["done"], len(pending)))},
+                )
                 group["status"] = "running"
                 group["results"] = []
                 group_ok = True
@@ -3530,7 +4993,7 @@ def folder_organize_start():
                     group["results"].append(result)
                     if not source:
                         result["status"] = "already_absent"; save(); continue
-                    count = int(source.get("count", 0) or 0)
+                    count = _folder_count(source)
                     videos = list(session.iter_folder_videos(str(source_id), count,
                                   should_stop=lambda: state["stop"])) if count else []
                     normal = [int(v.get("aid", 0) or 0) for v in videos
@@ -3540,6 +5003,13 @@ def folder_organize_start():
                     hidden_invalid = max(0, count - len(videos))
                     result.update(before=count, movable=len(normal), invalid=len(invalid) + hidden_invalid)
                     try:
+                        _task_safe_point(
+                            state,
+                            {"phase": "before_source_writes", "group_done": state["done"],
+                             "source_id": str(source_id)},
+                            {"phase": "before_source_writes", "source_id": str(source_id),
+                             **_progress_counters(groups=(state["done"], len(pending)))},
+                        )
                         for batch in chunks(normal):
                             session.move_batch(str(source_id), target_id, batch, mid=owner_mid,
                                                should_stop=lambda: state["stop"])
@@ -3553,7 +5023,7 @@ def folder_organize_start():
                         after = count
                         for attempt in range(6):
                             live_after = {str(f["media_id"]): f for f in session.list_folders()}
-                            after = int((live_after.get(str(source_id)) or {}).get("count", 0) or 0)
+                            after = _folder_count(live_after.get(str(source_id)) or {})
                             if after == 0 or state["stop"]:
                                 break
                             if attempt < 5:
@@ -3585,8 +5055,19 @@ def folder_organize_start():
                 emit("ok" if group_ok else "warn",
                      f"合并组完成：{group.get('final_name')}", phase="folder_merge")
                 save()
+                _task_safe_point(
+                    state,
+                    {"group_done": state["done"],
+                     "last_completed_group": str(group.get("target_id", ""))},
+                    {"phase": "group_complete",
+                     **_progress_counters(groups=(state["done"], len(pending)))},
+                )
             state["status"] = "stopped" if state["stop"] else "done"
+        except (PauseRequested, CancelRequested):
+            raise
         except bili_api.WriteUncertainError as e:
+            state["reconciliation_required"] = True
+            state["reconciliation_reason"] = str(e)
             state.update(status="unknown", error=str(e), stop=True)
             for g in plan:
                 if g.get("status") == "running": g["status"] = "unknown"
@@ -3603,18 +5084,27 @@ def folder_organize_start():
             try:
                 folders = session.list_folders(); store.save_folders(folders); APP["folders"] = folders
             except Exception: pass
+            if operation_connection is not None:
+                operation_connection.close()
             emit("ok" if state["status"] == "done" else "warn", "收藏夹合并任务已结束",
                  phase="folder_merge", kind="folder_merge_end")
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(pending)}
+    submission = _submit_app_task(
+        "folder_merge", state, run,
+        parameters={"group_count": len(pending), "owner_mid": owner_mid},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id,
+            "total": len(pending)}
 
 
 @app.post("/api/folder-organize/stop")
 def folder_organize_stop():
     state = APP.get("folder_merge_run")
     if state and state.get("running"):
-        state["stop"] = True
+        _cancel_legacy_state(state)
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的收藏夹合并"}
 
@@ -3806,7 +5296,7 @@ def _current_folder_profile_contexts() -> list[dict]:
         profile = profiles.get(mid)
         count = item_counts.get(mid, 0)
         scan = scans.get(mid, {})
-        remote_count = int(folder.get("count", 0) or 0)
+        remote_count = _folder_count(folder)
         # Empty folders contain no evidence and are not classification targets.
         if remote_count <= 0:
             continue
@@ -3847,7 +5337,7 @@ def _organization_profile_readiness() -> dict:
     inbox_count = 0
     for folder in folders:
         mid = str(folder["media_id"])
-        remote_count = int(folder.get("count", 0) or 0)
+        remote_count = _folder_count(folder)
         if remote_count <= 0:
             empty_count += 1
             continue
@@ -3917,8 +5407,8 @@ def folder_profiles_get():
         scan = scans.get(mid, {})
         item_count = item_counts.get(mid, 0)
         complete = (scan.get("status") == "complete" and
-                    int(scan.get("expected_count") or 0) == int(folder.get("count", 0) or 0) and
-                    item_count == int(folder.get("count", 0) or 0))
+                    int(scan.get("expected_count") or 0) == _folder_count(folder) and
+                    item_count == _folder_count(folder))
         current = complete and _folder_profile_is_current(profile, folder, scan, item_count)
         rows.append({**folder, "local_count": item_count, "scan_complete": complete,
                      "scan_state": scan.get("status", "never"),
@@ -3980,19 +5470,60 @@ def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
     profile = store.load_folder_profiles().get(str(media_id))
     if not profile or not str(profile.get("summary") or "").strip():
         return JSONResponse({"ok": False, "error": "该收藏夹还没有可上传的画像简介"}, status_code=409)
+    operation_connection = None
     try:
-        session = bili_api.BiliSession(get_session_cookie())
+        raw_session = bili_api.BiliSession(get_session_cookie())
         cfg = load_config()
-        session.read_interval = int(cfg.get("scan_interval", 2) or 2)
-        session.write_interval = float(cfg.get("write_interval", 2) or 2)
-        remote = session.get_folder_info(media_id)
+        raw_session.read_interval = int(cfg.get("scan_interval", 2) or 2)
+        raw_session.write_interval = float(cfg.get("write_interval", 2) or 2)
+        remote = raw_session.get_folder_info(media_id)
         remote_title = str(remote.get("title") or "").strip()
         local_title = str(folder.get("title") or "").strip()
         if not remote_title or remote_title != local_title:
             return JSONResponse({"ok": False,
                                  "error": "B 站收藏夹名称与本地目录不一致；请先刷新收藏夹目录，再检查画像后上传"},
                                 status_code=409)
-        result = session.update_folder_intro(media_id, remote, body.intro)
+        if str(remote.get("intro") or "") == body.intro:
+            emit("warn", f"「{local_title}」的 B 站简介已与目标一致，未重复发送写入；"
+                          "如任务中心仍有此操作待核对，请根据当前页面证据确认结果")
+            return {"ok": True, "media_id": str(media_id), "title": local_title,
+                    "intro": body.intro, "already_matches": True}
+        intro_digest = hashlib.sha256(body.intro.encode("utf-8")).hexdigest()
+        task_digest = hashlib.sha256(
+            f"{media_id}\0{intro_digest}".encode("utf-8")
+        ).hexdigest()
+        # A direct API retry represents the same logical request, so it must
+        # reuse its identity across HTTP calls. This also makes a confirmed
+        # replay return its saved result without another B 站 write.
+        session, operation_connection = _logged_bili_session(
+            raw_session, f"publish-intro:{task_digest}")
+
+        def validate_publish_intro_retry(operation):
+            try:
+                privacy = int(remote.get("attr") or 0) & 1
+            except (TypeError, ValueError):
+                return False
+            if (str(remote.get("title") or "").strip() !=
+                    str(operation.preconditions.get("title") or "").strip()):
+                return False
+            if privacy != operation.preconditions.get("privacy"):
+                return False
+            current_intro_digest = hashlib.sha256(
+                str(remote.get("intro") or "").encode("utf-8")
+            ).hexdigest()
+            if current_intro_digest != operation.preconditions.get("intro_sha256"):
+                return False
+            # The desired value already appears remotely. Stop here so the
+            # operator can review the ambiguous operation instead of issuing a
+            # duplicate write based on a stale NOT_APPLIED classification.
+            return hashlib.sha256(
+                str(remote.get("intro") or "").encode("utf-8")
+            ).hexdigest() != intro_digest
+
+        result = session.update_folder_intro(
+            media_id, remote, body.intro, retry=True,
+            validate_retry=validate_publish_intro_retry,
+        )
         saved_intro = str(result.get("intro", body.intro))
         emit("ok", f"已上传「{local_title}」的收藏夹简介到 B 站（{len(body.intro)} 字）")
         return {"ok": True, "media_id": str(media_id), "title": local_title,
@@ -4003,6 +5534,9 @@ def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
                             status_code=502)
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    finally:
+        if operation_connection is not None:
+            operation_connection.close()
 
 
 @app.post("/api/folder-profiles/generate")
@@ -4031,8 +5565,9 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
         return JSONResponse({"ok": False, "error": "LLM 未配置，请先选择供应商与模型"}, status_code=400)
 
     state = {
-        "running": True, "stop": False, "rebuild": bool(body.rebuild),
-        "total": len(requested), "done": 0, "generated": 0,
+        "id": uuid.uuid4().hex, "running": True, "stop": False,
+        "rebuild": bool(body.rebuild), "done": 0,
+        "total": len(requested), "generated": 0,
         "skipped": 0, "failed": 0, "current": "", "error": None,
     }
     conflict = _begin_job("folder_profile_run", state, error="收藏夹画像任务已在运行")
@@ -4043,7 +5578,20 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
         try:
             scans = store.load_folder_scan_states()
             profiles = store.load_folder_profiles()
-            for index, mid in enumerate(requested, 1):
+            completed_before = int(state.get("done", 0) or 0)
+
+            def should_stop_profile():
+                if state["stop"]:
+                    return True
+                context = _TASK_CONTEXTS.get(state["id"])
+                if context is not None:
+                    try:
+                        context.raise_if_control_requested()
+                    except (PauseRequested, CancelRequested):
+                        return True
+                return False
+
+            for index, mid in enumerate(requested[completed_before:], completed_before + 1):
                 if state["stop"]:
                     break
                 folder = active[mid]
@@ -4051,7 +5599,7 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                 total_items, samples = store.load_folder_profile_samples(mid)
                 scan = scans.get(mid, {})
                 old_profile = profiles.get(mid)
-                remote_count = int(folder.get("count", 0) or 0)
+                remote_count = _folder_count(folder)
                 complete = (scan.get("status") == "complete" and
                             int(scan.get("expected_count") or 0) == remote_count and
                             total_items == remote_count)
@@ -4092,7 +5640,7 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                             progress_callback=lambda stage, done, total: emit(
                                 "info", f"「{folder.get('title')}」{stage} {done}/{total} 批",
                                 phase="folder_profile"),
-                            should_stop=lambda: state["stop"])
+                            should_stop=should_stop_profile)
                         used_sample_count = int(result.pop("sample_count", len(compact)))
                         api_prompt_tokens = int(result.pop("api_prompt_tokens", 0) or 0)
                         api_completion_tokens = int(result.pop("api_completion_tokens", 0) or 0)
@@ -4142,6 +5690,15 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                 emit("progress", "", phase="folder_profile", kind="folder_profile_progress",
                      done=state["done"], total=state["total"], generated=state["generated"],
                      skipped=state["skipped"], failed=state["failed"], current=state["current"])
+                _task_safe_point(
+                    state,
+                    {"folder_done": index, "last_completed_folder": mid},
+                    {"phase": "folder_complete",
+                     "generated": state["generated"], "failed": state["failed"],
+                     **_progress_counters(folders=(index, state["total"]))},
+                )
+        except (PauseRequested, CancelRequested):
+            raise
         except Exception as exc:
             state["error"] = str(exc)
             emit("err", f"收藏夹画像任务失败：{exc}", phase="folder_profile")
@@ -4154,8 +5711,15 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                  total=state["total"], generated=state["generated"],
                  skipped=state["skipped"], failed=state["failed"])
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(requested)}
+    submission = _submit_app_task(
+        "folder_profile", state, run,
+        parameters={"folder_ids": list(requested), "rebuild": bool(body.rebuild)},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id,
+            "total": len(requested)}
 
 
 @app.get("/api/folder-profiles/status")
@@ -4167,7 +5731,7 @@ def folder_profiles_status():
 def folder_profiles_stop():
     state = APP.get("folder_profile_run")
     if state and state.get("running"):
-        state["stop"] = True
+        _cancel_legacy_state(state)
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的画像任务"}
 
@@ -4354,7 +5918,8 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
     done_ids0 = _pending_analysis_ids(rebuild_mode, store.analysis_status_map())
     pending0 = sum(1 for v in videos if v.get("bvid")
                    and v["bvid"] not in done_ids0 and not _is_invalid(v))
-    state = {"running": True, "done": 0, "total": len(videos),
+    state = {"id": uuid.uuid4().hex, "running": True, "done": 0,
+             "total": len(videos),
              "pending": pending0,
              "failed": 0, "stop": False, "error": None,
              "concurrency": concurrency, "batch": batch_size,
@@ -4468,9 +6033,23 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                         for b in batches:
                             if state["stop"]: break
                             work(b, ctx)
+                            _task_safe_point(
+                                state,
+                                {"round": state["round"], "done": ctx["done"]},
+                                {"phase": "analyze_batch", "round": state["round"],
+                                 "pending": state.get("pending", 0),
+                                 **_progress_counters(items=(ctx["done"], state["total"]))},
+                            )
                     else:
                         with ThreadPoolExecutor(max_workers=concurrency) as ex:
                             list(ex.map(lambda b: work(b, ctx), batches))
+                        _task_safe_point(
+                            state,
+                            {"round": state["round"], "done": ctx["done"]},
+                            {"phase": "analyze_batch", "round": state["round"],
+                             "pending": state.get("pending", 0),
+                             **_progress_counters(items=(ctx["done"], state["total"]))},
+                        )
                     refresh_analysis_statuses(force=True)
                     after_status = store.analysis_status_map()
                     failed_session.update(v["bvid"] for v in pending
@@ -4485,6 +6064,13 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                      inflight=state["inflight"], waiting=True)
                 ANALYZE_WAKE.clear()
                 ANALYZE_WAKE.wait(3)
+                _task_safe_point(
+                    state,
+                    {"round": state["round"], "done": ctx["done"], "waiting": True},
+                    {"phase": "waiting_for_scan", "round": state["round"],
+                     "pending": state.get("pending", 0), "waiting": True,
+                     **_progress_counters(items=(ctx["done"], state["total"]))},
+                )
 
             if state["stop"]:
                 emit("warn", "已停止分析（进度已保存）", phase="analyze",
@@ -4494,6 +6080,8 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                      f"分析结束：完成 {ctx['done']}，失败 {state['failed']}",
                      phase="analyze", kind="analyze_end",
                      done=ctx["done"], total=state["total"])
+        except (PauseRequested, CancelRequested):
+            raise
         except Exception as e:
             state["error"] = str(e)
             emit("err", f"分析出错：{e}", phase="analyze", kind="analyze_end")
@@ -4503,8 +6091,16 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
             state["continuous"] = False
             state["waiting"] = False
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": len(videos), "pending": pending0}
+    submission = _submit_app_task(
+        "analyze", state, run,
+        parameters={"selected_ids": sorted(selected), "rebuild_mode": rebuild_mode,
+                    "continuous": bool(body.continuous)},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id,
+            "total": len(videos), "pending": pending0}
 
 
 @app.get("/api/analyze/status")
@@ -4517,8 +6113,7 @@ def analyze_status():
 @app.post("/api/analyze/stop")
 def analyze_stop():
     if APP["analyze_run"]:
-        APP["analyze_run"]["stop"] = True
-        ANALYZE_WAKE.set()
+        _cancel_legacy_state(APP["analyze_run"])
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的分析"}
 
@@ -4771,9 +6366,9 @@ def apply_start():
             APP["session"] = bili_api.BiliSession(get_session_cookie())
         except Exception as e:
             return JSONResponse({"ok": False, "error": f"Cookie 不可用：{e}"}, status_code=400)
-    session = APP["session"]
+    raw_session = APP["session"]
     cfg = load_config()
-    session.write_interval = float(cfg.get("write_interval", 2) or 2)
+    raw_session.write_interval = float(cfg.get("write_interval", 2) or 2)
     batch_size = max(1, min(1000, int(cfg.get("apply_batch", 1000) or 1000)))
     videos = {v["bvid"]: v for v in store.load_videos() if v.get("bvid")}
 
@@ -4816,7 +6411,7 @@ def apply_start():
     already_done = len([1 for it in plan.values() if it.get("status") == "done"])
     held_unknown = len([1 for it in plan.values() if it.get("status") == "unknown"])
 
-    state = {"running": True, "done": 0, "total": total,
+    state = {"id": uuid.uuid4().hex, "running": True, "done": 0, "total": total,
              "ok": 0, "failed": 0, "skip": 0, "deleted": 0,
              "unknown": 0, "stop": False, "error": None, "log": [],
              "batch_size": batch_size, "batch_done": 0, "batch_total": 0}
@@ -4835,6 +6430,7 @@ def apply_start():
             yield items[i:i + batch_size]
 
     def run():
+        operation_connection = None
         def save_progress():
             store.save_plan(plan)
             store.save_videos(videos)
@@ -4859,6 +6455,10 @@ def apply_start():
                 state["ok"] += n
             elif status == "unknown":
                 state["unknown"] += n
+                unknown_ids = state.setdefault("unknown_bvids", [])
+                for bvid, _item, _video in entries:
+                    if str(bvid) not in unknown_ids:
+                        unknown_ids.append(str(bvid))
             elif status == "failed":
                 state["failed"] += n
             save_progress()
@@ -4870,6 +6470,14 @@ def apply_start():
             emit("warn", f"{message}（{len(entries)} 条）", phase="apply")
 
         def run_batch(kind, src, target_id, target_name, entries):
+            _task_safe_point(
+                state,
+                {"phase": "before_batch", "batch_done": state["batch_done"],
+                 "done": state["done"]},
+                {"phase": "before_batch",
+                 **_progress_counters(items=(state["done"], total),
+                                      batches=(state["batch_done"], state["batch_total"]))},
+            )
             if state["stop"]:
                 return False
             aids = [int(video.get("aid", 0) or 0) for _, _, video in entries]
@@ -4891,6 +6499,8 @@ def apply_start():
             except bili_api.WriteUncertainError as e:
                 msg = f"批次 {bn} 结果不确定：{e}"
                 finish_items(entries, "unknown", msg)
+                state["reconciliation_required"] = True
+                state["reconciliation_reason"] = str(e)
                 state["error"] = msg + "。已停止，请人工复核后再继续。"
                 state["stop"] = True
                 emit("err", state["error"], phase="apply", kind="apply_end",
@@ -4911,7 +6521,7 @@ def apply_start():
                 # 网络/IO：记账后继续，避免一次抖动卡死整次执行。
                 fail_entries(entries, f"批次 {bn} 网络/IO 异常：{e}")
                 return True
-            # 远端已成功 → 记账；落库失败保持 done 并停，绝不改写成 failed
+            # 远端已成功但本地记账失败 → 标记结果未知并要求核对，避免错误宣称 done/failed
             try:
                 if kind == "delete":
                     finish_items(entries, "done", success_msg, source_id=src)
@@ -4921,15 +6531,57 @@ def apply_start():
                                  target_id=target_id, source_id=src)
                 emit("ok", f"批次 {bn}/{bt} 完成：{len(entries)} 条",
                      phase="apply", done=state["done"], total=total)
+                _task_safe_point(
+                    state,
+                    {"phase": "batch_done", "batch_done": bn,
+                     "done": state["done"]},
+                    {"phase": "batch_done",
+                     **_progress_counters(items=(state["done"], total),
+                                          batches=(bn, bt))},
+                )
                 return True
             except (requests.RequestException, OSError) as e:
                 state["error"] = f"批次 {bn} 远端已成功但本地落库失败：{e}"
+                state["reconciliation_required"] = True
+                state["reconciliation_reason"] = state["error"]
                 state["stop"] = True
+                for bvid, item, _video in entries:
+                    _mark(item, "unknown", state["error"])
+                    unknown_ids = state.setdefault("unknown_bvids", [])
+                    if str(bvid) not in unknown_ids:
+                        unknown_ids.append(str(bvid))
+                state["ok"] = max(0, state["ok"] - len(entries))
+                state["unknown"] += len(entries)
+                emit("err", state["error"], phase="apply", kind="apply_end",
+                     done=state["done"], total=total)
+                return False
+            except Exception as e:
+                state["error"] = f"批次 {bn} 已确认但本地记账失败：{e}"
+                state["reconciliation_required"] = True
+                state["reconciliation_reason"] = state["error"]
+                state["stop"] = True
+                for bvid, item, _video in entries:
+                    _mark(item, "unknown", state["error"])
+                    unknown_ids = state.setdefault("unknown_bvids", [])
+                    if str(bvid) not in unknown_ids:
+                        unknown_ids.append(str(bvid))
+                state["ok"] = max(0, state["ok"] - len(entries))
+                state["unknown"] += len(entries)
                 emit("err", state["error"], phase="apply", kind="apply_end",
                      done=state["done"], total=total)
                 return False
 
         try:
+            context = _TASK_CONTEXTS.get(state["id"])
+            if context is not None and context.task.attempt > 1:
+                # A reconciled ambiguous batch may be replayed through the
+                # operation adapter, which returns confirmed results or retries
+                # only explicitly authorized NOT_APPLIED intents.
+                pending[:] = [(bvid, item) for bvid, item in pending
+                              if item.get("status") in ("pending", "unknown")]
+            session, operation_connection = _logged_bili_session(
+                raw_session, state["id"],
+                retry_operation_ids=state.get("retry_operation_ids", set()))
             if migrated:
                 emit("info", f"已把历史断点前 {migrated} 条补标为已完成")
             emit("info", f"开始批量执行：待操作 {total} 条，单批上限 {batch_size}"
@@ -5053,6 +6705,11 @@ def apply_start():
                         move_groups.setdefault((src, target_id, target_name), []).append(entry)
 
             save_progress()
+            _task_safe_point(
+                state,
+                {"phase": "prepared", "done": state["done"]},
+                {"phase": "prepared", **_progress_counters(items=(state["done"], total))},
+            )
 
             # 实际请求数：删除 -> 移动到现有夹 -> 新建夹并移动。
             def batch_count(groups):
@@ -5079,6 +6736,12 @@ def apply_start():
                         return
 
             for name, grouped in new_groups.items():
+                _task_safe_point(
+                    state,
+                    {"phase": "before_new_folder_group", "done": state["done"]},
+                    {"phase": "before_new_folder_group",
+                     **_progress_counters(items=(state["done"], total))},
+                )
                 if state["stop"]:
                     return
                 target_id = name_to_id.get(name, "")
@@ -5118,6 +6781,15 @@ def apply_start():
                         f"（其中删除失效 {state['deleted']}），"
                         f"失败 {state['failed']}，跳过 {state['skip']}",
                  phase="apply", kind="apply_end", done=state["done"], total=total)
+        except (PauseRequested, CancelRequested):
+            raise
+        except bili_api.WriteUncertainError as e:
+            state["reconciliation_required"] = True
+            state["reconciliation_reason"] = str(e)
+            state["error"] = f"执行结果不确定：{e}。已停止，请人工复核。"
+            state["stop"] = True
+            emit("err", state["error"], phase="apply", kind="apply_end",
+                 done=state["done"], total=total)
         except bili_api.RateLimitedError as e:
             state["error"] = f"风控触发：{e}。已停止。"
             emit("err", state["error"], phase="apply", kind="apply_end",
@@ -5138,9 +6810,18 @@ def apply_start():
                 if refreshed is not None:
                     emit("ok", f"已自动刷新收藏夹目录：{len(refreshed)} 个",
                          phase="apply", kind="folders_refreshed")
+            if operation_connection is not None:
+                operation_connection.close()
 
-    threading.Thread(target=run, daemon=True).start()
-    return {"ok": True, "started": True, "total": total, "batch_size": batch_size,
+    submission = _submit_app_task(
+        "apply", state, run,
+        parameters={"plan_count": len(pending), "batch_size": batch_size},
+    )
+    if isinstance(submission, JSONResponse):
+        return submission
+    record, _scheduler = submission
+    return {"ok": True, "started": True, "task_id": record.task_id,
+            "total": total, "batch_size": batch_size,
             "held_unknown": held_unknown}
 
 
@@ -5155,7 +6836,7 @@ def apply_status():
 @app.post("/api/apply/stop")
 def apply_stop():
     if APP["apply_run"]:
-        APP["apply_run"]["stop"] = True
+        _cancel_legacy_state(APP["apply_run"])
         return {"ok": True}
     return {"ok": False, "error": "没有运行中的执行"}
 
@@ -5880,7 +7561,7 @@ def _watch_parent_pipe() -> None:
 
 
 def main():
-    global _UVICORN_SERVER, _APP_PORT
+    global _UVICORN_SERVER, _APP_PORT, _SERVER_INSTANCE_LEASE
     parser = argparse.ArgumentParser(description="B站收藏夹整理")
     parser.add_argument("--port", type=int, default=8080,
                         help="监听端口；0 表示由系统分配（托管模式）")
@@ -5891,6 +7572,17 @@ def main():
     parser.add_argument("--handshake", action="store_true",
                         help="就绪后在 stdout 打印一行 BFO_READY（供托管方读取端口）")
     args = parser.parse_args()
+
+    # Electron enforces its own single-instance lock. Keep the same guarantee
+    # for the documented browser/server.py entry point, including custom ports;
+    # Vault DEKs and metadata are process-local and cannot safely be shared by
+    # two service processes using one user profile.
+    try:
+        _SERVER_INSTANCE_LEASE = _acquire_server_instance_lease()
+    except ProfileLockTimeoutError:
+        print("同一用户数据目录已有服务实例运行；请先关闭它再启动第二个实例。",
+              file=sys.stderr, flush=True)
+        return 2
     _APP_PORT = args.port
 
     log_path = Path(args.log_file)
@@ -5959,14 +7651,27 @@ def main():
         VAULT.load_meta()
     except vault_mod.VaultError as exc:
         log.error("加密库元数据无法读取：%s", exc)
+    if store.database_state() == store.DatabaseState.READY.value:
+        try:
+            # Reconcile persisted task states before serving requests when the
+            # active DB is already available. Encrypted profiles start this on
+            # unlock instead, because their DB is intentionally LOCKED here.
+            _ensure_task_scheduler()
+        except Exception:
+            log.exception("启动时无法恢复任务调度器状态；任务 API 将在后续请求时重试")
     _UVICORN_SERVER = uvicorn.Server(config)
     if args.port == 0 or args.handshake:
         threading.Thread(target=_bind_ready_port, args=(_UVICORN_SERVER, args.handshake),
                          daemon=True, name="bind-port").start()
     if os.environ.get("BFO_PARENT_PIPE") == "1":
         threading.Thread(target=_watch_parent_pipe, daemon=True, name="parent-pipe").start()
-    _UVICORN_SERVER.run()
+    try:
+        _UVICORN_SERVER.run()
+    finally:
+        if _SERVER_INSTANCE_LEASE is not None:
+            _SERVER_INSTANCE_LEASE.close()
+            _SERVER_INSTANCE_LEASE = None
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

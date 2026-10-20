@@ -300,7 +300,9 @@ class Vault:
         """Commit a complete ciphertext/plaintext file, never a partial destination."""
         dest = Path(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        temporary = dest.with_name(f".{dest.name}.{uuid.uuid4().hex}.tmp")
+        # Do not append a UUID to the complete (already hashed) archive name:
+        # that can exceed Windows' path budget even when the destination fits.
+        temporary = dest.with_name(f".vault-{uuid.uuid4().hex}.tmp")
         try:
             with temporary.open("xb") as handle:
                 handle.write(data)

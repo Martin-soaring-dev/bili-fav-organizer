@@ -90,6 +90,15 @@
           <path d="M20.2 14.2A8.4 8.4 0 0 1 9.8 3.8 7.8 7.8 0 1 0 20.2 14.2z" fill="currentColor"/>
         </svg>
       </button>
+      <button id="rail-tasks" class="rail-btn" type="button" title="后台任务与远端写入核对"
+              aria-label="后台任务与远端写入核对">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5" y="4" width="14" height="17" rx="2"/>
+          <path d="M9 4.5V3h6v1.5M8.5 10h7M8.5 14h7M8.5 18h4"/>
+        </svg>
+        <span id="rail-task-active-count" class="rail-task-active-count" hidden></span>
+      </button>
       <button id="rail-settings" class="rail-btn" type="button" title="设置" aria-label="设置">
         <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
           <path fill="currentColor" d="M19.14 12.94a7.1 7.1 0 0 0 .06-.94 7.1 7.1 0 0 0-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.3 7.3 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.24-1.12.56-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.67 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.1 7.1 0 0 0-.06.94c0 .32.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.42.35.61.22l2.39-.96c.5.38 1.04.7 1.62.94l.36 2.54c.04.24.25.42.5.42h3.84c.25 0 .46-.18.5-.42l.36-2.54c.58-.24 1.12-.56 1.62-.94l2.39.96c.19.13.47.02.61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>
@@ -238,7 +247,7 @@
           <button id="library-view-btn" class="btn ghost">查看本地内容</button>
           <span class="muted" id="scan-selection-summary">未加载目录</span>
           <label class="inline-label">扫描方式
-            <select id="scan-mode"><option value="resume">继续未完成/变化的夹</option><option value="rebuild">重扫所选夹</option></select>
+            <select id="scan-mode" title="继续扫描按收藏夹判断进度：已完成的收藏夹不会重复读取；未完成的收藏夹会重新读取，可能从该收藏夹第 1 页开始"><option value="resume">继续未完成/变化的夹</option><option value="rebuild">重扫所选夹</option></select>
           </label>
           <label class="inline-label">请求间隔
             <select id="scan-interval">
@@ -646,6 +655,29 @@
       <label><input type="checkbox" value="folder_profile"> 收藏夹画像数据</label>
     </div>
     <div class="modal-foot"><button id="clear-all" class="btn ghost">全选</button><button id="clear-none" class="btn ghost">全不选</button><button id="clear-confirm" class="btn danger">确认清除</button></div>
+  </div>
+</div>
+
+<!-- 统一任务与远端写入核对 -->
+<div id="task-center-modal" class="modal" style="display:none" role="dialog"
+     aria-modal="true" aria-labelledby="task-center-title">
+  <div class="modal-box task-center-box">
+    <div class="modal-head">
+      <span id="task-center-title">后台任务与远端写入</span>
+      <div class="task-center-head-actions">
+        <button id="task-center-refresh" class="mini" type="button">刷新</button>
+        <button id="task-center-close" class="mini" type="button">关闭</button>
+      </div>
+    </div>
+    <div class="task-center-tabs" role="tablist" aria-label="任务中心">
+      <button type="button" class="task-center-tab active" data-task-center-tab="tasks"
+              role="tab" aria-selected="true">后台任务</button>
+      <button type="button" class="task-center-tab" data-task-center-tab="operations"
+              role="tab" aria-selected="false">远端写入核对</button>
+    </div>
+    <div id="task-center-status" class="modal-meta" role="status" aria-live="polite">正在读取…</div>
+    <section id="task-center-tasks" class="modal-body task-center-list" role="tabpanel"></section>
+    <section id="task-center-operations" class="modal-body task-center-list" role="tabpanel" hidden></section>
   </div>
 </div>
 
@@ -1116,6 +1148,6 @@
 
 <script src="/static/vendor/xterm/xterm.js"></script>
 <script src="/static/vendor/xterm/addon-fit.js"></script>
-<script src="/static/app.js?v=20261010-term1"></script>
+<script src="/static/app.js?v=20261013-reliability-fixes"></script>
 </body>
 </html>

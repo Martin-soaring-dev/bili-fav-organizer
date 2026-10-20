@@ -189,6 +189,8 @@ def _copy_current_app(app_dir: Path) -> None:
     app_dir.mkdir(parents=True, exist_ok=True)
     for name in ("server.py", "store.py", "vault.py", "bili_api.py", "llm_analyzer.py"):
         shutil.copy2(REPO_ROOT / name, app_dir / name)
+    shutil.copytree(REPO_ROOT / "core", app_dir / "core",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     (app_dir / "static").mkdir()
     shutil.copy2(REPO_ROOT / "tests" / "migration" / "runtime_probe.py",
                  app_dir / "migration_probe.py")
@@ -247,10 +249,13 @@ def runtime(case: str, root: Path, *, data_override: Path | None = None,
 
 
 def probe(runtime_case: Runtime, operation: str, *, password: str = "Synthetic.Passphrase.42",
-          recovery_code: str = "", timeout: int = 30) -> dict:
+          recovery_code: str = "", timeout: int = 30,
+          env_overrides: dict[str, str] | None = None) -> dict:
     env = dict(runtime_case.env)
     env["BFO_PROBE_PASSWORD"] = password
     env["BFO_PROBE_RECOVERY"] = recovery_code
+    if env_overrides:
+        env.update({str(key): str(value) for key, value in env_overrides.items()})
     result = subprocess.run(
         [sys.executable, "migration_probe.py", operation],
         cwd=runtime_case.app_dir, env=env, text=True,
@@ -264,7 +269,16 @@ def probe(runtime_case: Runtime, operation: str, *, password: str = "Synthetic.P
         )
     for line in reversed(result.stdout.splitlines()):
         if line.startswith("MIGRATION_PROBE:"):
-            return json.loads(line.removeprefix("MIGRATION_PROBE:"))
+            payload = json.loads(line.removeprefix("MIGRATION_PROBE:"))
+            # Keep the child process's recovery warning available when a
+            # migration assertion fails; the probe otherwise serializes only
+            # the HTTP response and hides the underlying validation reason.
+            if (result.stderr and any(
+                    isinstance(payload.get(key), dict) and
+                    int(payload[key].get("http_status", 0)) >= 500
+                    for key in ("unlock", "completion", "onboarding", "lock"))):
+                payload["probe_stderr"] = result.stderr[-8000:]
+            return payload
     raise RuntimeError(f"current-code probe emitted no result:\n{result.stdout}\n{result.stderr}")
 
 

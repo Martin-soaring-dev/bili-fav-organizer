@@ -1,5 +1,28 @@
 # 旧版数据迁移与兼容性测试报告
 
+## 2026-10-16 当前候选复核
+
+以下是对本报告原始 `0e3180c` / `v0.209-beta.1` 发现的后续核销，不能覆盖或改写下文的 Windows 历史记录。候选从 `ea4983d2bb9f6d8c0ea54faeddc790a9e096df63` / tree `939a0607988524b7afec8097fde3e9acda4ec655` 重建；检查时仍有未提交改动，因此没有最终候选 SHA。所有命令通过 `tools/run_isolated_tests.py`，使用临时 profile 和合成 `v0.208` fixture。
+
+| 历史项 | 当前候选证据 | 当前状态 |
+|---|---|---|
+| MIG-009 | `migration.test_vault_migration.VaultMigrationTests.test_MIG_009_encryption_onboarding_preserves_logical_data`；vault migration 模块 12/12 | **PASS（隔离候选）**：加密快照与逻辑数据一致；锁定后工作库与 plain backup 不残留。 |
+| MIG-010 | `test_MIG_010_close_and_reunlock_restores_encrypted_data` | **PASS（隔离候选）**：删除隔离明文库后从密文恢复，数据摘要保持一致。 |
+| MIG-011 | `test_MIG_011_wrong_password_is_rejected` | **PASS（隔离候选）**：错误密码/恢复码均拒绝，库仍锁定。 |
+| MIG-012 | `test_MIG_012_recovery_code_unlocks_vault` | **INCONCLUSIVE**：单项和 vault migration 模块均通过；最近一次 300 项全量运行中该项一次返回 500。需查明全量顺序/负载下偶发失败并重跑，不能据单项通过关闭。 |
+| MIG-013 | `test_MIG_013_corrupted_encrypted_file_fails_safely` | **PASS（隔离候选）**：密文末尾损坏后拒绝解锁，不创建空库且保留损坏证据。 |
+| MIG-014 | `migration.test_failure_recovery` 4/4 | **PASS（隔离候选）**：复制中断、部分密文候选、损坏源、重复 onboarding 均有恢复/拒绝测试。 |
+| MIG-015 | `test_MIG_015_legacy_and_neo_default_data_path_contract` | **PASS（路径契约）/ NOT_RUN（双壳端到端）**：仍未让传统安装版与 Neo 同时读取同一份安装迁移夹具。 |
+| MIG-016 | `test_MIG_016_v0208_rollback_reads_and_plain_backup_restores_data` | **PASS（隔离候选）**：v0.208 reader 和隔离 plain backup 可读/恢复数据。 |
+| MIG-017 | `test_MIG_017_fresh_install_starts_independently` | **PASS（隔离候选）**：新 profile 独立初始化，不复用旧 fixture。 |
+| MIG-018 | `test_MIG_018_second_instance_with_active_writer_fails_safely_and_recovers` | **PASS（隔离候选）**：活动写事务期间第二实例受阻，释放后重试通过。另有真实 `server.py` 入口测试覆盖服务级单实例租约。 |
+| MIG-023–027, 029 | `migration.test_vault_migration` 新增故障、manifest、归档及跨进程封存测试 | **PASS（单独模块运行）**；其中 Windows `LockFileEx` 尚未实测。 |
+| MIG-028 | `test_MIG_028_repeated_lock_unlock_cycles_keep_manifest_file_set_stable` | **INCONCLUSIVE**：单独 vault migration 模块运行通过；最近两次全量运行中，一次通过、一次第二次解锁返回 500。 |
+
+最近两次全量隔离运行均为 **300 项：4 个 Linux `test_update_flow` FAIL、1 个 `winreg` ERROR、1 个 SKIP**，另外在第一次全量中 MIG-012 一次返回 500，在第二次全量中 MIG-028 的第二次解锁一次返回 500。对应 vault migration 单项与模块重跑均通过（12/12），但不同恢复路径在全量下的间歇性 500 原因尚未查明。四个 update 失败和 winreg 导入错误在 EA 基线已复现。当前候选保险库迁移结论为 **有明确未决项，不可报全绿**。Chromium UI 类因本机浏览器不可用跳过；Windows CI、真实安装升级、Mimo 对话式验收和历史 beta.2 profile 均未完成。
+
+本次复核没有读取或修改正式用户 profile、仓库 `data/library.sqlite3` 或 `tests/Test-BFO-Beta2/`。在获得同一最终 SHA 的完整回归与 Windows/安装证据前，下文的旧缺陷结论仅视为历史记录。
+
 ## 执行摘要
 
 - 日期：2026-10-11（Windows 11，`10.0.26300`）。
@@ -144,3 +167,11 @@ onboarding 会将 DB 加密到 `library.sqlite3.enc`，但当前实现保留明�
 当前不建议继续发布 `v0.209-beta.1`。在发布前至少需要修复并回归：锁定后的明文处理策略、空 DB 创建与密文恢复顺序、完整 AEAD 验证、加密文件原子写入/截断重试，以及已有 vault 的重复初始化保护。随后在隔离数据上重跑 MIG-009–014，并让 v0.208 reader、传统安装形态和 Neo 安装形态读取相同基线；Windows Hello 与 NSIS/Inno Setup 测试仍需真实 Windows 验收。
 
 本分支没有修改生产迁移/保险库逻辑；本报告记录的缺陷仍待独立修复和回归验证。
+
+## 2026-10-20 Windows 候选复验阻断
+
+用户转交的65ba02e Windows全量结果为306项：261通过、6失败、39错误、零跳过。已定位空profile锁父目录缺失与历史schema7合成SQLite夹具未入Git；本提交修复并补回归。新修复的Linux隔离schema16/16及migration-only30/30通过，包括MIG-029，但Windows锁与封存场景仍需复验，不能标记Windows PASS。MIG-029在旧报告中的marker未出现可能由更早初始化错误导致，根因归类须以Windows子进程完整日志复核。参见 [阻断记录](windows-acceptance-blockers-20261020.md)。
+
+## 2026-10-20 第二轮 Vault 阻断
+
+ac9da20 Windows报告318项，298通过、6失败、14错误、零跳过；首轮锁目录和历史夹具问题已被反馈确认修复。新修复排除准确运行锁路径，保留所有业务来源；缩短同目录原子临时名，保留加密/哈希校验；探针失败不再用二次manifest读取掩盖原始接口500。本机migration-only31/31（含MIG-027/029）和生产调度/Vault集成4/4通过，Windows仍需复验。详见 [第二轮复测](windows-vault-acceptance-retest-20261020.md)。

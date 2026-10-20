@@ -15,7 +15,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 IGNORED_NAMES = {
-    ".git", ".aws", ".codex", ".agents", ".private", ".venv", "venv",
+    ".git", ".aws", ".codex", ".codex-recovery", ".agents", ".private",
+    ".bfo-diag-temp", ".candidate-test-tmp", "Test-BFO-Beta2", ".venv", "venv",
     "node_modules", "dist", "build", "output", "data", ".test-data",
     "__pycache__", ".pytest_cache", ".bfo-test-dependencies",
 }
@@ -63,6 +64,15 @@ def main() -> int:
             "NO_PROXY": "127.0.0.1,localhost",
         })
         env.pop("BILI_FAV_ORGANIZER_DATA_DIR", None)
+        # Sanitizing LOCALAPPDATA also hides an already-downloaded Playwright
+        # browser, which would silently skip every UI regression test. Point
+        # Playwright at the real profile's browsers when they are installed.
+        if not env.get("PLAYWRIGHT_BROWSERS_PATH"):
+            original_local_appdata = os.environ.get("LOCALAPPDATA")
+            browsers = (Path(original_local_appdata) / "ms-playwright"
+                        if original_local_appdata else None)
+            if browsers is not None and browsers.is_dir():
+                env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
         print(f"Isolated checkout: {checkout}", flush=True)
         print(f"Isolated LOCALAPPDATA: {isolated_profile}", flush=True)
         extra_pythonpath = []

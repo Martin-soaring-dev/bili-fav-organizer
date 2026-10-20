@@ -50,6 +50,9 @@ token.json
 # 本地数据库、密钥与证书
 *.sqlite
 *.sqlite3
+!tests/database/fixtures/v0209_schema7.sqlite3
+!tests/database/fixtures/v0200_schema5.sqlite3
+!tests/database/fixtures/v0203_schema6.sqlite3
 *.sqlite3-*
 *.sqlite-journal
 *.db
@@ -77,6 +80,10 @@ bili-data-*/
 __pycache__/
 *.pyc
 *.pyo
+
+# Isolated test runner output
+tests/.test-data/
+/.bfo-isolated-tests-*/
 
 # Node / Electron 壳
 node_modules/

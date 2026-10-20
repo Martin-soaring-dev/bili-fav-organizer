@@ -7,15 +7,19 @@ b"app-unlock" 并在关闭时删除该文件，把金库的设备 secret 一并�
 """
 import json
 import os
-import tempfile
+import sys
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.responses import JSONResponse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import server
-import store
 import vault as vault_mod
+from store_profile_isolation import isolated_store_profile
 
 
 def _payload(res):
@@ -30,42 +34,31 @@ class VaultDeviceSecretTests(unittest.TestCase):
     _prod_device_secret = server.DEVICE_SECRET_BLOB
 
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
-        root = Path(self._tmp.name)
-        self._old = (
-            server.USER_DATA_DIR,
-            server.APP_UNLOCK_BLOB,
-            server.DEVICE_SECRET_BLOB,
-            server.VAULT,
-            store.DATA_DIR,
-            store.DB_FILE,
-            server.VAULT_DB_ENC,
-        )
-        server.USER_DATA_DIR = root
-        server.APP_UNLOCK_BLOB = root / "app_unlock.blob"
-        server.DEVICE_SECRET_BLOB = root / "device_secret.blob"
-        # 解锁会做解密自检，自检读的是加密快照 —— 不隔离会去碰真实库。
-        # 快照的唯一来源是 server.VAULT_DB_ENC（写入/回读/自检都看它），
-        # 所以它必须跟着 store.DATA_DIR 一起换。
-        store.DATA_DIR = root / "data"
-        store.DATA_DIR.mkdir(parents=True, exist_ok=True)
-        store.DB_FILE = store.DATA_DIR / "library.sqlite3"
-        store._initialize()
-        server.VAULT_DB_ENC = store.DATA_DIR / "library.sqlite3.enc"
+        self._stack = ExitStack()
+        self.addCleanup(self._stack.close)
+        # 共享隔离：显式建库，并清掉可能绑定在别的库上的旧调度器 ——
+        # 解锁路径会直接用 server._TASK_SCHEDULER 恢复任务。
+        data_dir = isolated_store_profile(self._stack)
+        root = data_dir.parent
+        for name, value in (
+            ("USER_DATA_DIR", root),
+            ("APP_UNLOCK_BLOB", root / "app_unlock.blob"),
+            ("DEVICE_SECRET_BLOB", root / "device_secret.blob"),
+            # 解锁会做解密自检，自检读的是加密快照 —— 不隔离会去碰真实库。
+            # 快照的唯一来源是 server.VAULT_DB_ENC（写入/回读/自检都看它），
+            # 所以它必须跟着 store.DATA_DIR 一起换。
+            ("VAULT_DB_ENC", data_dir / "library.sqlite3.enc"),
+        ):
+            self._stack.enter_context(patch.object(server, name, value))
 
         vault = vault_mod.Vault(root / "vault.json")
         vault.initialize(bound_mid="1", password="secret12",
                          recovery_code="AAAA-BBBB-CCCC-DDDD-EEEE")
         vault.save_meta()
-        server.VAULT = vault
+        self._stack.enter_context(patch.object(server, "VAULT", vault))
         server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
-
-    def tearDown(self):
-        (server.USER_DATA_DIR, server.APP_UNLOCK_BLOB,
-         server.DEVICE_SECRET_BLOB, server.VAULT, store.DATA_DIR,
-         store.DB_FILE, server.VAULT_DB_ENC) = self._old
-        server._APP_LOCK.update(enabled=False, unlocked=True, failed_attempts=0)
-        self._tmp.cleanup()
+        self.addCleanup(server._APP_LOCK.update, enabled=False, unlocked=True,
+                        failed_attempts=0)
 
     def test_production_paths_are_distinct(self):
         """两套密钥材料必须落在两个文件里；共用一个文件时会互相覆盖。"""
@@ -120,6 +113,74 @@ class VaultDeviceSecretTests(unittest.TestCase):
             self.assertEqual(0, len(seen), "skip_hello 不应再弹一次 Hello")
         finally:
             server.vault_hello_verify = original
+
+    def test_failed_bind_rolls_back_device_secret_and_wrap(self):
+        before_meta = server.VAULT.meta_path.read_bytes()
+        with patch.object(server.VAULT, "bind_device_blob",
+                          side_effect=OSError("synthetic metadata write failure")):
+            body, code = _payload(server.vault_bind_device(
+                server.VaultBindDeviceIn(skip_hello=True)))
+        self.assertEqual(500, code, body)
+        self.assertFalse(server.VAULT.state.has_device_wrap)
+        self.assertFalse(server.DEVICE_SECRET_BLOB.exists())
+        self.assertEqual(before_meta, server.VAULT.meta_path.read_bytes())
+
+    def test_failed_rebind_restores_existing_device_secret_and_wrap(self):
+        body, code = _payload(server.vault_bind_device(
+            server.VaultBindDeviceIn(skip_hello=True)))
+        self.assertEqual(200, code, body)
+        before_meta = server.VAULT.meta_path.read_bytes()
+        before_secret = server.DEVICE_SECRET_BLOB.read_bytes()
+        bind_device_blob = server.VAULT.bind_device_blob
+
+        def write_then_fail(secret):
+            bind_device_blob(secret)
+            raise OSError("synthetic post-write metadata failure")
+
+        with patch.object(server.VAULT, "bind_device_blob",
+                          side_effect=write_then_fail):
+            body, code = _payload(server.vault_bind_device(
+                server.VaultBindDeviceIn(skip_hello=True)))
+
+        self.assertEqual(500, code, body)
+        self.assertTrue(server.VAULT.state.has_device_wrap)
+        self.assertEqual(before_meta, server.VAULT.meta_path.read_bytes())
+        self.assertEqual(before_secret, server.DEVICE_SECRET_BLOB.read_bytes())
+
+    def test_failed_unbind_restores_device_secret_and_wrap(self):
+        body, code = _payload(server.vault_bind_device(
+            server.VaultBindDeviceIn(skip_hello=True)))
+        self.assertEqual(200, code, body)
+        before_meta = server.VAULT.meta_path.read_bytes()
+        before_secret = server.DEVICE_SECRET_BLOB.read_bytes()
+        with patch.object(server.VAULT, "save_meta",
+                          side_effect=OSError("synthetic metadata write failure")):
+            body, code = _payload(server.vault_unbind_device())
+        self.assertEqual(500, code, body)
+        self.assertTrue(server.VAULT.state.has_device_wrap)
+        self.assertEqual(before_meta, server.VAULT.meta_path.read_bytes())
+        self.assertEqual(before_secret, server.DEVICE_SECRET_BLOB.read_bytes())
+
+    def test_password_unlock_failure_after_dek_unlock_clears_new_dek(self):
+        server.VAULT.lock()
+        with patch.object(server, "_vault_migrate_plain_db_if_needed",
+                          side_effect=OSError("synthetic snapshot I/O failure")):
+            body, code = _payload(server.vault_unlock(
+                server.VaultUnlockIn(password="secret12")))
+        self.assertEqual(500, code, body)
+        self.assertFalse(server.VAULT.is_unlocked())
+
+    def test_device_unlock_failure_after_dek_unlock_clears_new_dek(self):
+        body, code = _payload(server.vault_bind_device(
+            server.VaultBindDeviceIn(skip_hello=True)))
+        self.assertEqual(200, code, body)
+        server.VAULT.lock()
+        with patch.object(server, "_vault_migrate_plain_db_if_needed",
+                          side_effect=OSError("synthetic snapshot I/O failure")):
+            body, code = _payload(server.vault_unlock_device(
+                server.VaultUnlockDeviceIn(skip_hello=True)))
+        self.assertEqual(400, code, body)
+        self.assertFalse(server.VAULT.is_unlocked())
 
     def test_app_lock_auto_unlock_toggle_keeps_device_secret(self):
         _payload(server.vault_bind_device(server.VaultBindDeviceIn(skip_hello=True)))
