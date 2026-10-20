@@ -6,16 +6,16 @@
 - **当前验收：**T8 Windows 全量回归 330/330 PASS；T10 实机 UAT 14/14 PASS、39 张截图；T11a PR checks PASS；T11b 隔离安装、schema 7→8 升级与重启验收 PASS。T11b 使用同 SHA 本地构建安装包；Beta CI 成功构建并通过 smoke，但未上传安装包 artifact。详见[验收报告](https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md)。
 - **T3：PARTIAL。**schema 5–8 契约及现有拒绝路径有证据；仍缺按版本抽样的类型/NOT NULL 变异、动态枚举 CHECK 的证伪测试，以及 schema<5 普通连接拒绝与人工恢复/导出路径自动化验证。
 - **T9：**维护者已将其从当前发布门禁中退休。旧只读审查仅作历史记录，不参与当前判定。
-- **T12：NOT_RUN。**本轮未创建 tag、Release 或发布；发布仍须维护者明确 GO。
+- **T12：NOT_RUN。**本轮未创建发布 tag、Release 或发布；发布仍须维护者明确 GO。
 - **PR 清理：**旧 CI-only PR #21 已关闭。Issue [#6](https://github.com/Martin-soaring-dev/bili-fav-organizer/issues/6) 是未解决的收藏夹计数异常问题，不属于 PR #22 的实现范围，继续保持 open。
 - **当前看板：**[BiliFavOrganizer Delivery Console](https://martin-soaring-dev.github.io/bili-fav-organizer/)。
 
 本节为当前权威状态。下方较早的执行记录保留用于追溯，不能覆盖本节结论。
 
-**分支收敛目标：**维护者要求最终只保留 `main`。候选、evidence 报告、日志与截图已纳入 main（证据归档提交 `d74bdb9`）；本清单当前验收链接改指向 `main`。`feat/reliability-scheduler-implementation`、`docs/reliability-scheduler-refactor-plan`、`fix/vault-active-work-barrier` 和 `master` 均无 main 独有提交；旧 `ci/ea-playwright-full-regression-20261019` 的 workflow 内容已由 main 中更新版本覆盖，可在核对后删除。`gh-pages` 需等 GitHub Pages 切换到 main 的 `docs/` 并在线验证后删除。`maintenance/release-pipeline-post-v0209` 与 `new_arch` 仍含 main 未有的代码；删除前须迁入 main 或明确决定舍弃。最终删除前再次核对远端分支列表，确保只剩 `main`。
+**分支收敛状态（远端复核：2026-10-21）：**目标是最终只保留 `main`。当前远端有 11 个分支，其中 10 个非 `main` 分支；PR #22 已合并、PR #21 已关闭，目前没有打开的 PR。候选、两条 evidence 分支的报告/日志/截图均已归档到 main，验收链接已指向 main；`feat/reliability-scheduler-implementation`、`docs/reliability-scheduler-refactor-plan`、`fix/vault-active-work-barrier`、`master` 均无 main 独有提交，可清理。`ci/ea-playwright-full-regression-20261019` 的 6 个独有提交中，workflow 改动已被 main 更新版本覆盖；`maintenance/release-pipeline-post-v0209`（3 个独有提交，head `c4e1d79616abd45c8a7776125ecabb6893271e52`）与 `new_arch`（1 个独有提交，head `52d4f9e5a898a7013724da215cf0caf18b6d7dab`）包含未合入内容。为保留完整历史，清理前应将这三条分支 head 保存为 `archive/*` 标签；这些是归档标签，不是发布标签。公开看板已复制到 `main/docs/index.html`，但 Pages 当前仍依赖 `gh-pages`：切换 Pages source 到 `main` 的 `/docs` 并在线确认成功后，再删除 `gh-pages`。最后删除其余 9 条非 main branch refs，并复核分支列表只剩 `main`。
 
 **用途：**按本清单维护 `bili-fav-organizer`，逐项修复、测试、截图验收并汇报。它把 [维护计划](reliability-maintenance-plan.md) 转成可执行任务卡。
-**更新日期：**2026-10-21
+**更新日期：**2026-10-21（分支盘点补充）
 **状态：**候选已合并；T8/T10/T11a/T11b 已通过，T3 为 PARTIAL，T12 未执行。详细结论见上方“合并后收尾状态”。
 
 **交互看板：**[公开 Delivery Console](https://martin-soaring-dev.github.io/bili-fav-organizer/) · [T11b 安装与升级验收报告](https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md) · [历史执行记录](reliability-maintenance-execution-20261019.md)
