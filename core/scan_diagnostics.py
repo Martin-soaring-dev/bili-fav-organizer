@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import secrets
 
+from bili_api import RateLimitedError
+
 
 def diagnose_folder(session, media_id: str, expected: int) -> dict:
     if not 0 <= expected <= 1000:
@@ -30,7 +32,7 @@ def diagnose_folder(session, media_id: str, expected: int) -> dict:
             pages[-1]["empty"] = True
 
     for item in session.iter_folder_videos(str(media_id), expected, on_event=page_event):
-        key = f"{int(item.get('type') or 2)}:{str(item.get('id') or item.get('aid') or '')}"
+        key = f"{int(item.get('type', 2))}:{str(item.get('id') or item.get('aid') or '')}"
         page_keys.append(key)
 
     id_keys = []
@@ -49,6 +51,8 @@ def diagnose_folder(session, media_id: str, expected: int) -> dict:
                     ids_error = "resource/ids 包含无效条目"
                     continue
                 id_keys.append(f"{int(item['type'])}:{str(item['id'])}")
+    except RateLimitedError:
+        raise
     except Exception as exc:
         # No API URL, response body, or cookie is exposed to UI.
         ids_error = type(exc).__name__
