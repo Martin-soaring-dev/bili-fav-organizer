@@ -582,12 +582,12 @@
       <div id="scan-issue-options" class="scan-issue-options">
         <section class="scan-issue-option scan-issue-manual">
           <div class="scan-option-title"><span class="scan-option-number">1</span><h3>去 B 站手动清理</h3><span class="scan-option-badge">推荐</span></div>
-          <p>打开对应收藏夹，检查并清理失效内容。处理完成后，回到这里重试扫描。</p>
+          <p>使用系统浏览器打开对应收藏夹，先核对实际资源数量。只有确定存在失效内容时才手动清理；处理完成后返回重扫。</p>
           <div class="scan-option-actions"><a id="scan-issue-link" class="btn primary" target="_blank" rel="noopener noreferrer">前往 B 站清理 ↗</a><button id="scan-issue-retry" class="btn ghost" type="button">我已处理，重试扫描</button></div>
         </section>
         <section class="scan-issue-option">
           <div class="scan-option-title"><span class="scan-option-number">2</span><h3>由程序自动清理</h3><span class="scan-option-badge scan-option-caution">不推荐</span></div>
-          <p class="scan-auto-warning">会修改你在 B 站的收藏夹，移除 B 站判定为失效的内容。建议先手动检查。</p>
+          <p class="scan-auto-warning">数量不一致也可能是本地分页或 API 漏读，并不代表云端存在失效视频。此操作可能删除远端正常内容；请先在 B 站核实并优先联系开发者诊断。</p>
           <button id="scan-issue-clean-show" class="btn ghost" type="button" aria-expanded="false" aria-controls="scan-issue-clean-confirm">查看自动清理选项</button>
           <div id="scan-issue-clean-confirm" class="scan-clean-confirm" hidden>
             <p>数量不一致不一定由失效视频引起。清理会直接修改远端收藏夹，本工具无法撤销此操作；清理后仍可能需要进一步排查。</p>
