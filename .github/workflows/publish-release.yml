@@ -180,6 +180,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: refs/tags/${{ inputs.tag }}
+          persist-credentials: false
 
       - name: Refuse overwrite and create GitHub Release
         shell: pwsh
