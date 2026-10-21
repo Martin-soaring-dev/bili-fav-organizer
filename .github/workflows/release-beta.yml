@@ -1,34 +1,33 @@
-name: Beta Windows release candidate build
+name: Beta Windows tag release
 
-# This workflow is build-only. It runs manually from main and never writes a Release or tag.
+# A pushed beta tag automatically runs tests, builds all Windows packages, and publishes a prerelease.
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Beta tag to build, for example v0.210-beta.1
-        required: true
-        type: string
+  push:
+    tags: ["v*-beta.*"]
 
 permissions:
   contents: read
 
 jobs:
   build:
-    if: ${{ github.ref == 'refs/heads/main' }}
+    if: ${{ contains(github.ref_name, '-beta.') }}
+    permissions:
+      contents: write
     runs-on: windows-latest
     env:
       BFO_REQUIRE_PLAYWRIGHT: "1"
-      BETA_RELEASE_TAG: ${{ inputs.tag }}
+      BETA_RELEASE_TAG: ${{ github.ref_name }}
     steps:
-      - name: Check out source
+      - name: Check out tagged source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Validate manual build request
+      - name: Validate pushed tag
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF -ne "refs/heads/main") { throw "Release candidates can only be built from main." }
+          if ($env:GITHUB_REF -notmatch '^refs/tags/') { throw "This workflow only runs from a pushed tag." }
           if ($env:BETA_RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Unsupported beta tag: $env:BETA_RELEASE_TAG" }
 
       - name: Set up Python
@@ -44,14 +43,14 @@ jobs:
       - name: Install Chromium for required UI regressions
         run: python -m playwright install chromium
 
-      # Candidate creation is gated by the same regression suite as CI.
+      # A tag is published only after the full regression suite succeeds.
       - name: Run tests
         run: python tools/run_isolated_tests.py
 
       - name: Embed release version
         shell: pwsh
         env:
-          RELEASE_VERSION: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ github.ref_name }}
         run: |
           $version = $env:RELEASE_VERSION
           if ($version -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Unsupported release version: $version" }
@@ -172,38 +171,23 @@ jobs:
           $hash = (Get-FileHash $expected -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $(Split-Path -Leaf $expected)" | Set-Content "$expected.sha256" -Encoding ascii
 
-      - name: Assemble release candidate and integrity manifest
+      - name: Publish GitHub Release after all tests and packages pass
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TITLE: ${{ steps.notes.outputs.title }}
+          RELEASE_NOTES_B64: ${{ steps.notes.outputs.notes_b64 }}
         run: |
+          $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
+          [System.IO.File]::WriteAllText("release-notes.md", $notes, [System.Text.UTF8Encoding]::new($false))
           $tag = $env:BETA_RELEASE_TAG
-          $neoVersion = $tag.TrimStart('v') -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
-          $stage = "release-candidate"
-          New-Item -ItemType Directory -Force $stage | Out-Null
+          $neoVersion = $tag.Substring(1) -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
           $zip = "BiliFavOrganizer-Windows-x64-$tag.zip"
           $setup = "dist/BiliFavOrganizer-Setup-$tag.exe"
           $electron = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
           $assets = @($zip, "$zip.sha256", $setup, "$setup.sha256", $electron, "$electron.sha256")
           foreach ($asset in $assets) {
-            if (-not (Test-Path $asset)) { throw "Missing release candidate asset: $asset" }
-            Copy-Item $asset (Join-Path $stage (Split-Path -Leaf $asset))
+            if (-not (Test-Path $asset)) { throw "Release asset missing: $asset" }
           }
-          python tools/release_candidate.py create-manifest `
-            --directory $stage `
-            --channel beta `
-            --tag $tag `
-            --repository $env:GITHUB_REPOSITORY `
-            --run-id $env:GITHUB_RUN_ID `
-            --run-attempt $env:GITHUB_RUN_ATTEMPT `
-            --source-sha $env:GITHUB_SHA `
-            --source-ref $env:GITHUB_REF `
-            --workflow-file .github/workflows/release-beta.yml
-          if ($LASTEXITCODE -ne 0) { throw "Could not create release candidate manifest." }
-
-      - name: Upload release candidate artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: release-candidate
-          path: release-candidate/*
-          if-no-files-found: error
-          retention-days: 30
-
+          gh release create $tag @assets --verify-tag --title "$env:RELEASE_TITLE" --notes-file release-notes.md --prerelease
+          if ($LASTEXITCODE -ne 0) { throw "GitHub Release creation/upload failed." }

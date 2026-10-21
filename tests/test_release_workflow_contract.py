@@ -10,20 +10,34 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
     def read(self, name: str) -> str:
         return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
-    def test_release_build_workflows_are_manual_main_only_and_read_only(self):
-        for name in ("release-beta.yml", "release-stable.yml"):
+    def test_release_build_workflows_are_tag_triggered_and_publish_after_tests(self):
+        expected_tags = {
+            "release-stable.yml": 'tags: ["v*"]',
+            "release-beta.yml": 'tags: ["v*-beta.*"]',
+        }
+        for name, tag_filter in expected_tags.items():
             with self.subTest(workflow=name):
                 text = self.read(name)
-                self.assertIn("workflow_dispatch:", text)
-                self.assertIn("if: ${{ github.ref == 'refs/heads/main' }}", text)
+                self.assertIn("on:\n  push:", text)
+                self.assertIn(tag_filter, text)
+                self.assertNotIn("workflow_dispatch:", text)
                 self.assertIn("contents: read", text)
-                self.assertNotIn("contents: write", text)
-                self.assertNotIn("gh release create", text)
-                self.assertIn("RELEASE_VERSION: ${{ inputs.tag }}", text)
-                self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", text)
-                self.assertIn("create-manifest", text)
-                self.assertIn("--source-sha $env:GITHUB_SHA", text)
-                self.assertIn("--source-ref $env:GITHUB_REF", text)
+                self.assertIn("contents: write", text)
+                self.assertIn("RELEASE_VERSION: ${{ github.ref_name }}", text)
+                self.assertIn("persist-credentials: false", text)
+                self.assertIn("gh release create $tag @assets --verify-tag", text)
+                self.assertNotIn("inputs.tag", text)
+                self.assertNotIn("create-manifest", text)
+                self.assertNotIn("actions/upload-artifact@", text)
+                tests = text.index("- name: Run tests")
+                python_build = text.index("- name: Build self-contained application")
+                installer = text.index("- name: Build installer (Inno Setup)")
+                electron = text.index("- name: Build Electron neo")
+                publish = text.index("- name: Publish GitHub Release after all tests and packages pass")
+                self.assertLess(tests, python_build)
+                self.assertLess(python_build, installer)
+                self.assertLess(installer, electron)
+                self.assertLess(electron, publish)
 
     def test_publisher_is_environment_gated_and_has_scoped_write_permission(self):
         text = self.read("publish-release.yml")
@@ -98,7 +112,6 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             "actions/checkout": "11bd71901bbe5b1630ceea73d27597364c9af683",
             "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",
             "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
-            "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
         }
         publisher_expected = {
             "actions/checkout": expected["actions/checkout"],

@@ -248,7 +248,7 @@ bili-fav-organizer/
 
 ## 更新日志
 
-### v0.210.1（待发布）
+### [v0.210.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.210.1)（2026-10-21 · 待发布）
 
 **Windows 实机测试版：扫描异常只读诊断、设置恢复与 B 站外链修复。**
 
