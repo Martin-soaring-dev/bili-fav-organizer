@@ -248,7 +248,15 @@ bili-fav-organizer/
 
 ## 更新日志
 
-### [v0.210.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.210.1)（2026-10-21 · 待发布）
+### 开发中：收藏夹批量读取与任务参数优化
+
+- 每夹一次读取完整 ID 清单，本地已有明细复用，缺少的明细合并为一次批量请求（最多 1000 条）。
+- 明细少返回时保留已确认的收藏 ID 并标注明细待补，不再把整夹退回 20 条分页；再次扫描只补查缺少明细。
+- 高级设置按任务标注每批条数、同时请求数和间隔；改用整数输入框，前后端校验范围，新增画像批次与并发设置。详见 [任务参数说明](docs/user/task-settings.md)。
+- 恢复 [收藏夹 API 原始规范与来源](docs/README.md)，补充 [历史实测与回归记录](docs/testing/favorite-api-history.md)。
+
+
+### [v0.210.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.210.1)（2026-10-21）
 
 **Windows 实机测试版：扫描异常只读诊断、设置恢复与 B 站外链修复。**
 

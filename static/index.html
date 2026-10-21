@@ -238,7 +238,7 @@
       <!-- 步骤 1：扫描 -->
       <section class="card">
         <h2>🔍 获取收藏明细</h2>
-        <p class="desc">先同步收藏夹目录；已建索引的内容优先本地复用，缺失元数据再按接口能力读取。小收藏夹使用 ID 清单核对，较大的夹使用分页明细。完整快照提交后会清理已取消收藏的夹内关系。</p>
+        <p class="desc">先同步收藏夹目录；每个收藏夹一次读取完整 ID 清单，已建索引的明细本地复用，缺少的明细合并成一次批量请求。明细暂不可用的条目保留 ID 并单独标注。完整 ID 快照提交后同步已取消收藏的夹内关系。</p>
         <div class="row">
           <button id="scan-btn" class="btn primary">开始扫描</button>
           <button id="scan-stop" class="btn danger">停止</button>
@@ -249,21 +249,8 @@
           <label class="inline-label">扫描方式
             <select id="scan-mode" title="继续扫描按收藏夹判断进度：已完成的收藏夹不会重复读取；未完成的收藏夹会重新读取，可能从该收藏夹第 1 页开始"><option value="resume">继续未完成/变化的夹</option><option value="rebuild">重扫所选夹</option></select>
           </label>
-          <label class="inline-label">请求间隔
-            <select id="scan-interval">
-              <option value="2" selected>2 秒</option>
-              <option value="3">3 秒</option>
-              <option value="4">4 秒</option>
-              <option value="5">5 秒</option>
-              <option value="6">6 秒</option>
-              <option value="7">7 秒</option>
-              <option value="8">8 秒</option>
-              <option value="9">9 秒</option>
-              <option value="10">10 秒</option>
-              <option value="20">20 秒</option>
-              <option value="30">30 秒</option>
-              <option value="60">60 秒</option>
-            </select>
+          <label class="inline-label">扫描读取间隔（秒）
+            <input id="scan-interval" type="text" inputmode="numeric" pattern="[0-9]+" data-min="2" data-max="60" value="2" class="num-input" aria-label="扫描读取间隔（秒）">
           </label>
         </div>
         <div class="progress" id="scan-progress" style="display:none">
@@ -308,12 +295,8 @@
         <div class="row">
           <button id="merge-start" class="btn primary">执行已提交任务</button>
           <button id="merge-stop" class="btn danger">停止</button>
-          <label class="inline-label">操作间隔
-            <select id="merge-interval">
-              <option value="1">1 秒</option><option value="2">2 秒</option>
-              <option value="3">3 秒</option><option value="5">5 秒</option>
-              <option value="10">10 秒</option>
-            </select>
+          <label class="inline-label">收藏夹修改 / 合并 / 删除间隔（秒）
+            <input id="merge-interval" type="text" inputmode="numeric" pattern="[0-9]+" data-min="1" data-max="60" value="2" class="num-input" aria-label="收藏夹修改 / 合并 / 删除间隔（秒）">
           </label>
           <span id="merge-status" class="muted"></span>
         </div>
@@ -331,9 +314,8 @@
             <button id="profile-generate" class="btn primary">生成缺失 / 过期画像</button>
             <button id="profile-rebuild" class="btn ghost">重建所选画像</button>
             <button id="profile-stop" class="btn danger">停止</button>
-            <label class="inline-label profile-interval-label" for="profile-request-interval">画像请求间隔
-              <input id="profile-request-interval" type="number" min="0.5" max="60"
-                     step="0.5" value="2" class="num-input" title="秒">
+            <label class="inline-label profile-interval-label" for="profile-request-interval">画像请求间隔（秒）
+              <input id="profile-request-interval" type="text" inputmode="numeric" pattern="[0-9]+" data-min="1" data-max="60" value="2" class="num-input" aria-label="画像请求间隔（秒）">
             </label>
             <span id="profile-status" class="muted"></span>
           </div>
@@ -355,28 +337,11 @@
           <button id="analyze-start" class="btn primary">开始分析</button>
           <button id="analyze-stop" class="btn danger">停止</button>
           <label class="inline-label"><input id="analyze-continuous" type="checkbox"> 连续 LLM 归类分析</label>
-          <label class="inline-label">批大小
-            <select id="analyze-batch">
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="5">5</option>
-              <option value="8">8</option>
-              <option value="10">10</option>
-              <option value="20">20</option>
-              <option value="50">50</option>
-              <option value="100">100</option>
-              <option value="200">200</option>
-              <option value="500">500</option>
-              <option value="1000">1000</option>
-            </select>
+          <label class="inline-label">内容匹配每批上限（条）
+            <input id="analyze-batch" type="text" inputmode="numeric" pattern="[0-9]+" data-min="1" data-max="1000" value="20" class="num-input" aria-label="内容匹配每批上限（条）">
           </label>
-          <label class="inline-label">并发
-            <select id="analyze-concurrency">
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-            </select>
+          <label class="inline-label">内容匹配同时请求数
+            <input id="analyze-concurrency" type="text" inputmode="numeric" pattern="[0-9]+" data-min="1" data-max="4" value="1" class="num-input" aria-label="内容匹配同时请求数">
           </label>
           <label class="inline-label">重建索引
             <select id="analyze-rebuild" title="决定哪些条目会被重新发送给模型">
@@ -421,20 +386,11 @@
           <button id="apply-stop" class="btn danger">停止</button>
           <button id="plan-view-apply" class="btn ghost">查看 / 修改方案</button>
           <span class="muted" id="apply-meta"></span>
-          <label class="inline-label">写操作间隔
-            <select id="write-interval">
-              <option value="1">1 秒</option>
-              <option value="2" selected>2 秒</option>
-              <option value="3">3 秒</option>
-              <option value="5">5 秒</option>
-            </select>
+          <label class="inline-label">内容移动 / 删除间隔（秒）
+            <input id="write-interval" type="text" inputmode="numeric" pattern="[0-9]+" data-min="1" data-max="60" value="2" class="num-input" aria-label="内容移动 / 删除间隔（秒）">
           </label>
-          <label class="inline-label">单批条数
-            <select id="apply-batch">
-              <option value="100">100</option>
-              <option value="500">500</option>
-              <option value="1000">1000（上限）</option>
-            </select>
+          <label class="inline-label">内容移动 / 删除每批上限（条）
+            <input id="apply-batch" type="text" inputmode="numeric" pattern="[0-9]+" data-min="1" data-max="1000" value="1000" class="num-input" aria-label="内容移动 / 删除每批上限（条）">
           </label>
         </div>
         <div class="progress" id="apply-progress" style="display:none">
@@ -1069,11 +1025,24 @@
           <p class="muted">默认不共享或注入应用保存的 Cookie。浏览器版使用自身的新标签页行为。</p>
         </div>
         <hr class="settings-sep">
-        <h3>扫描与批处理</h3>
+        <h3>任务数量与请求间隔</h3>
         <div class="settings-block">
-          <p class="muted">将已有请求间隔、批量条数及分析并发集中于此；保存后应用于后续任务。B站写入上限 1000，批量读取 1000 仅是候选策略，并非分页接口可用的单页数量。</p>
+          <p class="muted">保存后应用于后续任务。收藏夹读取使用完整 ID 清单与批量明细接口：每夹 ID 清单一次，缺失明细最多一次（最多 1000 条）；已有明细直接复用本地索引。</p>
+          <h4>收藏夹扫描与远端修改</h4>
           <div id="settings-scan-batch-controls" class="row" style="flex-wrap:wrap"></div>
-          <p class="muted">分页明细使用固定每页 20 条，待验证 B 站分页参数后再开放该项。</p>
+          <p class="muted">扫描：正常收藏夹完整 ID 清单读取一次，缺失明细最多请求一次；数量由收藏夹实际内容决定。远端修改串行执行；收藏夹改名、简介修改和删除均逐夹调用，不能使用“每批视频条数”代替。</p>
+          <h4>内容匹配分析（AI）</h4>
+          <div id="settings-content-controls" class="row" style="flex-wrap:wrap"></div>
+          <p class="muted">每批上限 1–1000 条，同时请求数 1–4；上下文不足时自动缩小批次。并发只影响 AI 请求。</p>
+          <h4>收藏夹画像（AI）</h4>
+          <div id="settings-profile-controls" class="row" style="flex-wrap:wrap">
+            <label class="inline-label">画像每批内容上限（条）<input id="profile-batch" type="text" inputmode="numeric" pattern="[0-9]+" data-min="1" data-max="1000" value="1000" class="num-input"></label>
+            <label class="inline-label">画像同时请求数<input id="profile-concurrency" type="text" inputmode="numeric" pattern="[0-9]+" data-min="1" data-max="4" value="1" class="num-input"></label>
+          </div>
+          <p class="muted">覆盖全部可用内容，每批最多 1–1000 条；多个压缩批次可并行，最后统一生成画像。请求间隔与模型 TPM 限制仍生效。</p>
+          <h4>收藏夹整理分析（AI）</h4>
+          <p class="muted">一次比较全部符合条件的收藏夹画像，同时请求数为 1。不按固定数量切割收藏夹，以保留跨夹合并关系。此操作没有独立的批大小或并发设置。</p>
+          <p class="muted">单条明细未返回时保留其收藏 ID，不自动把整夹转为 20 条分页重扫；再次扫描只补查缺失明细。所有可编辑数量和间隔仅接受十进制整数；输入后移开焦点即保存，留空或超范围不会保存。</p>
         </div>
         <hr class="settings-sep">
         <h3>收藏夹画像</h3>

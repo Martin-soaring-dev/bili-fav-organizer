@@ -1346,6 +1346,8 @@ def load_video_index_for_resources(resources: list[dict]) -> dict[str, dict]:
                     for row in rows:
                         key = f"{rtype}:{row[1]}"
                         record = json.loads(row[2])
+                        if record.get("metadata_status") == "unavailable":
+                            continue  # 下次只补查未返回明细的 ID，不能把占位记录当作缓存命中。
                         record["resource_key"] = str(row[0])
                         found[key] = record
                         keys.append(str(row[0]))
@@ -1363,6 +1365,20 @@ def load_video_index_for_resources(resources: list[dict]) -> dict[str, dict]:
                 if record.get("source_folder_id") not in record["folder_ids"]:
                     record["source_folder_id"] = record["folder_ids"][0] if record["folder_ids"] else ""
             return found
+        finally:
+            conn.close()
+
+
+def load_metadata_pending_folder_counts() -> dict[str, int]:
+    """完整 ID 快照中仍待补齐明细的条数；供续扫及界面显示使用。"""
+    with _lock:
+        conn = _connect()
+        try:
+            return {str(row[0]): int(row[1]) for row in conn.execute(
+                "SELECT fi.media_id,COUNT(*) FROM folder_items fi "
+                "JOIN videos v USING(resource_key) "
+                "WHERE json_extract(v.record_json,'$.metadata_status')='unavailable' "
+                "GROUP BY fi.media_id")}
         finally:
             conn.close()
 
@@ -1392,7 +1408,8 @@ def load_folder_profile_samples(media_id: str, *, limit: int | None = None) -> t
                     f"SELECT resource_key,record_json FROM videos WHERE resource_key IN ({marks})",
                     part).fetchall()
                 by_key.update({str(row[0]): json.loads(row[1]) for row in rows})
-            return total, [by_key[key] for key in sample_keys if key in by_key]
+            return total, [by_key[key] for key in sample_keys if key in by_key
+                           and by_key[key].get("metadata_status") != "unavailable"]
         finally:
             conn.close()
 

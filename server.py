@@ -2548,7 +2548,9 @@ DEFAULT_CONFIG = {
     "analyze_max_tokens": 32768,  # 单次输出上限；部分模型将思考计入此限制
     "model_context_tokens": 32768, # 模型上下文总长度，用于估算画像可容纳样本
     "model_tpm_limit": 20000, # 模型每分钟 token 上限；用于画像分页和本地限流
-    "profile_request_interval": 2.0, # 画像分批请求的最小间隔，减少模型接口限流
+    "profile_batch": 1000,
+    "profile_concurrency": 1,
+    "profile_request_interval": 2, # 画像分批请求的最小间隔，减少模型接口限流
     "scan_scope": "all",        # 扫描范围: all=全部收藏夹 / default=仅默认收藏夹
     "write_interval": 2,        # 执行阶段的写操作固定间隔(秒)
     "folder_merge_interval": 2,
@@ -2945,21 +2947,23 @@ def get_config():
 
 
 class ConfigIn(BaseModel):
+    profile_batch: Optional[int] = Field(default=None, strict=True, ge=1, le=1000)
+    profile_concurrency: Optional[int] = Field(default=None, strict=True, ge=1, le=4)
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     model: Optional[str] = None
     active_model_id: Optional[str] = None
-    scan_interval: Optional[int] = None
-    analyze_concurrency: Optional[int] = None
-    analyze_batch: Optional[int] = None
+    scan_interval: Optional[int] = Field(default=None, strict=True, ge=2, le=60)
+    analyze_concurrency: Optional[int] = Field(default=None, strict=True, ge=1, le=4)
+    analyze_batch: Optional[int] = Field(default=None, strict=True, ge=1, le=1000)
     analyze_max_tokens: Optional[int] = None
     model_context_tokens: Optional[int] = None
     model_tpm_limit: Optional[int] = None
-    profile_request_interval: Optional[float] = None
+    profile_request_interval: Optional[int] = Field(default=None, strict=True, ge=1, le=60)
     scan_scope: Optional[str] = None
-    write_interval: Optional[int] = None
-    folder_merge_interval: Optional[int] = None
-    apply_batch: Optional[int] = None
+    write_interval: Optional[int] = Field(default=None, strict=True, ge=1, le=60)
+    folder_merge_interval: Optional[int] = Field(default=None, strict=True, ge=1, le=60)
+    apply_batch: Optional[int] = Field(default=None, strict=True, ge=1, le=1000)
     prompt_profile: Optional[str] = None
     prompt_analyze: Optional[str] = None
     prompt_merge: Optional[str] = None
@@ -3009,8 +3013,12 @@ def set_config(cfg: ConfigIn):
         cur["model_context_tokens"] = max(4096, min(1000000, int(cfg.model_context_tokens)))
     if cfg.model_tpm_limit is not None:
         cur["model_tpm_limit"] = max(1000, min(10000000, int(cfg.model_tpm_limit)))
+    if cfg.profile_batch is not None:
+        cur["profile_batch"] = cfg.profile_batch
+    if cfg.profile_concurrency is not None:
+        cur["profile_concurrency"] = cfg.profile_concurrency
     if cfg.profile_request_interval is not None:
-        cur["profile_request_interval"] = max(0.5, min(60.0, float(cfg.profile_request_interval)))
+        cur["profile_request_interval"] = cfg.profile_request_interval
     if cfg.scan_scope is not None:
         cur["scan_scope"] = cfg.scan_scope if cfg.scan_scope in ("all", "default") else "all"
     if cfg.write_interval is not None:
@@ -4176,6 +4184,7 @@ def scan_issue_recover(media_id: str, body: ScanRecoveryIn):
 def _folder_view(folders: list) -> dict:
     done = {str(x) for x in store.load_scan_done()}
     states = store.load_folder_scan_states()
+    pending_metadata = store.load_metadata_pending_folder_counts()
     selected = set(store.load_scan_selection())
     rows = [{**f, "media_id": str(f["media_id"]),
              "done": (states.get(str(f["media_id"]), {}).get("status") == "complete" and
@@ -4184,6 +4193,7 @@ def _folder_view(folders: list) -> dict:
              "scan_state": states.get(str(f["media_id"]), {}).get("status", "never"),
              "scan_strategy": states.get(str(f["media_id"]), {}).get("strategy"),
              "scanned_count": states.get(str(f["media_id"]), {}).get("fetched_count", 0),
+             "metadata_pending_count": pending_metadata.get(str(f["media_id"]), 0),
              "scanned_at": states.get(str(f["media_id"]), {}).get("snapshot_completed_at"),
              "selected": str(f["media_id"]) in selected} for f in folders]
     return {"folders": rows, "selected_ids": list(selected)}
@@ -4307,8 +4317,10 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
             app_state["total"] = sum(_folder_count(f) for f in picked)
             app_state["folder_total"] = len(picked)
             states = store.load_folder_scan_states()
+            pending_metadata = store.load_metadata_pending_folder_counts()
             rebuild = bool(body and body.mode == "rebuild")
             eligible = [f for f in picked if rebuild or
+                        str(f["media_id"]) in pending_metadata or
                         states.get(str(f["media_id"]), {}).get("status") != "complete" or
                         states.get(str(f["media_id"]), {}).get("expected_count") != _folder_count(f)]
             app_state["folder_done"] = len(picked) - len(eligible)
@@ -4363,6 +4375,8 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                                        if f"{resource['type']}:{resource['id']}" not in cached]
                         fresh_records = session.get_resource_infos_bulk(
                             mid, missing_ids, should_stop=should_stop)
+                        if should_stop():
+                            raise CancelRequested("扫描已手动停止")
                         fresh_by_id = {
                             f"{int(item.get('type', 2) or 2)}:{item.get('id') or item.get('aid') or ''}": item
                             for item in fresh_records
@@ -4382,6 +4396,12 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                                 add_item(item)
                         fetched = len(resource_ids)
                         cache_hits = len(resource_ids) - len(missing_ids)
+                        unavailable = sum(item.get("metadata_status") == "unavailable"
+                                          for item in staged.values())
+                        if unavailable:
+                            emit("warn", f"「{folder['title']}」已核对 {len(resource_ids)} 个收藏 ID，"
+                                 f"其中 {unavailable} 条明细暂不可用；保留 ID，下次仅补查这些明细，不转分页重扫",
+                                 kind="scan_progress", current=folder["title"], strategy=strategy)
                         emit("info", f"「{folder['title']}」索引命中 {cache_hits}/{len(resource_ids)} 条，新增获取 {len(missing_ids)} 条元数据",
                              kind="scan_progress", current=folder["title"], strategy=strategy)
                     except bili_api.RateLimitedError:
@@ -4595,6 +4615,7 @@ def scan_tree():
     """返回收藏夹树：每个夹的名称/应有条数/已扫条数/是否完成，供前端弹窗展示。"""
     folders = store.load_folders()
     states = store.load_folder_scan_states()
+    pending_metadata = store.load_metadata_pending_folder_counts()
     videos = store.load_videos_raw()
     counts: dict = {}
     for v in videos.values():
@@ -4614,6 +4635,7 @@ def scan_tree():
                      states.get(str(mid), {}).get("expected_count") == _folder_count(f)),
             "status": states.get(str(mid), {}).get("status", "never"),
             "strategy": states.get(str(mid), {}).get("strategy", ""),
+            "metadata_pending_count": pending_metadata.get(str(mid), 0),
             "scanned_at": states.get(str(mid), {}).get("snapshot_completed_at"),
         })
     return {
@@ -5498,7 +5520,7 @@ def folder_profile_publish_intro(media_id: str, body: FolderIntroPublishIn):
         raw_session = bili_api.BiliSession(get_session_cookie())
         cfg = load_config()
         raw_session.read_interval = int(cfg.get("scan_interval", 2) or 2)
-        raw_session.write_interval = float(cfg.get("write_interval", 2) or 2)
+        raw_session.write_interval = float(cfg.get("folder_merge_interval", 2) or 2)
         remote = raw_session.get_folder_info(media_id)
         remote_title = str(remote.get("title") or "").strip()
         local_title = str(folder.get("title") or "").strip()
@@ -5654,6 +5676,8 @@ def folder_profiles_generate(body: FolderProfileGenerateIn):
                             context_window_tokens=context_tokens,
                             tpm_limit_tokens=tpm_limit_tokens,
                             request_interval=request_interval,
+                            batch_size=int(cfg.get("profile_batch", 1000)),
+                            concurrency=int(cfg.get("profile_concurrency", 1)),
                             retry_callback=lambda attempt, total, delay, detail: emit(
                                 "warn", f"「{folder.get('title')}」模型请求失败，{int(delay)} 秒后重试（第 {attempt}/{total} 次）：{detail}",
                                 phase="folder_profile"),
@@ -5940,6 +5964,7 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
     # 启动时先算一遍待发送量，方便前端区分「候选总量」和「本次要跑几条」
     done_ids0 = _pending_analysis_ids(rebuild_mode, store.analysis_status_map())
     pending0 = sum(1 for v in videos if v.get("bvid")
+                   and v.get("metadata_status") != "unavailable"
                    and v["bvid"] not in done_ids0 and not _is_invalid(v))
     state = {"id": uuid.uuid4().hex, "running": True, "done": 0,
              "total": len(videos),
@@ -6040,6 +6065,7 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                 ctx["scope"] = refresh_analysis_statuses()["scope"]
                 done_ids = _pending_analysis_ids(rebuild_mode, store.analysis_status_map())
                 pending = [v for v in current if v.get("bvid")
+                           and v.get("metadata_status") != "unavailable"
                            and v["bvid"] not in done_ids
                            and v["bvid"] not in failed_session
                            and not _is_invalid(v)]

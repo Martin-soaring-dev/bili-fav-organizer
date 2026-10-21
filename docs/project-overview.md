@@ -138,9 +138,10 @@ flowchart TB
 **扫描策略**（见 design/scan-sqlite-migration-plan.md）：
 
 ```
-media_count ≤ 1000  →  ID 清单 + 批量元数据接口
-media_count > 1000  →  分页明细接口（每页 20 条）
-任一路径不完整      →  回退分页明细，完成性校验通过才标 complete
+每夹 0–1000 条 → IDs 一次 + 复用本地索引 + 缺少的 infos 最多一次
+明细少返回     → 保留完整 ID 成员，标注明细待补，不整夹转分页
+缓存完整       → 只请求一次 IDs
+异常/历史大夹  → 保留兼容兜底；截断 ID 清单不视为完整
 ```
 
 ### 4.3 `llm_analyzer.py` — LLM 层

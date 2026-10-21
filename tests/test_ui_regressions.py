@@ -415,6 +415,40 @@ class BetaUiRegressionTests(unittest.TestCase):
             page.wait_for_timeout(200)
         self.fail(f"扫描未在 {timeout} 秒内结束：{status}")
 
+    def test_numeric_task_settings_validate_save_and_reload(self):
+        page = self.open_app()
+        self.dismiss_scan_issue_popup(page)
+        page.locator("#settings-btn").click()
+        page.locator('[data-tab="advanced"]').click()
+        field = page.locator("#analyze-batch")
+        self.assertEqual("text", field.get_attribute("type"))
+        self.assertEqual(1, field.count())
+        posts = []
+        page.on("request", lambda req: posts.append(req.post_data_json)
+                if req.method == "POST" and req.url.endswith("/api/config") else None)
+        field.fill("37")
+        field.press("Tab")
+        page.wait_for_function("async () => (await (await fetch('/api/config')).json()).analyze_batch === 37")
+        before = len(posts)
+        for value in ("1.5", "1e2", "-1", "", "1001"):
+            field.evaluate("(el, value) => { el.value = value; el.dispatchEvent(new Event('input', {bubbles: true})); }", value)
+            field.dispatch_event("change")
+            self.assertFalse(field.evaluate("el => el.checkValidity()"))
+        page.wait_for_timeout(200)
+        self.assertEqual(before, len(posts))
+        field.fill("37")
+        page.locator("#profile-batch").fill("75")
+        page.locator("#profile-concurrency").fill("2")
+        page.locator("#settings-save-advanced").click()
+        page.wait_for_function("async () => { const c = await (await fetch('/api/config')).json(); return c.profile_batch === 75 && c.profile_concurrency === 2; }")
+        page.reload()
+        self.dismiss_scan_issue_popup(page)
+        page.locator("#settings-btn").click()
+        page.locator('[data-tab="advanced"]').click()
+        self.assertEqual("75", page.locator("#profile-batch").input_value())
+        self.assertEqual("2", page.locator("#profile-concurrency").input_value())
+        self.assertEqual([], self.page_errors)
+
     def test_empty_model_config_does_not_storm_the_config_endpoint(self):
         page = self.open_app()
         requests = self.config_requests

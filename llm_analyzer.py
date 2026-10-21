@@ -20,6 +20,7 @@ import re
 import threading
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlsplit
@@ -1333,11 +1334,45 @@ def _compress_profile_pages(config: LLMConfig, folder: dict, items: list[dict],
                              throttle_callback=None,
                              progress_callback=None,
                              should_stop=None,
-                             request_callback=None) -> list[dict]:
+                             request_callback=None,
+                             batch_size: int = 1000, concurrency: int = 1) -> list[dict]:
     base = {"folder_name": folder.get("title", ""),
             "folder_item_count": int(content_count)}
-    pending = [(page, output_tokens, 0)
-               for page in _profile_chunks(items, system, base, field, input_budget)]
+    pages = _profile_chunks(items, system, base, field, input_budget)
+    size = max(1, min(1000, int(batch_size))) if field == "items" else 1000
+    pages = [page[start:start + size] for page in pages for start in range(0, len(page), size)]
+    workers = max(1, min(4, int(concurrency)))
+    if workers > 1 and len(pages) > 1:
+        # Each worker retains the existing context/truncation retry path. The
+        # shared request-slot lock still enforces interval and provider TPM.
+        completed_pages = 0
+        failed = threading.Event()
+        progress_lock = threading.Lock()
+        def compress_page(page):
+            nonlocal completed_pages
+            if failed.is_set():
+                raise ProfileCancelledError("其他画像批次失败，停止发送后续批次")
+            _check_profile_cancelled(should_stop)
+            try:
+                result = _compress_profile_pages(
+                    config, folder, page, field=field, system=system,
+                    output_tokens=output_tokens, input_budget=input_budget,
+                    context_window_tokens=context_window_tokens, content_count=content_count,
+                    stage=stage, request_interval=request_interval, tpm_limit_tokens=tpm_limit_tokens,
+                    usage_callback=usage_callback, retry_callback=retry_callback,
+                    throttle_callback=throttle_callback, should_stop=should_stop,
+                    request_callback=request_callback, batch_size=size, concurrency=1)
+            except Exception:
+                failed.set()
+                raise
+            with progress_lock:
+                completed_pages += 1
+                if progress_callback:
+                    progress_callback(stage, completed_pages, len(pages))
+            return result
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="profile-page") as pool:
+            return [digest for results in pool.map(compress_page, pages) for digest in results]
+    pending = [(page, output_tokens, 0) for page in pages]
     planned = len(pending)
     completed = 0
     compressed: list[dict] = []
@@ -1405,6 +1440,8 @@ def generate_folder_profile(config: LLMConfig, folder: dict,
                             *, context_window_tokens: int = 32768,
                             tpm_limit_tokens: int = 20000,
                             request_interval: float = 2.0,
+                            batch_size: int = 1000,
+                            concurrency: int = 1,
                             retry_callback=None,
                             throttle_callback=None,
                             progress_callback=None,
@@ -1473,14 +1510,19 @@ def generate_folder_profile(config: LLMConfig, folder: dict,
     tpm_limit_tokens = max(1000, int(tpm_limit_tokens or 20000))
     if not samples:
         raise ValueError("收藏夹没有可用于生成画像的本地内容")
+    batch_size = max(1, min(1000, int(batch_size)))
+    concurrency = max(1, min(4, int(concurrency)))
+    usage_lock = threading.Lock()
     usage_totals = {"prompt": 0, "completion": 0, "calls": 0}
 
     def collect_usage(prompt_tokens: int, completion_tokens: int) -> None:
-        usage_totals["prompt"] += max(0, int(prompt_tokens))
-        usage_totals["completion"] += max(0, int(completion_tokens))
+        with usage_lock:
+            usage_totals["prompt"] += max(0, int(prompt_tokens))
+            usage_totals["completion"] += max(0, int(completion_tokens))
 
     def collect_request() -> None:
-        usage_totals["calls"] += 1
+        with usage_lock:
+            usage_totals["calls"] += 1
 
     # SiliconFlow Qwen3 can use non-thinking mode. Step-3.5-Flash still emits
     # reasoning_content with enable_thinking=false, so it needs a larger budget.
@@ -1529,7 +1571,7 @@ def generate_folder_profile(config: LLMConfig, folder: dict,
     direct_size = (_estimate_tokens(direct_system) +
                    _estimate_tokens(json.dumps(direct_user, ensure_ascii=False)))
     obj = None
-    if direct_input_budget > 0 and direct_size <= direct_input_budget:
+    if len(samples) <= batch_size and direct_input_budget > 0 and direct_size <= direct_input_budget:
         _check_profile_cancelled(should_stop)
         if progress_callback:
             progress_callback("单次请求生成画像", 1, 1)
@@ -1560,7 +1602,8 @@ def generate_folder_profile(config: LLMConfig, folder: dict,
             throttle_callback=throttle_callback,
             progress_callback=progress_callback,
             should_stop=should_stop,
-            request_callback=collect_request)
+            request_callback=collect_request,
+            batch_size=batch_size, concurrency=concurrency)
 
         reduction_round = 0
         output_truncation_retries = 0
@@ -1597,7 +1640,8 @@ def generate_folder_profile(config: LLMConfig, folder: dict,
                     throttle_callback=throttle_callback,
                     progress_callback=progress_callback,
                     should_stop=should_stop,
-                    request_callback=collect_request)
+                    request_callback=collect_request,
+                    batch_size=batch_size, concurrency=concurrency)
             old_size = _estimate_tokens(json.dumps(summaries, ensure_ascii=False))
             new_size = _estimate_tokens(json.dumps(reduced, ensure_ascii=False))
             reduction_round += 1

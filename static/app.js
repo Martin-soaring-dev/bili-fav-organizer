@@ -1018,7 +1018,9 @@
       if (c.analyze_concurrency) $("analyze-concurrency").value = String(c.analyze_concurrency);
       if (c.analyze_batch) $("analyze-batch").value = String(c.analyze_batch);
       if (c.model_tpm_limit) $("model-tpm-limit").value = String(c.model_tpm_limit);
-      if (c.profile_request_interval) $("profile-request-interval").value = String(c.profile_request_interval);
+      if (c.profile_request_interval) $("profile-request-interval").value = String(Math.ceil(c.profile_request_interval));
+      $("profile-batch").value = String(c.profile_batch || 1000);
+      $("profile-concurrency").value = String(c.profile_concurrency || 1);
       renderManageLists();
       providerPresetsCache = c.provider_presets || [];
       renderPresetList(providerPresetsCache);
@@ -1037,65 +1039,50 @@
     renderActiveModelInfo();
   });
 
-  // 请求间隔改动即时保存
-  $("scan-interval").addEventListener("change", async () => {
-    const v = parseInt($("scan-interval").value, 10);
-    try {
-      await api("POST", "/api/config", { scan_interval: v });
-      log(`请求间隔已设为 ${v} 秒`);
-    } catch (e) { log("保存间隔失败: " + (e.error || e.message), "err"); }
-  });
-
-  // 写操作间隔改动即时保存
-  $("write-interval").addEventListener("change", async () => {
-    const v = parseInt($("write-interval").value, 10);
-    try {
-      await api("POST", "/api/config", { write_interval: v });
-      log(`写操作间隔已设为 ${v} 秒`);
-    } catch (e) { log("保存写操作间隔失败: " + (e.error || e.message), "err"); }
-  });
-  $("merge-interval").addEventListener("change", async () => {
-    const v = parseInt($("merge-interval").value, 10);
-    try { await api("POST", "/api/config", { folder_merge_interval: v }); log(`合并操作间隔已设为 ≥${v} 秒`); }
-    catch (e) { log("保存合并间隔失败: " + e.message, "err"); }
-  });
-
-  // 批量执行单批条数
-  $("apply-batch").addEventListener("change", async () => {
-    const v = parseInt($("apply-batch").value, 10);
-    try {
-      await api("POST", "/api/config", { apply_batch: v });
-      log(`执行批大小已设为 ${v} 条`);
-    } catch (e) { log("保存批大小失败: " + (e.error || e.message), "err"); }
-  });
-
-  // 分析并发数改动即时保存
-  $("analyze-concurrency").addEventListener("change", async () => {
-    const v = parseInt($("analyze-concurrency").value, 10);
-    try {
-      await api("POST", "/api/config", { analyze_concurrency: v });
-      log(`分析并发数已设为 ${v}（仅影响模型请求）`);
-    } catch (e) { log("保存并发数失败: " + (e.error || e.message), "err"); }
-  });
-
-  // 分析批大小改动即时保存
-  $("analyze-batch").addEventListener("change", async () => {
-    const v = parseInt($("analyze-batch").value, 10);
-    try {
-      await api("POST", "/api/config", { analyze_batch: v });
-      log(`分析批大小上限已设为 ${v} 条；超过上下文安全预算时会在发送前自动拆分`);
-    } catch (e) { log("保存批大小失败: " + (e.error || e.message), "err"); }
-  });
-
-  // 上下文窗口与最大输出由「管理模型」里的模型规格决定，这里不再单独保存。
-  $("profile-request-interval").addEventListener("change", async () => {
-    const v = parseFloat($("profile-request-interval").value);
-    if (!Number.isFinite(v) || v < 0.5) { log("画像请求间隔无效（需 ≥ 0.5 秒）", "warn"); return; }
-    try {
-      await api("POST", "/api/config", { profile_request_interval: v });
-      log(`画像请求间隔已设为 ${v} 秒`);
-    } catch (e) { log("保存画像请求间隔失败: " + (e.error || e.message), "err"); }
-  });
+  // Integer settings: validate the whole string; never silently truncate 1.5 or 1e3.
+  const integerSettings = [
+    ["scan-interval", "scan_interval", "扫描读取间隔"],
+    ["write-interval", "write_interval", "内容移动 / 删除间隔"],
+    ["merge-interval", "folder_merge_interval", "收藏夹修改 / 合并 / 删除间隔"],
+    ["apply-batch", "apply_batch", "内容移动 / 删除每批上限"],
+    ["analyze-batch", "analyze_batch", "内容匹配每批上限"],
+    ["analyze-concurrency", "analyze_concurrency", "内容匹配同时请求数"],
+    ["profile-request-interval", "profile_request_interval", "画像请求间隔"],
+    ["profile-batch", "profile_batch", "画像每批内容上限"],
+    ["profile-concurrency", "profile_concurrency", "画像同时请求数"],
+  ];
+  for (const [id, key, label] of integerSettings) {
+    const input = $(id);
+    input.addEventListener("beforeinput", event => {
+      if (event.data && /[^0-9]/.test(event.data) && !event.isComposing) event.preventDefault();
+    });
+    input.addEventListener("paste", event => {
+      if (/[^0-9]/.test(event.clipboardData?.getData("text") || "")) event.preventDefault();
+    });
+    input.addEventListener("input", () => {
+      input.setCustomValidity(/^[0-9]*$/.test(input.value) ? "" : "只能输入十进制整数");
+      input.removeAttribute("aria-invalid");
+    });
+    input.addEventListener("change", async () => {
+      const raw = input.value;
+      const value = Number(raw), min = Number(input.dataset.min), max = Number(input.dataset.max);
+      if (!/^[0-9]+$/.test(raw) || !Number.isSafeInteger(value) || value < min || value > max) {
+        input.setCustomValidity(`请输入 ${min}–${max} 之间的整数`);
+        input.setAttribute("aria-invalid", "true");
+        input.reportValidity();
+        return;
+      }
+      input.setCustomValidity("");
+      try {
+        await api("POST", "/api/config", { [key]: value });
+        input.value = String(value);
+        log(`${label}已保存为 ${value}`);
+      } catch (e) {
+        input.setAttribute("aria-invalid", "true");
+        log(`保存${label}失败: ` + (e.error || e.message), "err");
+      }
+    });
+  }
 
   $("model-tpm-limit").addEventListener("change", async () => {
     const v = parseInt($("model-tpm-limit").value, 10);
@@ -1736,7 +1723,8 @@
           f.strategy === "bulk_ids_infos" ? "批量" :
           f.strategy === "paged" ? "分页" :
           (f.strategy === "paged_fallback" || f.strategy === "paged_index_fallback") ? "回退分页" : "";
-        const stateLabel = f.done ? `完成 · ${strategyLabel}` :
+        const stateLabel = f.metadata_pending_count ? `ID 已完整 · ${f.metadata_pending_count} 条明细待补` :
+          f.done ? `完成 · ${strategyLabel}` :
           f.status === "inconsistent" ? `数量不一致 · ${strategyLabel}` :
           f.status === "stale" ? "旧进度需校验" : f.status === "partial" ? `未完成 · ${strategyLabel}` : "未扫描";
         row.querySelector(".scan-state").textContent = stateLabel;
@@ -1860,6 +1848,7 @@
   }
 
   function folderScanStatus(folder) {
+    if (folder.metadata_pending_count) return `ID 已完整，${folder.metadata_pending_count} 条明细待补`;
     if (folder.scan_state === "inconsistent" || folder.status === "inconsistent") return "数量不一致，需复核";
     if (folder.scan_state === "stale" || folder.status === "stale") return "旧进度待校验";
     if (folder.done) return "已完成";
@@ -1979,7 +1968,8 @@
       title.textContent = item.title || item.bvid || item.resource_key || "未命名内容";
       const sub = document.createElement("span");
       sub.className = "library-item-sub";
-      sub.textContent = [item.upper_name, item.bvid, formatLibraryTime(item.fav_time)].filter(Boolean).join(" · ");
+      sub.textContent = [item.metadata_status === "unavailable" ? "明细暂不可用（不代表失效）" : "",
+        item.upper_name, item.bvid, formatLibraryTime(item.fav_time)].filter(Boolean).join(" · ");
       button.append(title, sub);
       const review = libraryProfileReview(item);
       if (review) {
@@ -2029,6 +2019,7 @@
     detail.replaceChildren();
     const fields = [
       ["标题", item.title], ["BVID", item.bvid], ["AV 号", item.aid], ["资源 ID", item.id],
+      ["明细状态", item.metadata_status === "unavailable" ? item.metadata_error : ""],
       ["资源类型", item.type], ["UP 主", item.upper_name], ["UP 主 UID", item.upper_mid],
       ["时长（秒）", item.duration], ["收藏时间", formatLibraryTime(item.fav_time)],
       ["发布时间", formatLibraryTime(item.pubtime)], ["简介", item.desc],
@@ -5097,14 +5088,16 @@
       if (av && pv) av.textContent = pv.textContent;
     }
     if (name === "advanced") {
-      // 搬移现有表单节点（不复制 ID/事件监听器），保留全部原始保存逻辑。
-      const advancedControls = $("settings-scan-batch-controls");
-      if (advancedControls) {
-        for (const id of ["scan-interval", "write-interval", "apply-batch",
-                          "analyze-batch", "analyze-concurrency"]) {
-          const input = $(id);
-          const wrapper = input && input.closest("label");
-          if (wrapper && wrapper.parentElement !== advancedControls) advancedControls.appendChild(wrapper);
+      // Move original controls without duplicating IDs or save listeners.
+      for (const [target, ids] of [
+        ["settings-scan-batch-controls", ["scan-interval", "write-interval", "merge-interval", "apply-batch"]],
+        ["settings-content-controls", ["analyze-batch", "analyze-concurrency"]],
+        ["settings-profile-controls", ["profile-request-interval"]],
+      ]) {
+        const container = $(target);
+        for (const id of ids) {
+          const wrapper = $(id)?.closest("label");
+          if (container && wrapper && wrapper.parentElement !== container) container.appendChild(wrapper);
         }
       }
       if ($("external-link-mode")) {
@@ -5343,7 +5336,19 @@
   if ($("settings-save-advanced")) {
     $("settings-save-advanced").addEventListener("click", async () => {
       try {
+        const numeric = {};
+        for (const [id, key, label] of integerSettings) {
+          const input = $(id), value = Number(input.value);
+          if (!/^[0-9]+$/.test(input.value) || !Number.isSafeInteger(value) ||
+              value < Number(input.dataset.min) || value > Number(input.dataset.max)) {
+            input.setCustomValidity(`请输入 ${input.dataset.min}–${input.dataset.max} 之间的整数`);
+            input.reportValidity();
+            throw new Error(`${label}未保存：请输入范围内的整数`);
+          }
+          numeric[key] = value;
+        }
         await api("POST", "/api/config", {
+          ...numeric,
           prompt_profile: ($("prompt-profile") || {}).value || "",
           prompt_analyze: ($("prompt-analyze") || {}).value || "",
           prompt_merge: ($("prompt-merge") || {}).value || "",

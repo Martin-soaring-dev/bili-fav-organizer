@@ -29,6 +29,7 @@ with sqlite3.connect(TEST_ROOT / "library.sqlite3") as conn:
     conn.execute("INSERT OR IGNORE INTO schema_migrations VALUES(6, 'test')")
 import server
 import store
+from bili_api import BiliSession as RealBiliSession, CookieInfo
 from core.database import DatabaseNotInitializedError, DatabaseRecoveryRequiredError
 from fastapi.testclient import TestClient
 # Imported after the data directory is redirected: the helper imports store itself.
@@ -333,6 +334,75 @@ class ScanTroubleshootingTests(unittest.TestCase):
         self.run_scan()
         self.assertFalse(server.scan_issues_get()["blocked"])
         self.assertEqual("complete", store.load_folder_scan_states()["10"]["status"])
+
+    def make_documented_bulk_session(self, count, *, omit_last=False):
+        """Use the real API parser with synthetic HTTP responses, not a fake scan path."""
+        session = RealBiliSession(CookieInfo("synthetic", "synthetic", "1"))
+        session._mid = "1"
+        session._throttle_read = lambda **kwargs: None
+        session.list_folders = lambda: [{"media_id": "10", "title": "批量读取测试夹",
+                                         "count": count, "attr": 0}]
+        calls = []
+        options = {"omit_last": omit_last}
+
+        def request(method, url, **kwargs):
+            calls.append((method, url, kwargs.get("params")))
+            if url.endswith("/resource/ids"):
+                payload = [{"id": n, "type": 2, "bv_id": f"BVbulk{n}"}
+                           for n in range(1, count + 1)]
+            elif url.endswith("/resource/infos"):
+                keys = kwargs["params"]["resources"].split(",")
+                payload = [{"id": int(key.split(":")[0]), "type": 2,
+                            "bv_id": f"BVbulk{key.split(':')[0]}", "title": "已返回明细"}
+                           for key in keys
+                           if not (options["omit_last"] and key == f"{count}:2")]
+            else:
+                raise AssertionError(f"正常扫描不能请求分页或额外接口：{url}")
+            return SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+                                   json=lambda: {"code": 0, "data": payload})
+
+        session.session.request = request
+        self.stack.enter_context(patch.object(server.bili_api, "BiliSession", return_value=session))
+        return calls, options
+
+    def test_1000_item_scan_uses_ids_once_and_infos_once(self):
+        calls, _ = self.make_documented_bulk_session(1000)
+        self.run_scan()
+        self.assertEqual(2, len(calls))
+        self.assertEqual(1000, store.load_folder_item_counts()["10"])
+        self.assertEqual("indexed_ids", store.load_folder_scan_states()["10"]["strategy"])
+        self.assertFalse(server.scan_issues_get()["blocked"])
+
+    def test_cached_folder_rebuild_reads_only_id_catalog(self):
+        calls, _ = self.make_documented_bulk_session(316)
+        self.run_scan()
+        calls.clear()
+        self.run_scan()
+        self.assertEqual(1, len(calls))
+        self.assertTrue(calls[0][1].endswith("/resource/ids"))
+
+    def test_missing_info_is_retained_without_paging_and_only_it_is_refetched(self):
+        calls, options = self.make_documented_bulk_session(316, omit_last=True)
+        self.run_scan()
+        self.assertEqual(2, len(calls))
+        self.assertEqual(316, store.load_folder_item_counts()["10"])
+        self.assertEqual({"10": 1}, store.load_metadata_pending_folder_counts())
+        self.assertEqual(1, server.scan_tree()["folders"][0]["metadata_pending_count"])
+        self.assertFalse(server.scan_issues_get()["blocked"])
+        record = store.load_videos_raw()["BVbulk316"]
+        self.assertEqual("unavailable", record["metadata_status"])
+        self.assertFalse(server._is_invalid(record))
+        total, samples = store.load_folder_profile_samples("10")
+        self.assertEqual((316, 315), (total, len(samples)))
+        calls.clear()
+        options["omit_last"] = False
+        # 数量不变且成员快照已完成，也应补查明细，不能永远跳过。
+        result = server.scan(server.ScanIn(folder_ids=["10"], mode="resume"))
+        self.wait_scan(result)
+        self.assertEqual(2, len(calls))
+        self.assertEqual("316:2", calls[1][2]["resources"])
+        self.assertEqual({}, store.load_metadata_pending_folder_counts())
+        self.assertNotIn("metadata_status", store.load_videos_raw()["BVbulk316"])
         self.assertNotIn("clean", self.fake.calls)
 
     def test_gap_persists_and_does_not_clean_or_replace_old_snapshot(self):

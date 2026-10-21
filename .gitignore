@@ -108,9 +108,8 @@ bili_ck_profile/
 .playwright-cli/
 .playwright-mcp/
 
-# 第三方接口文档 —— 不在公开仓库再分发（备份见 master 分支）
-docs/fav/
+# 其他未恢复的第三方接口文档；收藏夹文档已按原许可证恢复
+
 docs/misc/
 docs/login/
 docs/video/
-docs/README.md
