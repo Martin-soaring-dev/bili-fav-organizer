@@ -1,4 +1,4 @@
-name: Stable Windows release candidate build
+name: Stable Windows tag release
 
 # A pushed stable tag automatically runs tests, builds all Windows packages, and publishes the Release.
 on:
@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           if ($env:GITHUB_REF -notmatch '^refs/tags/') { throw "This workflow only runs from a pushed tag." }
-          if ($env:STABLE_RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+([.][0-9]+)?
+          if ($env:STABLE_RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+([.][0-9]+)?$') { throw "Unsupported stable tag: $env:STABLE_RELEASE_TAG" }
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -43,7 +43,7 @@ jobs:
       - name: Install Chromium for required UI regressions
         run: python -m playwright install chromium
 
-      # Candidate creation is gated by the same regression suite as CI.
+      # A tag is published only after the full regression suite succeeds.
       - name: Run tests
         run: python tools/run_isolated_tests.py
 
