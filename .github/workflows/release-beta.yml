@@ -4,30 +4,42 @@ name: Beta Windows tag release
 on:
   push:
     tags: ["v*-beta.*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (manual builds use the selected branch or ref)"
+        required: true
+        type: string
+
+concurrency:
+  group: beta-release-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
   build:
-    if: ${{ contains(github.ref_name, '-beta.') }}
+    if: ${{ contains(github.event.release.tag_name || inputs.tag || github.ref_name, '-beta.') }}
     permissions:
       contents: write
     runs-on: windows-latest
     env:
       BFO_REQUIRE_PLAYWRIGHT: "1"
-      BETA_RELEASE_TAG: ${{ github.ref_name }}
+      BETA_RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
     steps:
       - name: Check out tagged source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref || format('refs/tags/{0}', env.BETA_RELEASE_TAG) }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Validate pushed tag
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF -notmatch '^refs/tags/') { throw "This workflow only runs from a pushed tag." }
           if ($env:BETA_RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Unsupported beta tag: $env:BETA_RELEASE_TAG" }
 
       - name: Set up Python
@@ -43,19 +55,19 @@ jobs:
       - name: Install Chromium for required UI regressions
         run: python -m playwright install chromium
 
-      # A tag is published only after the full regression suite succeeds.
+      # Run the full regression suite before creating packages.
       - name: Run tests
         run: python tools/run_isolated_tests.py
 
       - name: Embed release version
         shell: pwsh
         env:
-          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ env.BETA_RELEASE_TAG }}
         run: |
           $version = $env:RELEASE_VERSION
           if ($version -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Unsupported release version: $version" }
           $source = [System.IO.File]::ReadAllText("server.py")
-          $commit = $env:GITHUB_SHA.Substring(0, 7)
+          $commit = (& git rev-parse --short=7 HEAD).Trim()
           $buildDate = (& git log -1 --format=%ad --date=short).Trim()
           # 每个标记都要求恰好出现一次，避免替换到注释或别的代码行。
           $fill = [ordered]@{
@@ -73,38 +85,6 @@ jobs:
 
       - name: Build self-contained application
         run: pyinstaller --noconfirm --clean BiliFavOrganizer.spec
-
-      - name: Resolve release title and summary from README
-        id: notes
-        shell: pwsh
-        run: |
-          $tag = $env:BETA_RELEASE_TAG
-          $lines = @(Get-Content -Encoding UTF8 README.md)
-          $start = -1
-          $end = $lines.Count
-          for ($i = 0; $i -lt $lines.Count; $i++) {
-            $m = [regex]::Match($lines[$i], '^### \[([^\]]+)\]')
-            if (-not $m.Success) { continue }
-            if ($start -lt 0 -and $m.Groups[1].Value -eq $tag) { $start = $i + 1; continue }
-            if ($start -ge 0) { $end = $i; break }
-          }
-          if ($start -lt 0) {
-            # README 尚未补充该版本日志时，不阻断自动发布；使用默认标题与说明。
-            $title = "$tag"
-            $section = "Automated release for $tag.`n`nNo matching changelog section was found in README.md."
-            Write-Warning "README 中没有 $tag 的更新日志，使用默认 Release 标题与说明。"
-          } else {
-            if ($end -le $start) { throw "README 的 $tag 段落为空。" }
-            $section = ($lines[$start..($end - 1)] -join "`n").Trim("`r`n ")
-            $bold = [regex]::Match($section, '^\*\*(.+?)\*\*', 'Singleline')
-            if (-not $bold.Success) { throw "README 的 $tag 段落缺少加粗摘要行，无法生成 Release 标题。" }
-            $title = "$tag $($bold.Groups[1].Value.TrimEnd([char[]]@('。', '.')))"
-          }
-          # Base64 keeps the Chinese summary intact across the output file and the later env read.
-          $notesB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($section))
-          "title=$title" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "notes_b64=$notesB64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Release title: $title"
 
       - name: Create portable ZIP
         id: package
@@ -166,6 +146,7 @@ jobs:
         run: npm ci
 
       - name: Build Electron neo test installer
+        id: neo
         shell: pwsh
         run: |
           $neoVersion = $env:BETA_RELEASE_TAG.TrimStart('v') -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
@@ -176,24 +157,34 @@ jobs:
           if (-not (Test-Path $expected)) { throw "Electron artifact missing: $expected" }
           $hash = (Get-FileHash $expected -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $(Split-Path -Leaf $expected)" | Set-Content "$expected.sha256" -Encoding ascii
+          "asset_name=$expected" >> $env:GITHUB_OUTPUT
+          "checksum_name=$expected.sha256" >> $env:GITHUB_OUTPUT
 
-      - name: Publish GitHub Release after all tests and packages pass
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TITLE: ${{ steps.notes.outputs.title }}
-          RELEASE_NOTES_B64: ${{ steps.notes.outputs.notes_b64 }}
-        run: |
-          $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
-          [System.IO.File]::WriteAllText("release-notes.md", $notes, [System.Text.UTF8Encoding]::new($false))
-          $tag = $env:BETA_RELEASE_TAG
-          $neoVersion = $tag.Substring(1) -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
-          $zip = "BiliFavOrganizer-Windows-x64-$tag.zip"
-          $setup = "dist/BiliFavOrganizer-Setup-$tag.exe"
-          $electron = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
-          $assets = @($zip, "$zip.sha256", $setup, "$setup.sha256", $electron, "$electron.sha256")
-          foreach ($asset in $assets) {
-            if (-not (Test-Path $asset)) { throw "Release asset missing: $asset" }
-          }
-          gh release create $tag @assets --verify-tag --title "$env:RELEASE_TITLE" --notes-file release-notes.md --prerelease
-          if ($LASTEXITCODE -ne 0) { throw "GitHub Release creation/upload failed." }
+      - name: Preserve release packages for recovery
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: beta-release-${{ env.BETA_RELEASE_TAG }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ steps.package.outputs.asset_name }}
+            ${{ steps.package.outputs.checksum_name }}
+            ${{ steps.installer.outputs.setup_name }}
+            ${{ steps.installer.outputs.setup_checksum }}
+            ${{ steps.neo.outputs.asset_name }}
+            ${{ steps.neo.outputs.checksum_name }}
+
+      - name: Publish release and overwrite attachments
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ env.BETA_RELEASE_TAG }}
+          prerelease: true
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.package.outputs.asset_name }}
+            ${{ steps.package.outputs.checksum_name }}
+            ${{ steps.installer.outputs.setup_name }}
+            ${{ steps.installer.outputs.setup_checksum }}
+            ${{ steps.neo.outputs.asset_name }}
+            ${{ steps.neo.outputs.checksum_name }}

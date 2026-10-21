@@ -10,34 +10,57 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
     def read(self, name: str) -> str:
         return (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
-    def test_release_build_workflows_are_tag_triggered_and_publish_after_tests(self):
+    def test_release_build_workflows_support_both_release_paths_after_tests(self):
         expected_tags = {
-            "release-stable.yml": 'tags: ["v*"]',
-            "release-beta.yml": 'tags: ["v*-beta.*"]',
+            "release-stable.yml": ('tags: ["v*"]', "STABLE_RELEASE_TAG", "false"),
+            "release-beta.yml": ('tags: ["v*-beta.*"]', "BETA_RELEASE_TAG", "true"),
         }
-        for name, tag_filter in expected_tags.items():
+        for name, (tag_filter, tag_env, prerelease) in expected_tags.items():
             with self.subTest(workflow=name):
                 text = self.read(name)
                 self.assertIn("on:\n  push:", text)
                 self.assertIn(tag_filter, text)
-                self.assertNotIn("workflow_dispatch:", text)
-                self.assertIn("contents: read", text)
+                self.assertIn("release:\n    types: [published]", text)
+                self.assertIn("workflow_dispatch:", text)
+                self.assertIn("github.event.release.tag_name || inputs.tag || github.ref_name", text)
+                # Manual recovery uses the selected ref, so fixed orchestration and
+                # its updated tests can repair an already existing release.
+                self.assertIn("github.event_name == 'workflow_dispatch' && github.ref", text)
                 self.assertIn("contents: write", text)
-                self.assertIn("RELEASE_VERSION: ${{ github.ref_name }}", text)
                 self.assertIn("persist-credentials: false", text)
-                self.assertIn("gh release create $tag @assets --verify-tag", text)
-                self.assertNotIn("inputs.tag", text)
-                self.assertNotIn("create-manifest", text)
-                self.assertNotIn("actions/upload-artifact@", text)
+                self.assertIn("git rev-parse --short=7 HEAD", text)
+                self.assertIn("RELEASE_VERSION: ${{ env." + tag_env + " }}", text)
+                publish = text.split("- name: Publish release and overwrite attachments", 1)[1]
+                self.assertIn("uses: softprops/action-gh-release@", publish)
+                self.assertIn("tag_name: ${{ env." + tag_env + " }}", publish)
+                self.assertIn("overwrite_files: true", publish)
+                self.assertIn("fail_on_unmatched_files: true", publish)
+                self.assertIn("prerelease: " + prerelease, publish)
+                # Omitting name/body preserves the maintainer's existing notes.
+                self.assertNotRegex(publish, r"(?m)^\s+(?:name|body|body_path):")
+                for output in (
+                    "steps.package.outputs.asset_name",
+                    "steps.package.outputs.checksum_name",
+                    "steps.installer.outputs.setup_name",
+                    "steps.installer.outputs.setup_checksum",
+                    "steps.neo.outputs.asset_name",
+                    "steps.neo.outputs.checksum_name",
+                ):
+                    self.assertIn(output, publish)
+                self.assertEqual(publish.count("outputs."), 6)
+                self.assertNotIn("environment:", text)
+                self.assertNotIn("gh release create", text)
                 tests = text.index("- name: Run tests")
                 python_build = text.index("- name: Build self-contained application")
                 installer = text.index("- name: Build installer (Inno Setup)")
                 electron = text.index("- name: Build Electron neo")
-                publish = text.index("- name: Publish GitHub Release after all tests and packages pass")
+                archive = text.index("- name: Preserve release packages for recovery")
+                publish_index = text.index("- name: Publish release and overwrite attachments")
                 self.assertLess(tests, python_build)
                 self.assertLess(python_build, installer)
                 self.assertLess(installer, electron)
-                self.assertLess(electron, publish)
+                self.assertLess(electron, archive)
+                self.assertLess(archive, publish_index)
 
     def test_publisher_is_environment_gated_and_has_scoped_write_permission(self):
         text = self.read("publish-release.yml")
@@ -112,6 +135,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             "actions/checkout": "11bd71901bbe5b1630ceea73d27597364c9af683",
             "actions/setup-python": "a26af69be951a213d495a4c3e4e4022e16d87065",
             "actions/setup-node": "49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+            "softprops/action-gh-release": "3bb12739c298aeb8a4eeaf626c5b8d85266b0e65",
         }
         publisher_expected = {
             "actions/checkout": expected["actions/checkout"],

@@ -114,7 +114,6 @@ class ExecutableAttributionTests(unittest.TestCase):
                 flow = path.read_text(encoding="utf-8")
                 self.assertIn("on:\n  push:", flow)
                 self.assertIn(expected_tags[path.name], flow)
-                self.assertNotIn("workflow_dispatch:", flow)
                 self.assertIn("contents: read", flow)
                 self.assertIn("contents: write", flow)
                 self.assertIn('BUILD_VERSION = "dev"', flow)
@@ -123,10 +122,10 @@ class ExecutableAttributionTests(unittest.TestCase):
                 self.assertIn('Copy-Item "LICENSE"', flow)
                 self.assertIn('Copy-Item "NOTICE"', flow)
                 self.assertIn('BiliFavOrganizer-neo-Setup-$neoVersion.exe', flow)
-                self.assertIn("gh release create $tag @assets --verify-tag", flow)
-                self.assertIn("RELEASE_VERSION: ${{ github.ref_name }}", flow)
+                self.assertIn("uses: softprops/action-gh-release@", flow)
+                self.assertIn("overwrite_files: true", flow)
+                self.assertIn("RELEASE_VERSION: ${{ env.", flow)
                 self.assertNotIn("create-manifest", flow)
-                self.assertNotIn("actions/upload-artifact@", flow)
 
     def test_release_publisher_uses_verified_candidate_assets(self):
         flow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
