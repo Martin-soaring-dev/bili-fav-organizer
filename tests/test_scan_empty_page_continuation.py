@@ -27,6 +27,21 @@ class EmptyPageContinuationTests(unittest.TestCase):
         self.assertEqual(2, len(got))
         self.assertTrue(any(e.get("type") == "empty_page" for e in events))
 
+    def test_three_consecutive_empty_pages_fail_closed(self):
+        from bili_api import BiliApiError
+        session = BiliSession.__new__(BiliSession)
+        session._wapi = "https://api.bilibili.com"
+        session._throttle_read = Mock()
+        session._wbi_sign = lambda params: params
+        calls = []
+        def response(_method, _url, params, **_kwargs):
+            calls.append(params["pn"])
+            return {"medias": [], "has_more": True}
+        session._request = response
+        with self.assertRaises(BiliApiError):
+            list(session.iter_folder_videos("1000", 316))
+        self.assertEqual([1, 2, 3], calls)
+
     def test_empty_last_page_stops(self):
         session = BiliSession.__new__(BiliSession)
         session._wapi = 'https://api.bilibili.com'
