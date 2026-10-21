@@ -8,6 +8,7 @@ from bili_api import BiliSession
 class EmptyPageContinuationTests(unittest.TestCase):
     def test_has_more_true_empty_page_continues(self):
         session = BiliSession.__new__(BiliSession)
+        session._wapi = 'https://api.bilibili.com'
         session._throttle_read = Mock()
         session._wbi_sign = lambda params: params
         responses = [
@@ -28,6 +29,7 @@ class EmptyPageContinuationTests(unittest.TestCase):
 
     def test_empty_last_page_stops(self):
         session = BiliSession.__new__(BiliSession)
+        session._wapi = 'https://api.bilibili.com'
         session._throttle_read = Mock()
         session._wbi_sign = lambda params: params
         session._request = lambda *args, **kwargs: {"medias": [], "has_more": False}
