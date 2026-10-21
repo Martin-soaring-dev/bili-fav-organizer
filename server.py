@@ -2972,8 +2972,18 @@ class ConfigIn(BaseModel):
     confidence_merge_min: Optional[float] = None
 
 
+_CONFIG_WRITE_LOCK = threading.RLock()
+
+
 @app.post("/api/config")
 def set_config(cfg: ConfigIn):
+    # Blur-save and Save all may arrive together. Serialize the entire
+    # read/modify/write cycle so independent settings cannot overwrite each other.
+    with _CONFIG_WRITE_LOCK:
+        return _set_config(cfg)
+
+
+def _set_config(cfg: ConfigIn):
     cur = load_config()
     if cfg.base_url is not None:
         cur["base_url"] = cfg.base_url

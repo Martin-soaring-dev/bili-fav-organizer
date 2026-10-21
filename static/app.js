@@ -1011,16 +1011,8 @@
       }
       renderActiveModelInfo();
       try { refreshModelLamp(); } catch (_) { /* 启动早期还没这盏灯 */ }
-      if (c.scan_interval) $("scan-interval").value = String(c.scan_interval);
-      if (c.write_interval) $("write-interval").value = String(c.write_interval);
-      if (c.folder_merge_interval) $("merge-interval").value = String(c.folder_merge_interval);
-      if (c.apply_batch) $("apply-batch").value = String(c.apply_batch);
-      if (c.analyze_concurrency) $("analyze-concurrency").value = String(c.analyze_concurrency);
-      if (c.analyze_batch) $("analyze-batch").value = String(c.analyze_batch);
+      renderTaskSettings(c);
       if (c.model_tpm_limit) $("model-tpm-limit").value = String(c.model_tpm_limit);
-      if (c.profile_request_interval) $("profile-request-interval").value = String(Math.ceil(c.profile_request_interval));
-      $("profile-batch").value = String(c.profile_batch || 1000);
-      $("profile-concurrency").value = String(c.profile_concurrency || 1);
       renderManageLists();
       providerPresetsCache = c.provider_presets || [];
       renderPresetList(providerPresetsCache);
@@ -1051,6 +1043,13 @@
     ["profile-batch", "profile_batch", "画像每批内容上限"],
     ["profile-concurrency", "profile_concurrency", "画像同时请求数"],
   ];
+  function renderTaskSettings(config) {
+    for (const [id, key] of integerSettings) {
+      const input = $(id);
+      if (input.dataset.edited === "true" || config[key] == null) continue;
+      input.value = String(key === "profile_request_interval" ? Math.ceil(config[key]) : config[key]);
+    }
+  }
   for (const [id, key, label] of integerSettings) {
     const input = $(id);
     input.addEventListener("beforeinput", event => {
@@ -1060,6 +1059,7 @@
       if (/[^0-9]/.test(event.clipboardData?.getData("text") || "")) event.preventDefault();
     });
     input.addEventListener("input", () => {
+      input.dataset.edited = "true";
       input.setCustomValidity(/^[0-9]*$/.test(input.value) ? "" : "只能输入十进制整数");
       input.removeAttribute("aria-invalid");
     });
@@ -5195,6 +5195,7 @@
         api("GET", "/api/config"),
         api("GET", "/api/prompts/defaults"),
       ]);
+      renderTaskSettings(cfg);
       const defaults = (defRes && defRes.defaults) || {};
       for (const [elId, key] of map) {
         const el = $(elId);
