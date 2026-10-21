@@ -4,30 +4,42 @@ name: Stable Windows tag release
 on:
   push:
     tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing stable tag to build and publish or repair"
+        required: true
+        type: string
+
+concurrency:
+  group: stable-release-${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
   build:
-    if: ${{ !contains(github.ref_name, '-beta.') }}
+    if: ${{ !contains(github.event.release.tag_name || inputs.tag || github.ref_name, '-beta.') }}
     permissions:
       contents: write
     runs-on: windows-latest
     env:
       BFO_REQUIRE_PLAYWRIGHT: "1"
-      STABLE_RELEASE_TAG: ${{ github.ref_name }}
+      STABLE_RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag || github.ref_name }}
     steps:
       - name: Check out tagged source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: refs/tags/${{ env.STABLE_RELEASE_TAG }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate pushed tag
+      - name: Validate release tag
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF -notmatch '^refs/tags/') { throw "This workflow only runs from a pushed tag." }
           if ($env:STABLE_RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+([.][0-9]+)?$') { throw "Unsupported stable tag: $env:STABLE_RELEASE_TAG" }
 
       - name: Set up Python
@@ -50,12 +62,12 @@ jobs:
       - name: Embed release version
         shell: pwsh
         env:
-          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ env.STABLE_RELEASE_TAG }}
         run: |
           $version = $env:RELEASE_VERSION
           if ($version -notmatch '^v[0-9]+[.][0-9]+([.][0-9]+)?$') { throw "Unsupported release version: $version" }
           $source = [System.IO.File]::ReadAllText("server.py")
-          $commit = $env:GITHUB_SHA.Substring(0, 7)
+          $commit = (& git rev-parse --short=7 HEAD).Trim()
           $buildDate = (& git log -1 --format=%ad --date=short).Trim()
           # 每个标记都要求恰好出现一次，避免替换到注释或别的代码行。
           $fill = [ordered]@{
@@ -179,7 +191,21 @@ jobs:
           $hash = (Get-FileHash $expected -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $(Split-Path -Leaf $expected)" | Set-Content "$expected.sha256" -Encoding ascii
 
-      - name: Publish GitHub Release after all tests and packages pass
+      - name: Preserve release packages for recovery
+        uses: actions/upload-artifact@v4
+        with:
+          name: stable-release-${{ env.STABLE_RELEASE_TAG }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ steps.package.outputs.asset_name }}
+            ${{ steps.package.outputs.checksum_name }}
+            ${{ steps.installer.outputs.setup_name }}
+            ${{ steps.installer.outputs.setup_checksum }}
+            dist/electron/BiliFavOrganizer-neo-Setup-*.exe
+            dist/electron/BiliFavOrganizer-neo-Setup-*.exe.sha256
+
+      - name: Publish release or attach packages to existing release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -199,5 +225,31 @@ jobs:
           foreach ($asset in $assets) {
             if (-not (Test-Path $asset)) { throw "Release asset missing: $asset" }
           }
-          gh release create $tag @assets --verify-tag --title "$env:RELEASE_TITLE" --notes-file release-notes.md
-          if ($LASTEXITCODE -ne 0) { throw "GitHub Release creation/upload failed." }
+          # Distinguish a missing release from permission/network errors.
+          $endpoint = "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
+          $response = (& gh api $endpoint 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) {
+            if ($response -notmatch 'HTTP 404') { throw "Cannot inspect Release: $response" }
+            # Upload into a draft before publishing a newly created release.
+            gh release create $tag --draft --verify-tag --title "$env:RELEASE_TITLE" --notes-file release-notes.md
+            # A maintainer may have created the release while this build was running.
+            $response = (& gh api $endpoint 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0) { throw "Cannot create or resolve Release: $response" }
+          }
+          $release = $response | ConvertFrom-Json
+          # Keep an existing Release's title and notes; reruns replace matching assets.
+          gh release upload $tag @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw "GitHub Release attachment upload failed." }
+          if ($release.draft) {
+            gh release edit $tag --draft=false
+            if ($LASTEXITCODE -ne 0) { throw "GitHub Release publication failed." }
+          }
+          $published = (& gh api $endpoint | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0 -or $published.draft) { throw "Release is not published." }
+          foreach ($asset in $assets) {
+            $name = Split-Path -Leaf $asset
+            $remote = @($published.assets | Where-Object { $_.name -eq $name })
+            if ($remote.Count -ne 1 -or $remote[0].size -ne (Get-Item $asset).Length) {
+              throw "Published attachment missing or wrong size: $name"
+            }
+          }
