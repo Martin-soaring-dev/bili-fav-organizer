@@ -5087,6 +5087,14 @@
           if (wrapper && wrapper.parentElement !== advancedControls) advancedControls.appendChild(wrapper);
         }
       }
+      if ($("external-link-mode")) {
+        $("external-link-mode").disabled = !(window.shell && window.shell.links);
+        if (window.shell && window.shell.links) {
+          window.shell.links.getMode().then(mode => {
+            $("external-link-mode").value = mode === "internal" ? "internal" : "system";
+          }).catch(e => log("读取外链设置失败: " + e.message, "warn"));
+        }
+      }
       loadPromptFields();
     }
     if (name === "model") {
@@ -5302,6 +5310,15 @@
       }
     });
     updateHelloBtn();
+  }
+  if ($("external-link-mode")) {
+    $("external-link-mode").addEventListener("change", async () => {
+      if (!window.shell || !window.shell.links) return;
+      const selected = $("external-link-mode").value;
+      const result = await window.shell.links.setMode(selected);
+      if (!result || !result.ok) log("外链打开方式保存失败", "err");
+      else log("外链打开方式已保存：" + selected, "ok");
+    });
   }
   if ($("settings-save-advanced")) {
     $("settings-save-advanced").addEventListener("click", async () => {
