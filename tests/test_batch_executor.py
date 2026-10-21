@@ -26,10 +26,10 @@ class FakeBiliSession:
         self.write_interval = 0
         self.calls = []
 
-    def get_mid(self):
+    def get_mid(self, *, should_stop=None):
         return "123"
 
-    def list_folders(self):
+    def list_folders(self, *, should_stop=None):
         return [
             {"title": "源夹", "media_id": "10", "count": 0},
             {"title": "现有夹", "media_id": "20", "count": 0},
@@ -134,7 +134,7 @@ class BatchExecutorTests(unittest.TestCase):
 
     def test_uncertain_batch_stops_and_requires_review(self):
         class UncertainSession(FakeBiliSession):
-            def list_folders(self):
+            def list_folders(self, *, should_stop=None):
                 return [
                     {"title": "源夹", "media_id": "10", "count": 0},
                     {"title": "甲", "media_id": "20", "count": 0},

@@ -57,7 +57,7 @@ class FakeSession:
         self.clean_changes_count = True
         self.duplicate = False
 
-    def list_folders(self):
+    def list_folders(self, *, should_stop=None):
         self.calls.append("directory")
         return [{"media_id": "10", "title": "日常生活技巧", "count": self.count, "attr": 0}]
 
@@ -231,7 +231,7 @@ class ScanTroubleshootingTests(unittest.TestCase):
         calls = []
 
         class TwoFolderSession(FakeSession):
-            def list_folders(self):
+            def list_folders(self, *, should_stop=None):
                 calls.append(("directory", ""))
                 return [{"media_id": "10", "title": "完整夹", "count": 1, "attr": 0},
                         {"media_id": "20", "title": "未完成夹", "count": 2, "attr": 0}]
@@ -340,7 +340,7 @@ class ScanTroubleshootingTests(unittest.TestCase):
         session = RealBiliSession(CookieInfo("synthetic", "synthetic", "1"))
         session._mid = "1"
         session._throttle_read = lambda **kwargs: None
-        session.list_folders = lambda: [{"media_id": "10", "title": "批量读取测试夹",
+        session.list_folders = lambda **kwargs: [{"media_id": "10", "title": "批量读取测试夹",
                                          "count": count, "attr": 0}]
         calls = []
         options = {"omit_last": omit_last}

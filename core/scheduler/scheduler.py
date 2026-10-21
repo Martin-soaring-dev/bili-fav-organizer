@@ -55,6 +55,10 @@ class TaskWorkerNotFoundError(SchedulerError):
 class TaskControlRequested(Exception):
     """Base exception a worker can raise at a safe checkpoint boundary."""
 
+    # Low-level clients can preserve this control signal instead of treating it
+    # as a transient network failure and retrying the request.
+    _bfo_task_control_signal = True
+
 
 class PauseRequested(TaskControlRequested):
     """The worker should persist its checkpoint and exit as paused."""

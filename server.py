@@ -1305,8 +1305,13 @@ def _resume_after_failed_vault_barrier(scheduler: TaskScheduler | None) -> None:
         _VAULT_RECOVERY_THREAD.start()
 
 
-def _vault_pause_tasks_for_lock(timeout: float = 30.0) -> TaskScheduler:
-    """Close task admission and wait until every worker releases DB resources."""
+def _vault_pause_tasks_for_lock(timeout: float = 240.0) -> TaskScheduler:
+    """Close admission and allow an in-flight model call to reach a safe point.
+
+    A single model request may run for 180 seconds. Bilibili retry waits observe
+    the task control signal and stop promptly; model calls finish their current
+    request before their worker can release database resources.
+    """
     if store.database_state() != store.DatabaseState.READY.value:
         raise vault_mod.VaultError(
             f"数据库状态为 {store.database_state()}，无法执行锁定")
@@ -2285,6 +2290,19 @@ def _task_safe_point(state: dict, checkpoint: dict, progress: dict | None = None
     if context is None:
         return
     context.safe_point({"version": 1, **checkpoint}, progress=progress or {})
+
+
+def _task_should_stop(state: dict) -> bool:
+    """Check legacy stop intent and propagate scheduler pause/cancel signals.
+
+    Low-level Bilibili clients call this between requests and during their
+    rate-limit waits. A vault pause must escape as PauseRequested so their retry
+    loops do not turn it into a task failure or continue for several minutes.
+    """
+    context = _TASK_CONTEXTS.get(str(state.get("id") or ""))
+    if context is not None:
+        context.raise_if_control_requested()
+    return bool(state.get("stop"))
 
 
 # 任务进度里每个计数器都必须带上自己的单位名，界面上同一行才不会时而表示
@@ -4313,7 +4331,8 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                                      {"phase": "cleaning",
                                       **_progress_counters(steps=(0, 1))})
                     try:
-                        session.clean_invalid_folder(mid, should_stop=lambda: app_state["stop"])
+                        session.clean_invalid_folder(
+                            mid, should_stop=lambda: _task_should_stop(app_state))
                     except (bili_api.RateLimitedError, bili_api.BiliApiError) as exc:
                         if isinstance(exc, bili_api.WriteUncertainError):
                             app_state["reconciliation_required"] = True
@@ -4324,7 +4343,8 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                     store.update_scan_issue(mid, cleanup_unknown=False, event="B 站已确认清理请求，等待重扫验证")
 
             app_state["step"] = "folders"
-            folders = session.list_folders()
+            folders = session.list_folders(
+                should_stop=lambda: _task_should_stop(app_state))
             store.save_folders(folders)
             APP["folders"] = folders
             requested = body.folder_ids if body and body.folder_ids is not None else store.load_scan_selection()
@@ -4351,7 +4371,7 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
                        for f in picked if f not in eligible)
             app_state["done"] = done
             emit("info", f"扫描范围 {len(picked)} 个夹，{len(eligible)} 个需扫描，目录计数 {app_state['total']} 条")
-            should_stop = lambda: bool(app_state.get("stop"))
+            should_stop = lambda: _task_should_stop(app_state)
 
             for folder in sorted(eligible, key=_folder_count):
                 if should_stop():
@@ -4818,7 +4838,8 @@ def folder_organize_suggest():
             _task_safe_point(state, {"phase": "before_suggestions"},
                              {"phase": "suggestions",
                               **_progress_counters(steps=(0, 1))})
-            raw_groups = llm_analyzer.suggest_folder_merges(llm_cfg, profiles)
+            raw_groups = llm_analyzer.suggest_folder_merges(
+                llm_cfg, profiles, should_stop=lambda: _task_should_stop(state))
             known = {str(f["media_id"]): f for f in folders}
             used = set()
             groups = []
@@ -5020,7 +5041,8 @@ def folder_organize_start():
             pending[:] = [group for group in pending
                           if group.get("status") in ("pending", "unknown")]
             # 先把远端目录变化同步到 SQLite，并在所有写请求之前重验画像版本。
-            live_folders = session.list_folders()
+            live_folders = session.list_folders(
+                should_stop=lambda: _task_should_stop(state))
             store.save_folders(live_folders)
             readiness_now = _organization_profile_readiness()
             if not readiness_now["ready"]:
@@ -5048,22 +5070,25 @@ def folder_organize_start():
                 group["status"] = "running"
                 group["results"] = []
                 group_ok = True
-                live = {str(f["media_id"]): f for f in session.list_folders()}
+                live = {str(f["media_id"]): f for f in session.list_folders(
+                    should_stop=lambda: _task_should_stop(state))}
                 target_id = str(group["target_id"])
                 if target_id not in live:
                     group.update(status="failed", error="目标收藏夹不存在")
                     state["done"] += 1; save(); continue
                 for source_id in group["source_ids"]:
                     if state["stop"]: break
-                    live = {str(f["media_id"]): f for f in session.list_folders()}
+                    live = {str(f["media_id"]): f for f in session.list_folders(
+                        should_stop=lambda: _task_should_stop(state))}
                     source = live.get(str(source_id))
                     result = {"source_id": str(source_id), "status": "running"}
                     group["results"].append(result)
                     if not source:
                         result["status"] = "already_absent"; save(); continue
                     count = _folder_count(source)
-                    videos = list(session.iter_folder_videos(str(source_id), count,
-                                  should_stop=lambda: state["stop"])) if count else []
+                    videos = list(session.iter_folder_videos(
+                        str(source_id), count,
+                        should_stop=lambda: _task_should_stop(state))) if count else []
                     normal = [int(v.get("aid", 0) or 0) for v in videos
                               if int(v.get("aid", 0) or 0) > 0 and not _is_invalid(v)]
                     invalid = [int(v.get("aid", 0) or 0) for v in videos
@@ -5079,18 +5104,21 @@ def folder_organize_start():
                              **_progress_counters(groups=(state["done"], len(pending)))},
                         )
                         for batch in chunks(normal):
-                            session.move_batch(str(source_id), target_id, batch, mid=owner_mid,
-                                               should_stop=lambda: state["stop"])
+                            session.move_batch(
+                                str(source_id), target_id, batch, mid=owner_mid,
+                                should_stop=lambda: _task_should_stop(state))
                         for batch in chunks(invalid):
-                            session.batch_delete(str(source_id), batch,
-                                                 should_stop=lambda: state["stop"])
+                            session.batch_delete(
+                                str(source_id), batch,
+                                should_stop=lambda: _task_should_stop(state))
                         if hidden_invalid:
-                            session.clean_invalid_folder(str(source_id),
-                                                         should_stop=lambda: state["stop"])
+                            session.clean_invalid_folder(
+                                str(source_id), should_stop=lambda: _task_should_stop(state))
                         # B 站的收藏夹计数在 move 后可能短暂延迟，等待其收敛再决定是否删夹。
                         after = count
                         for attempt in range(6):
-                            live_after = {str(f["media_id"]): f for f in session.list_folders()}
+                            live_after = {str(f["media_id"]): f for f in session.list_folders(
+                                should_stop=lambda: _task_should_stop(state))}
                             after = _folder_count(live_after.get(str(source_id)) or {})
                             if after == 0 or state["stop"]:
                                 break
@@ -5101,7 +5129,8 @@ def folder_organize_start():
                             result.update(status="not_empty", error=f"仍有 {after} 条，未删除夹")
                             group_ok = False
                         elif group.get("delete_sources", True):
-                            session.delete_folder(str(source_id), should_stop=lambda: state["stop"])
+                            session.delete_folder(
+                                str(source_id), should_stop=lambda: _task_should_stop(state))
                             result["status"] = "merged_and_deleted"
                         else:
                             result["status"] = "merged_kept"
@@ -5113,9 +5142,12 @@ def folder_organize_start():
                 if state["stop"]: break
                 if group_ok:
                     final_name = (group.get("final_name") or "").strip()
-                    current = {str(f["media_id"]): f for f in session.list_folders()}.get(target_id)
+                    current = {str(f["media_id"]): f for f in session.list_folders(
+                        should_stop=lambda: _task_should_stop(state))}.get(target_id)
                     if current and final_name and current.get("title") != final_name:
-                        session.rename_folder(target_id, final_name, should_stop=lambda: state["stop"])
+                        session.rename_folder(
+                            target_id, final_name,
+                            should_stop=lambda: _task_should_stop(state))
                     group["status"] = "done"
                 else:
                     group["status"] = "partial"
@@ -5150,7 +5182,9 @@ def folder_organize_start():
             state["running"] = False
             save()
             try:
-                folders = session.list_folders(); store.save_folders(folders); APP["folders"] = folders
+                folders = session.list_folders(
+                    should_stop=lambda: _task_should_stop(state))
+                store.save_folders(folders); APP["folders"] = folders
             except Exception: pass
             if operation_connection is not None:
                 operation_connection.close()
@@ -6024,7 +6058,8 @@ def analyze_start(body: Optional[AnalyzeIn] = None):
                  inflight=inflight, pending=current_pending)
             err = ""
             try:
-                got = analyzer.analyze_batch(batch)
+                got = analyzer.analyze_batch(
+                    batch, should_stop=lambda: _task_should_stop(state))
             except Exception as e:
                 got = {}
                 err = f"{type(e).__name__}: {e}"
@@ -6562,11 +6597,13 @@ def apply_start():
             # try 只包远程调用：落库失败不得把已远端成功的批次标成 failed
             try:
                 if kind == "delete":
-                    session.batch_delete(src, aids, should_stop=lambda: state["stop"])
+                    session.batch_delete(
+                        src, aids, should_stop=lambda: _task_should_stop(state))
                     success_msg = f"批量删除失效视频成功（批次 {bn}）"
                 else:
-                    session.move_batch(src, target_id, aids, mid=owner_mid,
-                                       should_stop=lambda: state["stop"])
+                    session.move_batch(
+                        src, target_id, aids, mid=owner_mid,
+                        should_stop=lambda: _task_should_stop(state))
                     success_msg = f"批量移入「{target_name}」成功（批次 {bn}）"
             except bili_api.WriteUncertainError as e:
                 msg = f"批次 {bn} 结果不确定：{e}"
@@ -6661,8 +6698,9 @@ def apply_start():
                  phase="apply", kind="apply_start", done=0, total=total)
 
             # 每次执行都实时刷新收藏夹映射，不使用过期 folders.json。
-            owner_mid = session.get_mid()
-            live_folders = session.list_folders()
+            owner_mid = session.get_mid(should_stop=lambda: _task_should_stop(state))
+            live_folders = session.list_folders(
+                should_stop=lambda: _task_should_stop(state))
             store.save_folders(live_folders)
             if needs_profiles:
                 readiness_now = _organization_profile_readiness()

@@ -34,7 +34,7 @@ class FakeBiliSession:
                 raise failure
         return result
 
-    def list_folders(self):
+    def list_folders(self, *, should_stop=None):
         return [{"media_id": "10", "title": "原夹"}]
 
     def create_folder(self, title):

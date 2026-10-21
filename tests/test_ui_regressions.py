@@ -125,10 +125,10 @@ class FakeSession:
     read_interval = 2
     write_interval = 2
 
-    def get_mid(self):
+    def get_mid(self, *, should_stop=None):
         return "12345"
 
-    def list_folders(self):
+    def list_folders(self, *, should_stop=None):
         return [{"media_id": "10", "title": "异常收藏夹", "count": 5, "attr": 0}]
 
     def get_folder_resource_ids(self, media_id, expected, **kwargs):

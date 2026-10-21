@@ -5506,14 +5506,40 @@
   }
   if ($("lock-now-btn")) {
     $("lock-now-btn").addEventListener("click", async () => {
+      const button = $("lock-now-btn");
+      const statusText = $("app-lock-status-text");
+      if (button) {
+        button.disabled = true;
+        button.title = "正在等待后台任务到达安全暂停点";
+      }
+      if (statusText) statusText.textContent = "正在暂停后台任务并安全锁定，请等待当前请求结束…";
+      log("正在等待后台任务到达安全暂停点，然后锁定保险库", "info");
       try {
-        await api("POST", "/api/vault/lock", {});
+        await api("POST", "/api/vault/lock", {}, { timeoutMs: 360000 });
         vaultUnlockedCached = false;
         await refreshAppLock();
         showLockScreen(true);
         log("已锁定", "warn");
       } catch (e) {
-        log(e.error || e.message || "锁定失败", "err");
+        const reason = e.error || e.message || "锁定失败";
+        // HTTP 超时不代表后台一定没完成锁定；先复核保险库真实状态。
+        try {
+          const vault = await api("GET", "/api/vault/status", undefined, { timeoutMs: 10000 });
+          if (vault && vault.configured && vault.onboarding_complete && !vault.unlocked) {
+            vaultUnlockedCached = false;
+            showLockScreen(true);
+            log("保险库已在后台完成锁定", "warn");
+            return;
+          }
+        } catch (_) { /* 状态服务也暂不可用时，保留原始错误 */ }
+        await refreshAppLock();
+        if (statusText) statusText.textContent = `锁定未完成：${reason}`;
+        log(`锁定失败：${reason}`, "err");
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.title = "锁定";
+        }
       }
     });
   }

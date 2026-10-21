@@ -6,6 +6,7 @@ const { StringDecoder } = require('node:string_decoder');
 const fs = require('node:fs');
 const path = require('node:path');
 const pty = require('node-pty');
+const { isProjectReleaseUrl } = require('./external-links');
 
 const REPO_ROOT = path.join(__dirname, '..');
 const APP_ICON = path.join(REPO_ROOT, 'packaging', 'BiliFavOrganizer.ico');
@@ -598,6 +599,8 @@ function createWindow() {
       const parsed = new URL(url);
       if (parsed.protocol === 'https:' && parsed.hostname === 'www.bilibili.com') {
         if (readConfig().external_link_mode === 'internal') return { action: 'allow' };
+        void shell.openExternal(parsed.href).catch((err) => log('外部链接打开失败: ' + err.message));
+      } else if (isProjectReleaseUrl(parsed)) {
         void shell.openExternal(parsed.href).catch((err) => log('外部链接打开失败: ' + err.message));
       } else {
         log('拒绝未知窗口请求');

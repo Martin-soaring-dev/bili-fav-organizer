@@ -322,6 +322,8 @@ class BiliSession:
             except (RateLimitedError, BiliApiError):
                 raise
             except Exception as e:  # 网络/JSON 异常，允许重试
+                if getattr(e, "_bfo_task_control_signal", False):
+                    raise
                 last_exc = e
                 if i < attempts - 1:
                     time.sleep(0.5 * (i + 1))
@@ -387,13 +389,14 @@ class BiliSession:
         self._mixin_key_ts = time.time()
         return True
 
-    def _refresh_wbi_keys(self):
+    def _refresh_wbi_keys(self, should_stop=None):
         """获取 WBI 签名密钥：优先复用已取到的 nav 数据，避免重复请求（P2-5）。"""
         if self._mixin_key:
             return self._mixin_key
         if getattr(self, "_nav_data", None) and self._mixin_from_nav(self._nav_data):
             return self._mixin_key
-        nav = self._request("GET", f"{self._wapi}/x/web-interface/nav")
+        nav = self._request("GET", f"{self._wapi}/x/web-interface/nav",
+                            should_stop=should_stop)
         self._nav_data = nav
         if not self._mixin_from_nav(nav):
             wbi = (nav or {}).get("wbi_img", {}) or {}
@@ -403,7 +406,7 @@ class BiliSession:
                 f"{len(self._extract_wbi_key(wbi.get('sub_url','')))})")
         return self._mixin_key
 
-    def _wbi_sign(self, params: dict) -> dict:
+    def _wbi_sign(self, params: dict, should_stop=None) -> dict:
         """对参数做 WBI 签名，返回带 wts / w_rid 的副本。"""
         out = dict(params)
         out["wts"] = str(int(time.time()))
@@ -413,16 +416,17 @@ class BiliSession:
             if k not in ("w_rid", "wts") and not _contains_unsafe(str(v))
         )
         query = urllib.parse.urlencode(items, safe="'()*!-._~")
-        mixin = self._refresh_wbi_keys()
+        mixin = self._refresh_wbi_keys(should_stop=should_stop)
         out["w_rid"] = hashlib.md5(f"{query}{mixin}".encode()).hexdigest()
         return out
 
     # ---------- 用户 & 收藏夹 ----------
-    def get_mid(self) -> str:
+    def get_mid(self, *, should_stop=None) -> str:
         """获取当前登录用户 mid，同时缓存 nav 数据供 WBI 签名复用（只发一次请求）。"""
         if self._mid:
             return self._mid
-        data = self._request("GET", f"{self._wapi}/x/web-interface/nav")
+        data = self._request("GET", f"{self._wapi}/x/web-interface/nav",
+                             should_stop=should_stop)
         self._nav_data = data
         try:
             self._mixin_from_nav(data)
@@ -431,15 +435,15 @@ class BiliSession:
         self._mid = str(data.get("mid", ""))
         return self._mid
 
-    def list_folders(self) -> list[dict]:
+    def list_folders(self, *, should_stop=None) -> list[dict]:
         """获取收藏夹列表，返回 [{media_id, title, count, attr, ...}]。
 
         attr 是属性位域：bit0=是否私有，bit1=0 表示默认收藏夹。
         保留它供服务端可靠识别默认收藏夹（不依赖标题文字）。
         """
-        mid = self.get_mid()
+        mid = self.get_mid(should_stop=should_stop)
         data = self._request("GET", f"{self._wapi}/x/v3/fav/folder/created/list-all",
-                             params={"up_mid": mid})
+                             params={"up_mid": mid}, should_stop=should_stop)
         folders = []
         for f in data.get("list", []) or []:
             folders.append({
@@ -489,7 +493,7 @@ class BiliSession:
                 "type": "0",          # 视频
                 "platform": "web",
             }
-            params = self._wbi_sign(params)
+            params = self._wbi_sign(params, should_stop=should_stop)
             data = self._request(
                 "GET", f"{self._wapi}/x/v3/fav/resource/list",
                 params=params, should_stop=should_stop,

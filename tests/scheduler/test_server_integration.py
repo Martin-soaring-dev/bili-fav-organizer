@@ -81,6 +81,58 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
             """)
             self._run_subprocess(env, script)
 
+    def test_vault_lock_interrupts_bilibili_rate_limit_backoff_and_pauses_task(self):
+        with tempfile.TemporaryDirectory(prefix="bfo-scheduler-vault-backoff-") as temp_dir:
+            root = Path(temp_dir)
+            env = os.environ.copy()
+            env["LOCALAPPDATA"] = str(root / "profile")
+            env["HOME"] = str(root / "home")
+            env["BILI_FAV_ORGANIZER_DATA_DIR"] = str(root / "profile" / "data")
+            env["BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL"] = "1"
+            script = textwrap.dedent(r"""
+                import threading, time, uuid
+                import store
+                store.initialize_new_database()
+                import bili_api, server
+                server.VAULT.initialize(bound_mid="12345", password="safe-password")
+                server.VAULT.complete_onboarding()
+
+                request_started = threading.Event()
+                class Response:
+                    status_code = 412
+                class FakeHttp:
+                    def request(self, *args, **kwargs):
+                        request_started.set()
+                        return Response()
+
+                session = object.__new__(bili_api.BiliSession)
+                session.session = FakeHttp()
+                session.read_interval = 0
+                session._last_read_at = 0.0
+                session._risk_got_once = set()
+                state = {"id": uuid.uuid4().hex, "running": True, "stop": False}
+
+                def runner():
+                    session._request(
+                        "GET", "https://example.invalid/read",
+                        should_stop=lambda: server._task_should_stop(state))
+
+                _record, scheduler = server._submit_app_task(
+                    "scan", state, runner, parameters={"fixture": "412-backoff"})
+                assert request_started.wait(5), "worker never entered the simulated 412 backoff"
+                started = time.monotonic()
+                locked = server.vault_lock()
+                elapsed = time.monotonic() - started
+                assert isinstance(locked, dict), getattr(locked, "body", locked)
+                assert locked["ok"] is True, locked
+                assert elapsed < 5, f"lock waited for the full retry backoff: {elapsed:.2f}s"
+                record = scheduler.get_task(state["id"])
+                assert record.status is server.TaskStatus.PAUSED, record
+                assert record.pause_reason is server.PauseReason.VAULT_LOCK, record
+                assert store.database_state() == store.DatabaseState.LOCKED.value
+            """)
+            self._run_subprocess(env, script)
+
     def test_scan_route_persists_and_runs_through_the_scheduler(self):
         with tempfile.TemporaryDirectory(prefix="bfo-scheduler-scan-") as temp_dir:
             root = Path(temp_dir)
@@ -97,8 +149,8 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
                 class FakeSession:
                     read_interval = 2
                     write_interval = 2
-                    def get_mid(self): return "12345"
-                    def list_folders(self):
+                    def get_mid(self, *, should_stop=None): return "12345"
+                    def list_folders(self, *, should_stop=None):
                         return [{"media_id": "10", "title": "empty", "count": 0,
                                  "attr": 0}]
                     def get_folder_resource_ids(self, *args, **kwargs): return []

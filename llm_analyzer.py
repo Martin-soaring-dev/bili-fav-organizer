@@ -752,7 +752,8 @@ class LLMAnalyzer:
                 "user_text": user_text, "max_tokens": max_tokens,
                 "prompt_tokens": prompt_tokens, "safety_tokens": safety_tokens}
 
-    def _call(self, videos: list[dict], prepared: dict | None = None):
+    def _call(self, videos: list[dict], prepared: dict | None = None,
+              should_stop=None):
         """调用一次模型。
 
         返回 (结果字典 bvid->result, 缺失视频列表, 原因)
@@ -780,6 +781,8 @@ class LLMAnalyzer:
 
         reason = "error"
         for _ in range(MAX_RETRY):
+            if should_stop:
+                should_stop()
             try:
                 resp = self._session().post(
                     url, json=payload, headers=headers, timeout=DEFAULT_TIMEOUT)
@@ -870,8 +873,11 @@ class LLMAnalyzer:
         return {}, list(videos), reason
 
     # ---------- 批处理 + 容错 ----------
-    def analyze_batch(self, videos: list[dict], _depth: int = 0) -> dict:
+    def analyze_batch(self, videos: list[dict], _depth: int = 0,
+                      should_stop=None) -> dict:
         """分析一批视频，返回 {bvid: result}。"""
+        if should_stop:
+            should_stop()
         if not videos or not self.config.configured:
             return {}
         try:
@@ -887,17 +893,18 @@ class LLMAnalyzer:
             combined = {}
             for part in (videos[:mid], videos[mid:]):
                 try:
-                    combined.update(self.analyze_batch(part, _depth + 1))
+                    combined.update(self.analyze_batch(
+                        part, _depth + 1, should_stop=should_stop))
                 except ContextBudgetError as err:
                     log.error("单批上下文预算保护阻止发送: %s", err)
             return combined
-        got, missing, reason = self._call(videos, prepared)
+        got, missing, reason = self._call(videos, prepared, should_stop=should_stop)
         if not missing:
             return got
         if len(missing) == 1:
             # 解析失败/网络错误可再试一次；"空正文"重试无用，直接放弃
             if reason in ("parse", "error"):
-                got2, _, _ = self._call(missing)
+                got2, _, _ = self._call(missing, should_stop=should_stop)
                 got.update(got2)
             return got
         if len(missing) > 1 and reason in ("truncated", "context") and self.on_context_split:
@@ -909,8 +916,10 @@ class LLMAnalyzer:
         if _depth >= MAX_SPLIT_DEPTH and reason not in ("truncated", "context"):
             return got
         mid = len(missing) // 2
-        got.update(self.analyze_batch(missing[:mid], _depth + 1))
-        got.update(self.analyze_batch(missing[mid:], _depth + 1))
+        got.update(self.analyze_batch(missing[:mid], _depth + 1,
+                                      should_stop=should_stop))
+        got.update(self.analyze_batch(missing[mid:], _depth + 1,
+                                      should_stop=should_stop))
         return got
 
     # ---------- 单条包装（兼容旧调用） ----------
@@ -919,7 +928,8 @@ class LLMAnalyzer:
         return r.get(video.get("bvid", ""))
 
 
-def suggest_folder_merges(config: LLMConfig, folder_profiles: list[dict]) -> list[dict]:
+def suggest_folder_merges(config: LLMConfig, folder_profiles: list[dict], *,
+                          should_stop=None) -> list[dict]:
     """根据收藏夹名称和代表内容生成保守的合并建议。"""
     system = (
         "你是 B 站收藏夹信息架构整理助手。目标是在保留有用主题边界的前提下，"
@@ -958,6 +968,8 @@ def suggest_folder_merges(config: LLMConfig, folder_profiles: list[dict]) -> lis
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
+    if should_stop:
+        should_stop()
     resp = requests.post(f"{config.base_url}/chat/completions", json=payload,
                          headers=headers, timeout=DEFAULT_TIMEOUT)
     resp.raise_for_status()

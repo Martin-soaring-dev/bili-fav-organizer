@@ -38,10 +38,10 @@ class FakeBiliSession:
             {"title": "现有夹", "media_id": "20", "count": 0},
         ]
 
-    def get_mid(self):
+    def get_mid(self, *, should_stop=None):
         return "123"
 
-    def list_folders(self):
+    def list_folders(self, *, should_stop=None):
         return list(self._folders)
 
     def batch_delete(self, media_id, aids, **kwargs):
