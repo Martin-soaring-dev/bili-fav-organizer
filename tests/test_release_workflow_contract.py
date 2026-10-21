@@ -18,7 +18,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         for name, tag_filter in expected_tags.items():
             with self.subTest(workflow=name):
                 text = self.read(name)
-                self.assertIn("on:\\n  push:", text)
+                self.assertIn("on:\n  push:", text)
                 self.assertIn(tag_filter, text)
                 self.assertNotIn("workflow_dispatch:", text)
                 self.assertIn("contents: read", text)
