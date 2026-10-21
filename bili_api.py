@@ -498,6 +498,13 @@ class BiliSession:
             )
             medias = data.get("medias", []) or []
             if not medias:
+                # 空页不一定代表扫描结束；has_more=True 时继续翻页并由上限保护。
+                # 不能因中间的空页漏掉后续有效资源。
+                if data.get("has_more") is True:
+                    if on_event:
+                        on_event({"type": "empty_page", "media_id": media_id, "pn": pn})
+                    pn += 1
+                    continue
                 break
             for m in medias:
                 yield self._normalize_video(m, media_id)
