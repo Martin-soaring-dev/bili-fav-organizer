@@ -111,8 +111,14 @@ for seeded_provider in store.list_providers():
     store.delete_provider(seeded_provider["id"])
 
 
+# Keep persisted settings in the UI harness; a constant partial config makes values
+# disappear from /api/config after reload and produces a false regression failure.
+_real_load_config = server.load_config
 def load_config():
-    return {"scan_interval": 2, "write_interval": 2}
+    config = dict(server.DEFAULT_CONFIG)
+    config.update(_real_load_config())
+    config.update({"scan_interval": 2, "write_interval": 2})
+    return config
 
 
 class FakeSession:
