@@ -1058,6 +1058,17 @@
           <span id="settings-advanced-state" class="muted"></span>
         </div>
         <hr class="settings-sep">
+        <h3>外部链接（Electron Neo）</h3>
+        <div class="settings-block">
+          <label>打开 B 站网页方式
+            <select id="external-link-mode">
+              <option value="system">系统默认浏览器（推荐，使用浏览器现有登录态）</option>
+              <option value="internal">Electron 内置窗口（独立登录态）</option>
+            </select>
+          </label>
+          <p class="muted">默认不共享或注入应用保存的 Cookie。浏览器版使用自身的新标签页行为。</p>
+        </div>
+        <hr class="settings-sep">
         <h3>扫描与批处理</h3>
         <div class="settings-block">
           <p class="muted">将已有请求间隔、批量条数及分析并发集中于此；保存后应用于后续任务。B站写入上限 1000，批量读取 1000 仅是候选策略，并非分页接口可用的单页数量。</p>
