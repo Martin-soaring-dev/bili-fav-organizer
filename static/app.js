@@ -1334,6 +1334,26 @@
     if (scanRecoveryBusy || scanIssuesRunning) event.preventDefault();
   });
   $("scan-issue-retry").addEventListener("click", () => recoverScanIssue("retry"));
+  $("scan-issue-diagnose").addEventListener("click", async () => {
+    if (!scanIssueId || scanRecoveryBusy || scanIssuesRunning) return;
+    const btn = $("scan-issue-diagnose");
+    btn.disabled = true;
+    const out = $("scan-issue-result");
+    out.textContent = "正在执行只读诊断，不会清理或修改 B 站数据…";
+    try {
+      const result = await api("POST", "/api/scan/issues/" + encodeURIComponent(scanIssueId) + "/diagnose", {});
+      const report = result.diagnostic || {};
+      const missing = (report.ids_not_in_pages || []).length;
+      const extra = (report.pages_not_in_ids || []).length;
+      const pages = (report.pages || []).map(p => `第${p.page}页:${p.returned}${p.empty ? "（空页）" : ""}`).join("、");
+      out.textContent = `只读诊断：目录 ${report.directory_count}、分页 ${report.paged_count}/去重 ${report.paged_unique_count}、ID清单 ${report.ids_count}/去重 ${report.ids_unique_count}；清单有而分页缺失 ${missing}，反向缺失 ${extra}。${report.ids_error ? " ID清单错误：" + report.ids_error : ""} 分页：${pages}。临时指纹仅用于本次结果比较，诊断不会写回。`;
+    } catch (e) {
+      out.textContent = "只读诊断失败：" + (e.error || e.message || String(e));
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   $("scan-issue-refresh").addEventListener("click", () => recoverScanIssue("refresh"));
   $("scan-issue-clean-show").addEventListener("click", () => {
     const panel = $("scan-issue-clean-confirm");
