@@ -104,31 +104,29 @@ class ExecutableAttributionTests(unittest.TestCase):
         self.assertIn('StringStruct("LegalCopyright", COPYRIGHT)', spec)
         self.assertIn("version=VERSION_INFO", spec)
 
-    def test_release_candidate_workflows_embed_build_info_and_ship_license_and_notice(self):
+    def test_release_workflows_embed_build_info_ship_license_and_publish_on_tags(self):
+        expected_tags = {
+            "release-stable.yml": 'tags: ["v*"]',
+            "release-beta.yml": 'tags: ["v*-beta.*"]',
+        }
         for path in BUILD_WORKFLOWS:
             with self.subTest(workflow=path.name):
                 flow = path.read_text(encoding="utf-8")
-                self.assertIn("workflow_dispatch:", flow)
-                self.assertIn("if: ${{ github.ref == 'refs/heads/main' }}", flow)
+                self.assertIn("on:\\n  push:", flow)
+                self.assertIn(expected_tags[path.name], flow)
+                self.assertNotIn("workflow_dispatch:", flow)
                 self.assertIn("contents: read", flow)
-                self.assertIn("'BUILD_VERSION = \"dev\"'", flow)
-                self.assertIn("'BUILD_COMMIT = \"\"'", flow)
-                self.assertIn("'BUILD_DATE = \"\"'", flow)
+                self.assertIn("contents: write", flow)
+                self.assertIn("'BUILD_VERSION = \\"dev\\"'", flow)
+                self.assertIn("'BUILD_COMMIT = \\"\\"'", flow)
+                self.assertIn("'BUILD_DATE = \\"\\"'", flow)
                 self.assertIn('Copy-Item "LICENSE"', flow)
                 self.assertIn('Copy-Item "NOTICE"', flow)
                 self.assertIn('BiliFavOrganizer-neo-Setup-$neoVersion.exe', flow)
-                self.assertIn("python tools/release_candidate.py create-manifest", flow)
-                self.assertIn(
-                    "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-                    flow,
-                )
-                self.assertNotIn("gh release create", flow,
-                                 "candidate build workflows must not publish a Release")
-                self.assertNotIn("contents: write", flow,
-                                 "candidate build workflows must remain read-only")
-                # workflow_dispatch runs on main, so the embedded version must come
-                # from the requested tag input rather than github.ref_name (= main).
-                self.assertIn("RELEASE_VERSION: ${{ inputs.tag }}", flow)
+                self.assertIn("gh release create $tag @assets --verify-tag", flow)
+                self.assertIn("RELEASE_VERSION: ${{ github.ref_name }}", flow)
+                self.assertNotIn("create-manifest", flow)
+                self.assertNotIn("actions/upload-artifact@", flow)
 
     def test_release_publisher_uses_verified_candidate_assets(self):
         flow = PUBLISH_WORKFLOW.read_text(encoding="utf-8")
