@@ -1,4 +1,4 @@
-name: Beta Windows release candidate build
+name: Beta Windows tag release
 
 # A pushed beta tag automatically runs tests, builds all Windows packages, and publishes a prerelease.
 on:
@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           if ($env:GITHUB_REF -notmatch '^refs/tags/') { throw "This workflow only runs from a pushed tag." }
-          if ($env:BETA_RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+
+          if ($env:BETA_RELEASE_TAG -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') { throw "Unsupported beta tag: $env:BETA_RELEASE_TAG" }
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -43,7 +43,7 @@ jobs:
       - name: Install Chromium for required UI regressions
         run: python -m playwright install chromium
 
-      # Candidate creation is gated by the same regression suite as CI.
+      # A tag is published only after the full regression suite succeeds.
       - name: Run tests
         run: python tools/run_isolated_tests.py
 
@@ -181,9 +181,7 @@ jobs:
           $notes = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:RELEASE_NOTES_B64))
           [System.IO.File]::WriteAllText("release-notes.md", $notes, [System.Text.UTF8Encoding]::new($false))
           $tag = $env:BETA_RELEASE_TAG
-          $numeric = $tag.Substring(1) -replace '-beta[.].*$', ''
-          $parts = $numeric.Split('.')
-          $neoVersion = if ($parts.Count -eq 2) { "$numeric.0" } else { $numeric }
+          $neoVersion = $tag.Substring(1) -replace '^([0-9]+[.][0-9]+)-beta[.]', '$1.0-beta.'
           $zip = "BiliFavOrganizer-Windows-x64-$tag.zip"
           $setup = "dist/BiliFavOrganizer-Setup-$tag.exe"
           $electron = "dist/electron/BiliFavOrganizer-neo-Setup-$neoVersion.exe"
