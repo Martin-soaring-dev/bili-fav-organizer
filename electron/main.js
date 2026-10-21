@@ -1,6 +1,6 @@
 'use strict';
 // Electron 壳：窗口、托盘、单实例，以及托管 Python 后端（拉起 → 握手 → 收摊）。
-const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, ipcMain, dialog, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const { StringDecoder } = require('node:string_decoder');
 const fs = require('node:fs');
@@ -583,6 +583,21 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // 外部 B 站页面必须交给系统默认浏览器。不要向网页窗口注入保存在应用内的 Cookie。
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === 'https:' && parsed.hostname === 'www.bilibili.com') {
+        void shell.openExternal(parsed.href).catch((err) => log('外部链接打开失败: ' + err.message));
+      } else {
+        log('拒绝未知窗口请求');
+      }
+    } catch (_err) {
+      log('拒绝无效窗口请求');
+    }
+    return { action: 'deny' };
   });
 
   // 关闭 = 收进托盘，不退出；托盘菜单「退出」才真正退出
