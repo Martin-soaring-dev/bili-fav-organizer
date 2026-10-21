@@ -52,6 +52,10 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 contextBridge.exposeInMainWorld('shell', {
+  links: {
+    getMode: () => ipcRenderer.invoke('shell:external-link-mode'),
+    setMode: mode => ipcRenderer.invoke('shell:external-link-mode', mode),
+  },
   captionHeight: CAPTION_H,
   isDesktopShell: true,
   // Hello 验证期间把窗口让开（那个验证框我们无权置顶，只能自己退让）
