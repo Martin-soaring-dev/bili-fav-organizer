@@ -5076,7 +5076,19 @@
       const av = $("about-version"), pv = $("app-version");
       if (av && pv) av.textContent = pv.textContent;
     }
-    if (name === "advanced") loadPromptFields();
+    if (name === "advanced") {
+      // 搬移现有表单节点（不复制 ID/事件监听器），保留全部原始保存逻辑。
+      const advancedControls = $("settings-scan-batch-controls");
+      if (advancedControls) {
+        for (const id of ["scan-interval", "write-interval", "apply-batch",
+                          "analyze-batch", "analyze-concurrency"]) {
+          const input = $(id);
+          const wrapper = input && input.closest("label");
+          if (wrapper && wrapper.parentElement !== advancedControls) advancedControls.appendChild(wrapper);
+        }
+      }
+      loadPromptFields();
+    }
     if (name === "model") {
       // 进入「模型」页时刷新供应商/模型列表
       (async () => {
