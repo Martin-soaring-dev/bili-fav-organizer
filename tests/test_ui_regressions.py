@@ -418,7 +418,7 @@ class BetaUiRegressionTests(unittest.TestCase):
     def test_numeric_task_settings_validate_save_and_reload(self):
         page = self.open_app()
         self.dismiss_scan_issue_popup(page)
-        page.locator("#settings-btn").click()
+        page.locator("#rail-settings").click()
         page.locator('[data-tab="advanced"]').click()
         field = page.locator("#analyze-batch")
         self.assertEqual("text", field.get_attribute("type"))
@@ -443,7 +443,7 @@ class BetaUiRegressionTests(unittest.TestCase):
         page.wait_for_function("async () => { const c = await (await fetch('/api/config')).json(); return c.profile_batch === 75 && c.profile_concurrency === 2; }")
         page.reload()
         self.dismiss_scan_issue_popup(page)
-        page.locator("#settings-btn").click()
+        page.locator("#rail-settings").click()
         page.locator('[data-tab="advanced"]').click()
         self.assertEqual("75", page.locator("#profile-batch").input_value())
         self.assertEqual("2", page.locator("#profile-concurrency").input_value())
