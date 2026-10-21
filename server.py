@@ -4134,6 +4134,29 @@ def scan_issues_get():
             "running": bool((APP.get("scan_run") or {}).get("running"))}
 
 
+@app.post("/api/scan/issues/{media_id}/diagnose")
+def scan_issue_diagnose(media_id: str):
+    """Explicit user-triggered read-only comparison: never changes B station or SQLite."""
+    if (APP.get("scan_run") or {}).get("running"):
+        return JSONResponse({"ok": False, "error": "扫描任务运行中，请稍后执行诊断"}, status_code=409)
+    folder = next((f for f in store.load_folders() if str(f.get("media_id")) == str(media_id)), None)
+    if folder is None:
+        return JSONResponse({"ok": False, "error": "收藏夹不在本地目录中"}, status_code=404)
+    expected = _folder_count(folder)
+    if expected > 1000:
+        return JSONResponse({"ok": False, "error": "当前诊断仅支持不超过1000条的收藏夹"}, status_code=400)
+    from core.scan_diagnostics import diagnose_folder
+    try:
+        sess = bili_api.BiliSession(get_session_cookie())
+        sess.read_interval = max(2, int(load_config().get("scan_interval", 2) or 2))
+        result = diagnose_folder(sess, str(media_id), expected)
+        return {"ok": True, "diagnostic": result}
+    except bili_api.RateLimitedError:
+        return JSONResponse({"ok": False, "error": "B站触发风控，已中止只读诊断"}, status_code=429)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": "只读诊断失败", "error_type": type(exc).__name__}, status_code=502)
+
+
 @app.post("/api/scan/issues/{media_id}/recover")
 def scan_issue_recover(media_id: str, body: ScanRecoveryIn):
     issue = next((row for row in _pending_scan_issues() if row["media_id"] == media_id), None)

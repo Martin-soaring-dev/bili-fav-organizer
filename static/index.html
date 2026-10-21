@@ -582,12 +582,12 @@
       <div id="scan-issue-options" class="scan-issue-options">
         <section class="scan-issue-option scan-issue-manual">
           <div class="scan-option-title"><span class="scan-option-number">1</span><h3>去 B 站手动清理</h3><span class="scan-option-badge">推荐</span></div>
-          <p>打开对应收藏夹，检查并清理失效内容。处理完成后，回到这里重试扫描。</p>
-          <div class="scan-option-actions"><a id="scan-issue-link" class="btn primary" target="_blank" rel="noopener noreferrer">前往 B 站清理 ↗</a><button id="scan-issue-retry" class="btn ghost" type="button">我已处理，重试扫描</button></div>
+          <p>使用系统浏览器打开对应收藏夹，先核对实际资源数量。只有确定存在失效内容时才手动清理；处理完成后返回重扫。</p>
+          <div class="scan-option-actions"><a id="scan-issue-link" class="btn primary" target="_blank" rel="noopener noreferrer">前往 B 站清理 ↗</a><button id="scan-issue-retry" class="btn ghost" type="button">我已处理，重试扫描</button><button id="scan-issue-diagnose" class="btn ghost" type="button">只读诊断漏读原因</button></div>
         </section>
         <section class="scan-issue-option">
           <div class="scan-option-title"><span class="scan-option-number">2</span><h3>由程序自动清理</h3><span class="scan-option-badge scan-option-caution">不推荐</span></div>
-          <p class="scan-auto-warning">会修改你在 B 站的收藏夹，移除 B 站判定为失效的内容。建议先手动检查。</p>
+          <p class="scan-auto-warning">数量不一致也可能是本地分页或 API 漏读，并不代表云端存在失效视频。此操作可能删除远端正常内容；请先在 B 站核实并优先联系开发者诊断。</p>
           <button id="scan-issue-clean-show" class="btn ghost" type="button" aria-expanded="false" aria-controls="scan-issue-clean-confirm">查看自动清理选项</button>
           <div id="scan-issue-clean-confirm" class="scan-clean-confirm" hidden>
             <p>数量不一致不一定由失效视频引起。清理会直接修改远端收藏夹，本工具无法撤销此操作；清理后仍可能需要进一步排查。</p>
@@ -1056,6 +1056,24 @@
           <button id="settings-save-advanced" class="btn primary" type="button">全部保存</button>
           <button id="settings-reset-all-prompts" class="btn ghost" type="button">全部恢复默认</button>
           <span id="settings-advanced-state" class="muted"></span>
+        </div>
+        <hr class="settings-sep">
+        <h3>外部链接（Electron Neo）</h3>
+        <div class="settings-block">
+          <label>打开 B 站网页方式
+            <select id="external-link-mode">
+              <option value="system">系统默认浏览器（推荐，使用浏览器现有登录态）</option>
+              <option value="internal">Electron 内置窗口（独立登录态）</option>
+            </select>
+          </label>
+          <p class="muted">默认不共享或注入应用保存的 Cookie。浏览器版使用自身的新标签页行为。</p>
+        </div>
+        <hr class="settings-sep">
+        <h3>扫描与批处理</h3>
+        <div class="settings-block">
+          <p class="muted">将已有请求间隔、批量条数及分析并发集中于此；保存后应用于后续任务。B站写入上限 1000，批量读取 1000 仅是候选策略，并非分页接口可用的单页数量。</p>
+          <div id="settings-scan-batch-controls" class="row" style="flex-wrap:wrap"></div>
+          <p class="muted">分页明细使用固定每页 20 条，待验证 B 站分页参数后再开放该项。</p>
         </div>
         <hr class="settings-sep">
         <h3>收藏夹画像</h3>
