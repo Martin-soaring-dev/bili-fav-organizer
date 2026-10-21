@@ -445,6 +445,9 @@ class BetaUiRegressionTests(unittest.TestCase):
         self.dismiss_scan_issue_popup(page)
         page.locator("#rail-settings").click()
         page.locator('[data-tab="advanced"]').click()
+        # Configuration loads asynchronously after navigation; wait for the saved
+        # values to render before asserting, rather than reading HTML defaults.
+        page.wait_for_function("document.getElementById('profile-batch').value === '75' && document.getElementById('profile-concurrency').value === '2'")
         self.assertEqual("75", page.locator("#profile-batch").input_value())
         self.assertEqual("2", page.locator("#profile-concurrency").input_value())
         self.assertEqual([], self.page_errors)
