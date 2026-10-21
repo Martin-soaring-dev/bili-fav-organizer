@@ -112,7 +112,7 @@ class ExecutableAttributionTests(unittest.TestCase):
         for path in BUILD_WORKFLOWS:
             with self.subTest(workflow=path.name):
                 flow = path.read_text(encoding="utf-8")
-                self.assertIn("on:\\n  push:", flow)
+                self.assertIn("on:\n  push:", flow)
                 self.assertIn(expected_tags[path.name], flow)
                 self.assertNotIn("workflow_dispatch:", flow)
                 self.assertIn("contents: read", flow)
