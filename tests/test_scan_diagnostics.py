@@ -43,6 +43,13 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(2, report["paged_unique_count"])
         self.assertEqual([], report["ids_not_in_pages"])
 
+    def test_type_zero_remains_distinct_from_type_two(self):
+        session = FakeSession([1], [{"id": 1, "type": 2}])
+        session.iter_folder_videos = lambda _mid, _total, on_event=None: iter([{"id": 1, "type": 0}])
+        report = diagnose_folder(session, "10", 1)
+        self.assertEqual(1, len(report["ids_not_in_pages"]))
+        self.assertEqual(1, len(report["pages_not_in_ids"]))
+
     def test_rejects_large_folder_without_request(self):
         session = FakeSession([], [])
         with self.assertRaises(ValueError):
