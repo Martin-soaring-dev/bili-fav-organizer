@@ -175,6 +175,12 @@ jobs:
       RELEASE_TITLE: ${{ needs.verify-candidate.outputs.release_title }}
       RELEASE_NOTES_B64: ${{ needs.verify-candidate.outputs.release_notes_b64 }}
     steps:
+      - name: Check out the verified release tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          ref: refs/tags/${{ inputs.tag }}
+
       - name: Refuse overwrite and create GitHub Release
         shell: pwsh
         env:
