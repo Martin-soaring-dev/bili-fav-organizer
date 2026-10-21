@@ -470,6 +470,7 @@ class BiliSession:
         on_event:    可选回调，接收事件 dict（req / page）
         """
         pn = 1
+        empty_streak = 0
         total_pages = max(1, (int(total) + PAGE_SIZE - 1) // PAGE_SIZE)
         while True:
             if pn > MAX_SCAN_PAGES:
@@ -501,11 +502,15 @@ class BiliSession:
                 # 空页不一定代表扫描结束；has_more=True 时继续翻页并由上限保护。
                 # 不能因中间的空页漏掉后续有效资源。
                 if data.get("has_more") is True:
+                    empty_streak += 1
+                    if empty_streak >= 3:
+                        raise BiliApiError("分页连续 3 个空页但仍有后续内容，停止扫描以避免无界请求")
                     if on_event:
                         on_event({"type": "empty_page", "media_id": media_id, "pn": pn})
                     pn += 1
                     continue
                 break
+            empty_streak = 0
             for m in medias:
                 yield self._normalize_video(m, media_id)
             if on_event:
