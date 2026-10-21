@@ -4046,12 +4046,14 @@ def _folder_count(folder: dict) -> int:
 
 
 def _pending_scan_issues() -> list[dict]:
-    """Include pre-upgrade inconsistent scans without treating a gap as invalid content."""
+    """Include incomplete membership scans and retained IDs whose details are still unavailable."""
     saved = store.load_scan_issues()
     states = store.load_folder_scan_states()
+    metadata_pending = store.load_metadata_pending_folder_counts()
     folders = {str(f["media_id"]): f for f in store.load_folders()}
     ids = {mid for mid, issue in saved.items() if issue.get("status") != "resolved"}
     ids.update(mid for mid, state in states.items() if state.get("status") == "inconsistent")
+    ids.update(mid for mid, count in metadata_pending.items() if count > 0)
     result = []
     for mid in sorted(ids):
         state, folder = states.get(mid, {}), folders.get(mid, {})
@@ -4060,6 +4062,12 @@ def _pending_scan_issues() -> list[dict]:
                  "fetched_count": state.get("fetched_count", 0),
                  "unique_count": state.get("fetched_count", 0), "history": [],
                  "last_error": state.get("last_error"), **saved.get(mid, {})}
+        pending_count = int(metadata_pending.get(mid, 0) or 0)
+        if pending_count:
+            # Metadata absence is actionable, but it is not proof that the remote item is invalid.
+            issue["kind"] = "metadata_pending"
+            issue["metadata_pending_count"] = pending_count
+            issue["status"] = "pending"
         result.append(issue)
     return result
 
@@ -4183,6 +4191,10 @@ def scan_issue_recover(media_id: str, body: ScanRecoveryIn):
     if body.action not in ("retry", "clean", "refresh"):
         return JSONResponse({"ok": False, "error": "不支持的处理方式"}, status_code=400)
     if body.action == "clean":
+        if issue.get("kind") == "metadata_pending":
+            return JSONResponse({"ok": False,
+                                 "error": "缺少内容明细不代表内容失效，不能据此自动清理；请重试扫描或前往 B 站核对。"},
+                                status_code=400)
         if not body.confirmed:
             return JSONResponse({"ok": False, "error": "自动清理会修改 B 站收藏夹，请先确认"}, status_code=400)
         if issue.get("cleanup_unknown"):
@@ -4288,7 +4300,8 @@ def _start_scan(body: Optional[ScanIn] = None, *, recovery: str | None = None):
             if recovery:
                 mid = body.folder_ids[0]
                 existing = next(row for row in _pending_scan_issues() if row["media_id"] == mid)
-                store.update_scan_issue(mid, **{k: v for k, v in existing.items() if k != "media_id"},
+                store.update_scan_issue(mid, **{k: v for k, v in existing.items()
+                                                if k not in ("media_id", "kind", "metadata_pending_count")},
                                         event="开始刷新目录并重新扫描" if recovery == "refresh" else
                                         "开始重试扫描" if recovery == "retry" else "用户已确认自动清理")
                 if recovery == "clean":

@@ -388,7 +388,19 @@ class ScanTroubleshootingTests(unittest.TestCase):
         self.assertEqual(316, store.load_folder_item_counts()["10"])
         self.assertEqual({"10": 1}, store.load_metadata_pending_folder_counts())
         self.assertEqual(1, server.scan_tree()["folders"][0]["metadata_pending_count"])
-        self.assertFalse(server.scan_issues_get()["blocked"])
+        issue_state = server.scan_issues_get()
+        self.assertTrue(issue_state["blocked"])
+        self.assertEqual([("metadata_pending", 1)],
+                         [(issue["kind"], issue["metadata_pending_count"])
+                          for issue in issue_state["issues"]])
+        rejected_clean = self.client.post(
+            "/api/scan/issues/10/recover",
+            json={"action": "clean", "confirmed": True})
+        self.assertEqual(400, rejected_clean.status_code)
+        blocked = self.client.post("/api/analyze/start", json={})
+        self.assertEqual(409, blocked.status_code)
+        self.assertEqual("scan_issue_pending", blocked.json()["code"])
+        self.assertNotIn("clean", self.fake.calls)
         record = store.load_videos_raw()["BVbulk316"]
         self.assertEqual("unavailable", record["metadata_status"])
         self.assertFalse(server._is_invalid(record))
@@ -397,12 +409,13 @@ class ScanTroubleshootingTests(unittest.TestCase):
         calls.clear()
         options["omit_last"] = False
         # 数量不变且成员快照已完成，也应补查明细，不能永远跳过。
-        result = server.scan(server.ScanIn(folder_ids=["10"], mode="resume"))
+        result = server.scan_issue_recover("10", server.ScanRecoveryIn(action="retry"))
         self.wait_scan(result)
         self.assertEqual(2, len(calls))
         self.assertEqual("316:2", calls[1][2]["resources"])
         self.assertEqual({}, store.load_metadata_pending_folder_counts())
         self.assertNotIn("metadata_status", store.load_videos_raw()["BVbulk316"])
+        self.assertFalse(server.scan_issues_get()["blocked"])
         self.assertNotIn("clean", self.fake.calls)
 
     def test_gap_persists_and_does_not_clean_or_replace_old_snapshot(self):

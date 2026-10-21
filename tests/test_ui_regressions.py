@@ -482,6 +482,43 @@ class BetaUiRegressionTests(unittest.TestCase):
                             f"稳态仍在持续请求 /api/config：{len(requests)} 次")
         self.assertEqual([], self.page_errors)
 
+    def test_metadata_pending_scan_opens_actionable_popup(self):
+        page = self.open_app()
+        self.dismiss_scan_issue_popup(page)
+        issue = {
+            "media_id": "10", "title": "明细暂缺收藏夹", "status": "pending",
+            "kind": "metadata_pending", "metadata_pending_count": 1,
+            "expected_count": 316, "fetched_count": 316, "unique_count": 316,
+            "history": [], "last_error": None,
+        }
+        issue_requests = []
+
+        def serve_metadata_issue(route):
+            if route.request.method == "GET":
+                issue_requests.append(route.request.url)
+                route.fulfill(status=200, content_type="application/json",
+                              body=json.dumps({"issues": [issue], "blocked": True,
+                                               "running": False}, ensure_ascii=False))
+            else:
+                route.continue_()
+
+        page.route("**/api/scan/issues", serve_metadata_issue)
+        self.run_scan(page)
+        modal = page.locator("#scan-issue-modal")
+        modal.wait_for(state="visible", timeout=10000)
+        self.assertTrue(issue_requests, "扫描结束后前端没有刷新扫描异常")
+        self.assertEqual("收藏夹内容明细暂不可用",
+                         page.locator("#scan-issue-title").inner_text())
+        self.assertIn("1 条内容暂时没有取得详情",
+                      page.locator("#scan-issue-description").inner_text())
+        self.assertIn("不会自动删除",
+                      page.locator("#scan-issue-metadata-note").inner_text())
+        self.assertEqual("重新读取缺失明细",
+                         page.locator("#scan-issue-retry").inner_text())
+        self.assertTrue(page.locator("#scan-issue-clean-option").is_hidden())
+        self.assertTrue(page.locator("#scan-issue-counts").is_hidden())
+        self.assertEqual([], self.page_errors)
+
     def test_closed_scan_issue_popup_is_not_reopened_by_scan_idle(self):
         page = self.open_app()
         modal = page.locator("#scan-issue-modal")

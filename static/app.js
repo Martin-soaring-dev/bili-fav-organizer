@@ -1129,6 +1129,7 @@
   // ---------- 步骤1 扫描 ----------
   let scanIssues = [];
   let scanIssueId = "";
+  let scanIssueKind = "";
   let scanRecoveryBusy = false;
   let scanIssuesRunning = false;
   let scanIssueFocus = null;
@@ -1138,18 +1139,27 @@
   const scanIssueModal = $("scan-issue-modal");
 
   function scanIssueSignature() {
-    return scanIssues.map(row => String(row.media_id)).sort().join(",");
+    return JSON.stringify(scanIssues.map(row => [
+      String(row.media_id),
+      String(row.kind || "count_mismatch"),
+      Number(row.metadata_pending_count || 0),
+      Number(row.expected_count || 0),
+      Number(row.fetched_count || 0),
+      Number(row.unique_count || 0),
+    ]).sort((a, b) => a[0].localeCompare(b[0])));
   }
 
   function setScanRecoveryControls() {
     const busy = scanRecoveryBusy || scanIssuesRunning;
     const issue = scanIssues.find(row => row.media_id === scanIssueId);
+    const metadataPending = !!(issue && issue.kind === "metadata_pending");
     for (const id of ["scan-issue-retry", "scan-issue-refresh", "scan-issue-select",
                       "scan-issue-clean-consent"]) {
-      $(id).disabled = busy;
+      $(id).disabled = busy || (metadataPending && id === "scan-issue-clean-consent");
     }
-    $("scan-issue-clean-show").disabled = busy || !!(issue && issue.cleanup_unknown);
-    $("scan-issue-clean").disabled = busy || !$("scan-issue-clean-consent").checked || !!(issue && issue.cleanup_unknown);
+    $("scan-issue-clean-show").disabled = busy || metadataPending || !!(issue && issue.cleanup_unknown);
+    $("scan-issue-clean").disabled = busy || metadataPending
+      || !$("scan-issue-clean-consent").checked || !!(issue && issue.cleanup_unknown);
     $("scan-issue-link").setAttribute("aria-disabled", String(busy));
     scanIssueModal.setAttribute("aria-busy", String(busy));
   }
@@ -1157,9 +1167,14 @@
   function renderScanIssue() {
     const issue = scanIssues.find(row => row.media_id === scanIssueId) || scanIssues[0];
     if (!issue) return;
-    const changed = scanIssueId !== issue.media_id;
+    const kind = issue.kind || "count_mismatch";
+    const metadataPending = kind === "metadata_pending";
+    const metadataCount = Number(issue.metadata_pending_count || 0);
+    const changed = scanIssueId !== issue.media_id || scanIssueKind !== kind;
     scanIssueId = issue.media_id;
-    $("scan-issue-title").textContent = "收藏夹数量不一致";
+    scanIssueKind = kind;
+    $("scan-issue-title").textContent = metadataPending
+      ? "收藏夹内容明细暂不可用" : "收藏夹数量不一致";
     $("scan-issue-eyebrow").textContent = "扫描需要你的帮助";
     $("scan-issue-block-note").hidden = false;
     $("scan-issue-picker").hidden = scanIssues.length < 2;
@@ -1170,11 +1185,33 @@
       option.selected = row.media_id === scanIssueId;
       return option;
     }));
-    $("scan-issue-description").textContent = `收藏夹「${issue.title}」的数量与本次扫描结果不一致。你可以选择以下方式处理。`;
+    $("scan-issue-description").textContent = metadataPending
+      ? "收藏夹「" + issue.title + "」的 ID 已保留，但有 " + metadataCount
+        + " 条内容暂时没有取得详情。详情接口暂缺不等于内容已失效。"
+      : "收藏夹「" + issue.title + "」的数量与本次扫描结果不一致。你可以选择以下方式处理。";
+    $("scan-issue-metadata-note").hidden = !metadataPending;
+    if (metadataPending) {
+      $("scan-issue-metadata-note").textContent =
+        "程序已保留这些收藏关系，不会自动删除。可以重试读取缺失明细，或稍后再核对。";
+    }
+    $("scan-issue-counts").hidden = metadataPending;
     $("scan-issue-expected").textContent = issue.expected_count ?? "—";
     $("scan-issue-fetched").textContent = issue.fetched_count ?? "—";
     $("scan-issue-unique").textContent = issue.unique_count ?? "—";
-    $("scan-issue-link").href = `https://www.bilibili.com/medialist/detail/ml${encodeURIComponent(issue.media_id)}`;
+    $("scan-issue-link").href = "https://www.bilibili.com/medialist/detail/ml"
+      + encodeURIComponent(issue.media_id);
+    $("scan-issue-link").textContent = metadataPending ? "前往 B 站核对 ↗" : "前往 B 站清理 ↗";
+    $("scan-issue-manual-title").textContent = metadataPending
+      ? "前往 B 站核对" : "去 B 站手动清理";
+    $("scan-issue-manual-note").textContent = metadataPending
+      ? "可在系统浏览器打开对应收藏夹，检查这些内容是否仍可访问。不要只因本地暂缺详情就删除。"
+      : "使用系统浏览器打开对应收藏夹，先核对实际资源数量。只有确定存在失效内容时才手动清理；处理完成后返回重扫。";
+    $("scan-issue-retry").textContent = metadataPending
+      ? "重新读取缺失明细" : "我已处理，重试扫描";
+    $("scan-issue-clean-option").hidden = metadataPending;
+    $("scan-issue-causes-text").textContent = metadataPending
+      ? "可能是 B 站接口暂时未返回详情、内容权限或网络状态变化。暂缺详情不能单独证明内容失效。"
+      : "收藏夹可能存在隐藏的失效或不可访问内容，也可能是数量尚未同步、扫描期间内容变化，或临时网络 / 接口异常。数量差异本身不能确定原因。";
     $("scan-issue-options").hidden = false;
     $("scan-issue-foot-note").textContent = "关闭提示后，后续整理仍会暂停。";
     $("scan-issue-dismiss").textContent = "暂时关闭";
@@ -1192,7 +1229,7 @@
     $("scan-issue-history").hidden = !history.length;
     $("scan-issue-history-list").replaceChildren(...history.map(event => {
       const li = document.createElement("li");
-      li.textContent = `${event.at} · ${event.text}`;
+      li.textContent = event.at + " · " + event.text;
       return li;
     }));
     setScanRecoveryControls();
@@ -1268,7 +1305,9 @@
       }
       const remaining = await refreshScanIssues();
       if (!remaining.some(row => row.media_id === issue.media_id)) {
-        const message = `「${issue.title}」重新扫描验证通过。B 站数量由 ${issue.expected_count} 更新为 ${status.total} 条，本次读取 ${status.done} 条。`;
+        const message = issue.kind === "metadata_pending"
+          ? `「${issue.title}」缺失的内容明细已补齐，收藏夹关系保持不变。`
+          : `「${issue.title}」重新扫描验证通过。B 站数量由 ${issue.expected_count} 更新为 ${status.total} 条，本次读取 ${status.done} 条。`;
         log(message, "ok");
         if (!remaining.length) {
           $("scan-issue-options").hidden = true;
@@ -1278,6 +1317,8 @@
           $("scan-issue-title").textContent = "扫描异常已解决";
           $("scan-issue-eyebrow").textContent = "核对完成";
           $("scan-issue-block-note").hidden = true;
+          $("scan-issue-metadata-note").hidden = true;
+          $("scan-issue-counts").hidden = false;
           $("scan-issue-expected").textContent = status.total;
           $("scan-issue-fetched").textContent = status.done;
           $("scan-issue-unique").textContent = status.done;
@@ -1290,7 +1331,12 @@
         }
       } else {
         renderScanIssue();
-        $("scan-issue-result").textContent = status.error || "数量仍不一致，请检查 B 站收藏夹后再重试。";
+        const currentIssue = remaining.find(row => row.media_id === issue.media_id);
+        const fallback = issue.kind === "metadata_pending"
+          ? "仍有 " + Number((currentIssue && currentIssue.metadata_pending_count) || 0)
+            + " 条内容明细暂不可用；收藏关系已保留，可以稍后重试。"
+          : "数量仍不一致，请检查 B 站收藏夹后再重试。";
+        $("scan-issue-result").textContent = status.error || fallback;
       }
       await refreshTree();
       await refreshStats();

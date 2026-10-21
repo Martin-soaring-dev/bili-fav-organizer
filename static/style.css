@@ -898,7 +898,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 
 /* 扫描异常提示：优先引导用户手动处理，远端清理必须单独确认。 */
 .scan-issue-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 12px 14px; border: 1px solid var(--accent2); border-radius: 8px; background: var(--soft-warn); font-size: 13px; }
-.scan-issue-banner[hidden], .scan-issue-picker[hidden], .scan-clean-confirm[hidden], .scan-issue-history[hidden], .scan-issue-options[hidden] { display: none; }
+.scan-issue-banner[hidden], .scan-issue-picker[hidden], .scan-clean-confirm[hidden], .scan-issue-history[hidden], .scan-issue-counts[hidden], .scan-issue-option[hidden], .scan-issue-options[hidden] { display: none; }
 #scan-issue-modal { z-index: 150; }
 .scan-issue-box { width: min(720px, 94vw); max-height: 94vh; border-radius: 16px; font-family: system-ui, "Segoe UI", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
 .scan-issue-box .btn, .scan-issue-box .mini, .scan-issue-box select { font-family: inherit; }

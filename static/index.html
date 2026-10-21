@@ -529,7 +529,8 @@
     <div class="modal-body scan-issue-body">
       <label id="scan-issue-picker" class="scan-issue-picker" hidden>待处理收藏夹<select id="scan-issue-select"></select></label>
       <p id="scan-issue-description" class="scan-issue-description"></p>
-      <div class="scan-issue-counts">
+      <p id="scan-issue-metadata-note" class="scan-issue-description scan-issue-metadata-note" hidden></p>
+      <div id="scan-issue-counts" class="scan-issue-counts">
         <div><span>B 站显示</span><strong id="scan-issue-expected">—</strong><small>条</small></div>
         <div><span>本次读取</span><strong id="scan-issue-fetched">—</strong><small>条</small></div>
         <div><span>去重后</span><strong id="scan-issue-unique">—</strong><small>条</small></div>
@@ -537,11 +538,11 @@
       <p id="scan-issue-block-note" class="scan-issue-block-note">为保证整理结果准确，请先解决这个问题，再继续画像、分类、移动或合并。</p>
       <div id="scan-issue-options" class="scan-issue-options">
         <section class="scan-issue-option scan-issue-manual">
-          <div class="scan-option-title"><span class="scan-option-number">1</span><h3>去 B 站手动清理</h3><span class="scan-option-badge">推荐</span></div>
-          <p>使用系统浏览器打开对应收藏夹，先核对实际资源数量。只有确定存在失效内容时才手动清理；处理完成后返回重扫。</p>
+          <div class="scan-option-title"><span class="scan-option-number">1</span><h3 id="scan-issue-manual-title">去 B 站手动清理</h3><span class="scan-option-badge">推荐</span></div>
+          <p id="scan-issue-manual-note">使用系统浏览器打开对应收藏夹，先核对实际资源数量。只有确定存在失效内容时才手动清理；处理完成后返回重扫。</p>
           <div class="scan-option-actions"><a id="scan-issue-link" class="btn primary" target="_blank" rel="noopener noreferrer">前往 B 站清理 ↗</a><button id="scan-issue-retry" class="btn ghost" type="button">我已处理，重试扫描</button><button id="scan-issue-diagnose" class="btn ghost" type="button">只读诊断漏读原因</button></div>
         </section>
-        <section class="scan-issue-option">
+        <section id="scan-issue-clean-option" class="scan-issue-option">
           <div class="scan-option-title"><span class="scan-option-number">2</span><h3>由程序自动清理</h3><span class="scan-option-badge scan-option-caution">不推荐</span></div>
           <p class="scan-auto-warning">数量不一致也可能是本地分页或 API 漏读，并不代表云端存在失效视频。此操作可能删除远端正常内容；请先在 B 站核实并优先联系开发者诊断。</p>
           <button id="scan-issue-clean-show" class="btn ghost" type="button" aria-expanded="false" aria-controls="scan-issue-clean-confirm">查看自动清理选项</button>
@@ -559,7 +560,7 @@
       </div>
       <div id="scan-issue-result" class="scan-issue-result" role="status" aria-live="polite"></div>
       <details id="scan-issue-history" class="scan-issue-history" hidden><summary>查看处理记录</summary><ol id="scan-issue-history-list"></ol></details>
-      <div class="scan-issue-causes"><strong>为什么会出现这个问题？</strong><p>收藏夹可能存在隐藏的失效或不可访问内容，也可能是数量尚未同步、扫描期间内容变化，或临时网络 / 接口异常。数量差异本身不能确定原因。</p></div>
+      <div class="scan-issue-causes"><strong>为什么会出现这个问题？</strong><p id="scan-issue-causes-text">收藏夹可能存在隐藏的失效或不可访问内容，也可能是数量尚未同步、扫描期间内容变化，或临时网络 / 接口异常。数量差异本身不能确定原因。</p></div>
     </div>
     <div class="modal-foot scan-issue-foot"><span id="scan-issue-foot-note">关闭提示后，后续整理仍会暂停。</span><button id="scan-issue-dismiss" class="btn ghost" type="button">暂时关闭</button></div>
   </div>
