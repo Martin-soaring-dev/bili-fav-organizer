@@ -161,6 +161,13 @@ function registerShellIpc() {
     if (changed) applyOverlay();
   });
 
+  ipcMain.handle('shell:external-link-mode', (_event, mode) => {
+    if (mode === undefined) return readConfig().external_link_mode === 'internal' ? 'internal' : 'system';
+    if (!['internal', 'system'].includes(mode)) return { ok: false };
+    patchConfig({ external_link_mode: mode });
+    return { ok: true, mode };
+  });
+
   // Windows Hello 的验证框由系统的凭据 broker（CredentialUIBroker.exe）绘制，不是本窗口的子窗口。
   // 它属于更高完整性级别，我们**没有权限**把那个窗口置顶（实测 SetWindowPos 返回 ACCESS_DENIED，
   // 这是 UIPI 的策略，不是参数问题），也没法让它一出现就是前台。
@@ -590,6 +597,7 @@ function createWindow() {
     try {
       const parsed = new URL(url);
       if (parsed.protocol === 'https:' && parsed.hostname === 'www.bilibili.com') {
+        if (readConfig().external_link_mode === 'internal') return { action: 'allow' };
         void shell.openExternal(parsed.href).catch((err) => log('外部链接打开失败: ' + err.message));
       } else {
         log('拒绝未知窗口请求');
