@@ -44,7 +44,10 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("GH_TOKEN:", job_header)
         self.assertEqual(text.count("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}"), 3)
         self.assertEqual(text.count("contents: write"), 1)
-        self.assertNotIn("uses:", text.split("  publish:\n", 1)[1])
+        publish_job = text.split("  publish:\n", 1)[1]
+        self.assertEqual(publish_job.count("uses:"), 1)
+        self.assertIn("uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683", publish_job)
+        self.assertIn("persist-credentials: false", publish_job)
 
     def test_publisher_write_token_is_scoped_to_trusted_shell_steps(self):
         text = self.read("publish-release.yml")
@@ -55,7 +58,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("contents: write", top_level_permissions)
         self.assertIn("permissions:\n      contents: read\n      actions: read", verification_job)
         self.assertIn("permissions:\n      contents: write\n      actions: read", publish_job)
-        self.assertNotIn("uses:", publish_job)
+        self.assertEqual(publish_job.count("uses:"), 1)
+        self.assertIn("persist-credentials: false", publish_job)
         token_index = publish_job.index("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}")
         self.assertEqual(publish_job.count("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}"), 1)
         step_start = publish_job.rfind("      - name:", 0, token_index)
