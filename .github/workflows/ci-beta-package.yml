@@ -6,6 +6,7 @@ on:
       - '.github/workflows/release-beta.yml'
       - '.github/workflows/release-stable.yml'
       - '.github/workflows/publish-release.yml'
+      - '.github/workflows/backfill-release-notes.yml'
       - '.github/workflows/ci-beta-package.yml'
       - 'tools/release_candidate.py'
       - 'tests/test_release_candidate.py'
