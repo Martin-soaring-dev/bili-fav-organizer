@@ -152,7 +152,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         for action, sha in publisher_expected.items():
             with self.subTest(workflow="publish-release.yml", action=action):
                 self.assertIn(f"uses: {action}@{sha}", publisher)
-        for name in ("publish-release.yml", "release-beta.yml", "release-stable.yml"):
+        for name in ("publish-release.yml", "release-beta.yml", "release-stable.yml", "backfill-release-notes.yml"):
             with self.subTest(workflow=name, contract="all actions are pinned"):
                 action_lines = [line for line in self.read(name).splitlines()
                                 if re.match(r"^\s*uses:", line)]
@@ -218,6 +218,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/main'", text)
         for path in (
             "publish-release.yml",
+            "backfill-release-notes.yml",
             "tools/release_candidate.py",
             "tests/test_release_candidate.py",
             "tests/test_release_workflow_contract.py",
@@ -229,6 +230,23 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             "tools/**",
         ):
             self.assertIn(path, text)
+
+    def test_release_notes_backfill_only_fills_empty_body_and_never_touches_assets(self):
+        text = self.read("backfill-release-notes.yml")
+        self.assertIn("release:\\n    types: [published]", text)
+        self.assertIn("workflow_dispatch:", text)
+        self.assertIn("inputs.tag", text)
+        self.assertIn("permissions:\\n  contents: read", text.split("jobs:", 1)[0])
+        self.assertIn("permissions:\\n      contents: write", text)
+        self.assertIn("gh release view $tag --json tagName,name,body,isDraft,isPrerelease", text)
+        self.assertIn("Existing release notes are preserved; nothing to change.", text)
+        self.assertIn("gh release edit $tag --notes-file $notesPath", text)
+        self.assertIn("README.md", text)
+        self.assertIn("refs/tags/", text)
+        self.assertIn("Release notes populated for $tag. No release assets were changed.", text)
+        self.assertNotIn("gh release upload", text)
+        self.assertNotIn("softprops/action-gh-release", text)
+        self.assertNotIn("gh run download", text)
 
     def test_all_python_test_workflows_require_the_pinned_playwright_browser(self):
         requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
