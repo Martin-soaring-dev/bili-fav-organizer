@@ -234,6 +234,9 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
                 json.dumps(server.scan_status())
                 assert task.status is server.TaskStatus.COMPLETED, task
                 assert store.load_folder_scan_states()["10"]["status"] == "complete"
+                assert server._TASK_SCHEDULER.wait_for_idle(timeout=5), (
+                    "terminal task status was visible before the worker exited"
+                )
                 assert not store.database_connections()
             """
             self._run_subprocess(env, script)
