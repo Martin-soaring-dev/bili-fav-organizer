@@ -256,6 +256,17 @@ bili-fav-organizer/
 - 恢复 [收藏夹 API 原始规范与来源](docs/README.md)，补充 [历史实测与回归记录](docs/testing/favorite-api-history.md)。
 
 
+### [v0.210.5](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.210.5)（2026-10-23）
+
+**稳定版：修复锁定未挂起任务、更新链接无法打开，并加固调度恢复与 SQLite WAL 写入可靠性。**
+
+- 修复应用锁定流程：先挂起正在运行的任务，再进入锁定状态；补充锁定与暂停之间的回归测试。
+- 修复“获取更新”无法打开发布页面的问题，补全 Electron 外链处理。
+- 调度器分发新任务前先恢复未完成的远端操作，降低重启或中断后任务状态不一致的风险。
+- 修复 SQLite WAL sidecar 生命周期处理导致写入连接意外进入只读状态的问题，并补充数据库事务清理与生命周期测试。
+- 当前主分支全量 CI 已通过；发布工作流仍会针对发布标签重新运行 Windows 回归测试，并构建便携包、传统安装包、Electron Neo 安装包及各自的 SHA-256 校验文件。
+
+
 ### [v0.210.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.210.1)（2026-10-21）
 
 **Windows 实机测试版：扫描异常只读诊断、设置恢复与 B 站外链修复。**
