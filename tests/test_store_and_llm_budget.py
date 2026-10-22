@@ -162,7 +162,7 @@ class LLMContextBudgetSplitTests(unittest.TestCase):
             return {"packed_videos": [], "system": "s", "user_text": "u",
                     "max_tokens": 16, "prompt_tokens": 1, "safety_tokens": 1}
 
-        def fake_call(batch, prepared=None):
+        def fake_call(batch, prepared=None, should_stop=None):
             return ({v["bvid"]: {"ok": True} for v in batch}, [], "ok")
 
         with patch.object(analyzer, "_prepare_call", side_effect=fake_prepare), \
@@ -178,7 +178,7 @@ class LLMContextBudgetSplitTests(unittest.TestCase):
         analyzer = llm_analyzer.LLMAnalyzer(self._config(), folders=["夹A"])
         videos = self._videos(2)
 
-        def fake_call(batch, prepared=None):
+        def fake_call(batch, prepared=None, should_stop=None):
             if len(batch) > 1:
                 return {}, list(batch), "truncated"
             return ({batch[0]["bvid"]: {"ok": True}}, [], "ok")
