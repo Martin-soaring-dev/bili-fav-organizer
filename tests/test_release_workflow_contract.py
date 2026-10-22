@@ -233,11 +233,11 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
 
     def test_release_notes_backfill_only_fills_empty_body_and_never_touches_assets(self):
         text = self.read("backfill-release-notes.yml")
-        self.assertIn("release:\\n    types: [published]", text)
+        self.assertIn("release:\n    types: [published]", text)
         self.assertIn("workflow_dispatch:", text)
         self.assertIn("inputs.tag", text)
-        self.assertIn("permissions:\\n  contents: read", text.split("jobs:", 1)[0])
-        self.assertIn("permissions:\\n      contents: write", text)
+        self.assertIn("permissions:\n  contents: read", text.split("jobs:", 1)[0])
+        self.assertIn("permissions:\n      contents: write", text)
         self.assertIn("gh release view $tag --json tagName,name,body,isDraft,isPrerelease", text)
         self.assertIn("Existing release notes are preserved; nothing to change.", text)
         self.assertIn("gh release edit $tag --notes-file $notesPath", text)
