@@ -28,7 +28,7 @@ jobs:
         with:
           # A manual backfill uses the current canonical ledger; automatic release events
           # use the immutable tag snapshot that was published.
-          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || format('refs/tags/{0}', env.RELEASE_TAG) }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || format('refs/tags/{0}', github.event.release.tag_name || inputs.tag) }}
           fetch-depth: 0
           persist-credentials: false
 
