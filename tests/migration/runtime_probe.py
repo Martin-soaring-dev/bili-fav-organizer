@@ -475,9 +475,25 @@ def main() -> None:
         result["target_exists_after_retry"] = target_db.exists()
         result["target_after_retry"] = database_snapshot(target_db)
 
+    # Bound the observation to a quiescent application. Operations return while
+    # the scheduler thread may still be finishing a request, and two connections
+    # closing at nearly the same time can leave an empty WAL/SHM pair behind
+    # (the first close cannot delete them while the second handle is open).
+    # Waiting for idle and letting SQLite converge makes the measured state a
+    # property of the paused profile instead of a race with background work.
+    scheduler = getattr(server, "_TASK_SCHEDULER", None)
+    if scheduler is not None:
+        try:
+            scheduler.wait_for_idle(timeout=10)
+        except Exception:  # noqa: BLE001 - idle probing must not mask real errors
+            pass
+    try:
+        store.settle_wal_sidecars()
+    except Exception:  # noqa: BLE001 - convergence is best effort by design
+        pass
+    result["database_sidecars_at_probe_end"] = _database_sidecars()
     result["final_database"] = database_snapshot(Path(store.DB_FILE))
     result["database_file_exists_at_probe_end"] = store.DB_FILE.is_file()
-    result["database_sidecars_at_probe_end"] = _database_sidecars()
     result["open_sqlite_descriptors_at_probe_end"] = _open_sqlite_descriptors()
     result["database_state"] = store.database_state()
     if any(

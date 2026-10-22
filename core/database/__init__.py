@@ -9,6 +9,7 @@ from .lifecycle import (
     DatabaseRecoveryRequiredError,
     DatabaseState,
     IntegrityValidationError,
+    open_readonly_session,
     sqlite_uri,
     validate_database,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "DatabaseRecoveryRequiredError",
     "DatabaseState",
     "IntegrityValidationError",
+    "open_readonly_session",
     "sqlite_uri",
     "validate_database",
 ]

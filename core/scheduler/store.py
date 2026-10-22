@@ -11,11 +11,15 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Protocol, runtime_checkable
 import json
+import logging
 import sqlite3
 import threading
+from contextlib import nullcontext
 from urllib.parse import quote
 
 from .models import TaskRecord, TaskStatus, utc_now
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStoreError(RuntimeError):
@@ -196,12 +200,52 @@ class SQLiteTaskStore:
         and closes it before returning.
         """
         database_path = Path(lifecycle.path).expanduser().resolve()
-        return cls(
+        store = cls(
             connection_factory=lambda: lifecycle.connect(mode="rw", owner=owner),
             database_exists=database_path.is_file,
             owner_lock_path=(owner_lock_path or
                              database_path.with_name(database_path.name + ".scheduler.lock")),
         )
+        # Kept for the guarded write opener below: task writes open a fresh
+        # connection per operation, and the open must not race a sibling close.
+        store._lifecycle = lifecycle
+        return store
+
+    def _open_write_transaction(self) -> sqlite3.Connection:
+        """Open a connection and begin its write transaction as one step.
+
+        Opening and immediately writing is the only window where a sibling
+        connection closing (which deletes the WAL shared-memory file) can make a
+        brand-new connection read-only. Holding the lifecycle gate across
+        open+first statement removes that window; if SQLite still reports the
+        connection as read-only, nothing has executed yet, so retrying exactly
+        once on a new connection is safe. The first failure is always logged.
+        """
+        lifecycle = getattr(self, "_lifecycle", None)
+        gate = lifecycle.connection_gate() if lifecycle is not None else nullcontext()
+        with gate:
+            conn = self._connect_ready()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                conn.close()
+                if "readonly database" not in str(exc).lower():
+                    raise
+                logger.warning(
+                    "任务写入建立事务时数据库被判定为只读（并发关闭删除了 WAL 共享内存），"
+                    "重开连接重试一次：%s", exc)
+                conn = self._connect_ready()
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                except BaseException:
+                    # The second attempt can fail too. Release its lifecycle lease
+                    # explicitly before preserving the original exception.
+                    try:
+                        conn.close()
+                    except Exception:
+                        logger.exception("关闭重试失败的调度器 SQLite 连接时出错")
+                    raise
+        return conn
 
     def _connect(self) -> sqlite3.Connection:
         if not self._database_exists():
@@ -346,9 +390,8 @@ class SQLiteTaskStore:
     def claim_owner_epoch(self, owner_id: str) -> int:
         if not owner_id:
             raise ValueError("owner_id 不能为空")
-        conn = self._connect_ready()
+        conn = self._open_write_transaction()
         try:
-            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 f"SELECT value FROM {self._META_TABLE} WHERE key='owner_epoch'"
             ).fetchone()
@@ -367,9 +410,8 @@ class SQLiteTaskStore:
             conn.close()
 
     def create(self, record: TaskRecord) -> tuple[TaskRecord, bool]:
-        conn = self._connect_ready()
+        conn = self._open_write_transaction()
         try:
-            conn.execute("BEGIN IMMEDIATE")
             if record.idempotency_key:
                 row = conn.execute(
                     f"SELECT * FROM {self._TASKS_TABLE} WHERE idempotency_key=?",
@@ -442,9 +484,8 @@ class SQLiteTaskStore:
         assignments = ",".join(f"{column}=?" for column in mutable_columns)
         parameters = [values[columns.index(column)] for column in mutable_columns]
         parameters.extend((record.task_id, expected_revision))
-        conn = self._connect_ready()
+        conn = self._open_write_transaction()
         try:
-            conn.execute("BEGIN IMMEDIATE")
             cursor = conn.execute(
                 f"UPDATE {self._TASKS_TABLE} SET {assignments} "
                 "WHERE task_id=? AND revision=?",

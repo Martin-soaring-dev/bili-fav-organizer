@@ -21,6 +21,7 @@ from core.database import (
     DatabaseRecoveryRequiredError,
     DatabaseState,
     IntegrityValidationError,
+    open_readonly_session,
     validate_database,
 )
 from core.database.profile_lock import ProfileLockTimeoutError
@@ -535,6 +536,56 @@ class CandidateDatabaseTests(unittest.TestCase):
             return str(connection.execute("SELECT value FROM marker").fetchone()[0])
         finally:
             connection.close()
+
+
+
+class ReadOnlySessionTests(unittest.TestCase):
+    """Read-only inspection of a live profile DB must not leave WAL/SHM behind.
+
+    A ``mode=ro`` handle cannot delete the sidecars it creates, so closing one
+    left an empty ``-wal`` and a ``-shm`` beside the database. Everything that
+    may point at the active database now uses a writable handle with
+    ``PRAGMA query_only`` instead.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="bfo-readonly-session-")
+        self.root = Path(self._tmp.name)
+        self.db = self.root / "library.sqlite3"
+        connection = sqlite3.connect(self.db)
+        try:
+            connection.execute("PRAGMA journal_mode=WAL").fetchone()
+            connection.execute("CREATE TABLE marker (value TEXT NOT NULL)")
+            connection.execute("INSERT INTO marker(value) VALUES('seed')")
+            connection.commit()
+        finally:
+            connection.close()
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _sidecars(self) -> list[str]:
+        return sorted(p.name for p in self.root.iterdir()
+                      if p.name.endswith(("-wal", "-shm", "-journal")))
+
+    def test_open_readonly_session_is_read_only_and_leaves_no_sidecars(self):
+        connection = open_readonly_session(self.db)
+        try:
+            count = connection.execute("SELECT count(*) FROM marker").fetchone()[0]
+            self.assertEqual(1, count)
+            with self.assertRaises(sqlite3.OperationalError):
+                connection.execute("INSERT INTO marker(value) VALUES('blocked')")
+        finally:
+            connection.close()
+        self.assertEqual([], self._sidecars(),
+                         "read-only session left WAL/SHM beside the database")
+
+    def test_validate_database_leaves_no_sidecars(self):
+        validation = validate_database(self.db)
+        self.assertEqual(("ok",), validation.integrity_check)
+        self.assertEqual((), validation.foreign_key_violations)
+        self.assertEqual([], self._sidecars(),
+                         "validate_database left WAL/SHM beside the database")
 
 
 if __name__ == "__main__":
