@@ -30,9 +30,19 @@ class _FailingBeginConnection(sqlite3.Connection):
         return super().close()
 
 
+class _FakeProfileReadLease:
+    def close(self):
+        return None
+
+
 class _FakeLifecycle:
     def __init__(self, opened):
         self.opened = opened
+
+    def acquire_profile_read_lease(self):
+        # _ProfileAwareRLock takes a shared lease before its process-local lock.
+        # This test isolates transaction retry cleanup, so a no-op lease is enough.
+        return _FakeProfileReadLease()
 
     @contextmanager
     def connection_gate(self):
