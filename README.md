@@ -285,7 +285,7 @@ bili-fav-organizer/
 - 优化任务数值设置的整数校验、配置载入与并发保存行为。
 - 发布流程补充基于标签/Release 事件触发构建的能力，并上传发行包及对应 SHA-256 校验文件。
 
-### [v0.210.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/83e48d193ccb19ce6dcb0d765c5b8d85266b0e65)（2026-10-22）
+### [v0.210.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/83e48d193ccb19ce6dcb0d7654fcfb2a6fcec2de)（2026-10-22）
 
 **Windows 实机测试版：扫描异常只读诊断、设置恢复与 B 站外链修复。**
 
