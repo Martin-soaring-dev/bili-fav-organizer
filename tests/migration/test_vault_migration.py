@@ -334,7 +334,14 @@ class VaultMigrationTests(unittest.TestCase):
         self.assertEqual(200, unlocked["unlock"]["http_status"], unlocked)
         self.assertTrue(unlocked["database_file_exists_at_probe_end"])
         self.assertEqual([], unlocked["database_sidecars_at_probe_start"])
+        # The probe now measures the paused profile (scheduler idle + WAL converged)
+        # instead of an instant that races background work; the database must still
+        # be complete and consistent at that boundary.
         self.assertEqual([], unlocked["database_sidecars_at_probe_end"])
+        final = unlocked["final_database"]
+        self.assertEqual(["ok"], final["integrity_check"], final)
+        self.assertEqual([], final["foreign_key_violations"], final)
+        self.assertTrue(unlocked["vault_unlocked"])
 
 
 if __name__ == "__main__":

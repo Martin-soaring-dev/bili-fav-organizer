@@ -1394,8 +1394,9 @@ def _vault_sqlite_logical_digest(connection: sqlite3.Connection) -> str:
 
 
 def _vault_digest_database_file(path: Path) -> str:
-    uri = store.sqlite_uri(path, "ro")
-    connection = sqlite3.connect(uri, uri=True, timeout=30)
+    # Writable handle + query_only: a mode=ro handle cannot delete the WAL/SHM
+    # sidecars it creates, which left residue beside the live profile database.
+    connection = store.open_readonly_session(path)
     try:
         return _vault_sqlite_logical_digest(connection)
     finally:
@@ -1667,6 +1668,13 @@ def vault_unlock_device(body: VaultUnlockDeviceIn | None = None):
         return JSONResponse({"ok": False, "error": f"设备材料不可用：{exc}"},
                             status_code=status)
     _resume_vault_paused_tasks()
+    # A concurrent close can leave an empty WAL/SHM pair behind; settle it
+    # once the unlock is complete. SQLite still refuses while a connection
+    # or another process holds the database, so nothing is unlinked blindly.
+    try:
+        store.settle_wal_sidecars()
+    except Exception as exc:  # noqa: BLE001 - cleanup must not break unlock
+        log.warning("解锁后 WAL 收敛失败：%s", exc)
     _set_vault_lock_phase("idle")
     _APP_LOCK.update(unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,
@@ -1714,6 +1722,13 @@ def vault_unlock(body: VaultUnlockIn):
         status = 409 if isinstance(exc, TimeoutError) else 500
         return JSONResponse({"ok": False, "error": f"解锁未完成：{exc}"}, status_code=status)
     _resume_vault_paused_tasks()
+    # A concurrent close can leave an empty WAL/SHM pair behind; settle it
+    # once the unlock is complete. SQLite still refuses while a connection
+    # or another process holds the database, so nothing is unlinked blindly.
+    try:
+        store.settle_wal_sidecars()
+    except Exception as exc:  # noqa: BLE001 - cleanup must not break unlock
+        log.warning("解锁后 WAL 收敛失败：%s", exc)
     _set_vault_lock_phase("idle")
     _APP_LOCK.update(enabled=False, unlocked=True)
     return {"ok": True, "selftest": test, "db_restored": restored, "migrated": migrated,

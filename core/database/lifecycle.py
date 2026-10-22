@@ -103,6 +103,23 @@ def _readonly_connection(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(sqlite_uri(path, "ro"), uri=True, timeout=30)
 
 
+def open_readonly_session(path: str | Path) -> sqlite3.Connection:
+    r"""Open a database for read-only work through a writable file handle.
+
+    ``PRAGMA query_only`` keeps the SQL session read-only, but the handle stays
+    writable so SQLite can delete the ``-wal``/``-shm`` sidecars when the
+    connection closes. A ``mode=ro`` handle cannot delete them, so inspecting a
+    live profile database that way leaves residue behind and keeps the WAL in a
+    state concurrent writers race against.
+
+    Use this for anything that may point at the *active* database. Private
+    candidates and copies may keep using ``mode=ro``.
+    """
+    connection = sqlite3.connect(sqlite_uri(Path(path), "rw"), uri=True, timeout=30)
+    connection.execute("PRAGMA query_only=ON")
+    return connection
+
+
 def validate_database(path: str | Path) -> DatabaseValidation:
     """Run full SQLite and FK checks without creating or modifying ``path``."""
     db_path = Path(path)
@@ -110,7 +127,7 @@ def validate_database(path: str | Path) -> DatabaseValidation:
         raise IntegrityValidationError(f"候选数据库不存在：{db_path}")
     connection = None
     try:
-        connection = _readonly_connection(db_path)
+        connection = open_readonly_session(db_path)
         integrity = tuple(str(row[0]) for row in connection.execute("PRAGMA integrity_check"))
         if integrity != ("ok",):
             raise IntegrityValidationError(
@@ -154,8 +171,16 @@ class _TrackedConnection(sqlite3.Connection):
         self._lease_released = False
 
     def close(self):
+        # The real sqlite3 close is what deletes the WAL/SHM sidecars when this
+        # is the last connection. It must not overlap another connection being
+        # opened: that overlap is what leaves a fresh connection unable to take
+        # a WAL read mark (SQLITE_READONLY) or leaves orphaned sidecars behind.
+        gate = getattr(self._lifecycle, "_conn_gate", None)
         try:
-            return super().close()
+            if gate is None:
+                return super().close()
+            with gate:
+                return super().close()
         finally:
             self._release_lease()
 
@@ -221,6 +246,13 @@ class DatabaseLifecycle:
                                   else self.path.parent / ".bfo-profile.lock")
         self._profile_lock = ProfileFileLock(self.profile_lock_path)
         self._condition = threading.Condition(threading.RLock())
+        # Serialises the SQLite file-level open/close operations only. WAL
+        # sidecars are created on open and deleted on the last close, so an open
+        # that interleaves with another connection's close can hand back a
+        # connection SQLite treats as read-only (and can leave orphaned files).
+        # This gate is always taken before ``_condition`` and released before any
+        # profile-lock release, so it cannot invert the cross-process lock order.
+        self._conn_gate = threading.RLock()
         self._state = DatabaseState.UNINITIALIZED
         self._leases: dict[str, dict] = {}
 
@@ -298,7 +330,7 @@ class DatabaseLifecycle:
         profile_lease = self._profile_lock.acquire_shared(timeout=profile_lock_timeout)
         lease_id = uuid.uuid4().hex
         try:
-            with self._condition:
+            with self._conn_gate, self._condition:
                 if self._state != DatabaseState.READY:
                     if not self.path.is_file():
                         raise self._missing_error()
@@ -322,6 +354,17 @@ class DatabaseLifecycle:
         except Exception:
             profile_lease.close()
             raise
+
+    @contextmanager
+    def connection_gate(self):
+        """Hold the file-level open/close gate across a caller's open+first write.
+
+        A connection only protects its WAL read mark once a transaction has
+        begun. Callers that open and immediately write can hold this gate so no
+        sibling close can delete the sidecars in between.
+        """
+        with self._conn_gate:
+            yield
 
     @contextmanager
     def maintenance(self, timeout: float | None = None):
@@ -380,7 +423,7 @@ class DatabaseLifecycle:
         # connection. A caller that already owns maintenance gets a reentrant
         # lease; direct callers still receive cross-process protection.
         profile_lease = self._profile_lock.acquire_exclusive()
-        with self._condition:
+        with self._conn_gate, self._condition:
             try:
                 if self._state != DatabaseState.DRAINING:
                     raise DatabaseLifecycleError(
@@ -413,7 +456,8 @@ class DatabaseLifecycle:
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         mode = "rwc" if create else "rw"
-        return sqlite3.connect(sqlite_uri(target, mode), uri=True, timeout=30)
+        with self._conn_gate:
+            return sqlite3.connect(sqlite_uri(target, mode), uri=True, timeout=30)
 
     def initialize_new_database(self, initializer, *,
                                 allow_existing_evidence: bool = False) -> DatabaseValidation:

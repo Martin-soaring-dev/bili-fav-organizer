@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -21,6 +22,7 @@ from core.database import (
     DatabaseRecoveryRequiredError,
     DatabaseState,
     IntegrityValidationError,
+    open_readonly_session,
     sqlite_uri,
     validate_database,
 )
@@ -119,6 +121,12 @@ _lifecycle_lock = threading.RLock()
 _lifecycle_instance: DatabaseLifecycle | None = None
 _lifecycle_key: tuple | None = None
 
+log = logging.getLogger(__name__)
+
+# SQLite reports this when a freshly opened connection could not take a WAL read
+# mark because a sibling connection closed (and dropped the -shm file) meanwhile.
+_WRITE_READONLY_FRAGMENT = "readonly database"
+
 
 def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -205,16 +213,63 @@ def _connect(*, mode: str = "rw", owner: str = "store"):
 @contextmanager
 def _transaction():
     with _lock:
-        conn = _connect()
+        lifecycle = _lifecycle()
+        with lifecycle.connection_gate():
+            conn = _connect()
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+            except sqlite3.OperationalError as exc:
+                # A sibling connection closing as the last one deletes the WAL
+                # shared-memory file; a connection that opened just before that
+                # close has no read mark yet and SQLite reports it as read-only.
+                # No statement has run at this point, so one freshly opened
+                # attempt is safe. Anything else (or a second failure) is real.
+                conn.close()
+                if (_WRITE_READONLY_FRAGMENT not in str(exc).lower()
+                        or database_state() != DatabaseState.READY.value):
+                    raise
+                log.warning(
+                    "写事务建立时数据库被判定为只读（并发关闭删除了 WAL 共享内存），"
+                    "重开连接重试一次：%s", exc)
+                conn = _connect()
+                conn.execute("BEGIN IMMEDIATE")
+        # From here on the transaction holds a WAL read/write lock, so a sibling
+        # close cannot delete the sidecars this connection depends on.
         try:
-            conn.execute("BEGIN IMMEDIATE")
             yield conn
             conn.commit()
         except Exception:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             raise
         finally:
             conn.close()
+
+
+def settle_wal_sidecars() -> bool:
+    """Let SQLite drop orphaned WAL/SHM files once the profile is quiescent.
+
+    Two connections closing at nearly the same time can leave an empty ``-wal``
+    and a ``-shm`` behind: the first close cannot delete them while the other
+    handle is still open, and SQLite suppresses that error. Re-opening and
+    closing a writable handle gives SQLite another chance to delete them, and it
+    still refuses while another process holds the database — this never unlinks
+    a sidecar behind an active connection's back.
+    """
+    lifecycle = _lifecycle()
+    if lifecycle.state is not DatabaseState.READY or not DB_FILE.is_file():
+        return False
+    if lifecycle.active_connection_count:
+        return False
+    connection = lifecycle.connect(mode="rw", owner="store:settle-wal")
+    try:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.commit()
+    finally:
+        connection.close()
+    return True
 
 
 def _backup_legacy_files() -> str:
@@ -678,7 +733,7 @@ def validate_database_candidate(path: str | Path) -> dict:
         raise IntegrityValidationError(
             f"候选数据库 Schema {validation.schema_version} 低于已确认支持边界"
             f" {_MIN_SUPPORTED_SCHEMA}；拒绝猜测旧版结构")
-    connection = sqlite3.connect(sqlite_uri(Path(path), "ro"), uri=True)
+    connection = open_readonly_session(path)
     try:
         tables = {str(row[0]) for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")}
@@ -899,7 +954,7 @@ def _copy_database_to_schema_candidate(lifecycle: DatabaseLifecycle,
     source = None
     target = None
     try:
-        source = sqlite3.connect(sqlite_uri(DB_FILE, "ro"), uri=True, timeout=30)
+        source = open_readonly_session(DB_FILE)
         target = lifecycle.connect_for_initialization(candidate, create=False)
         source.backup(target)
         target.commit()
