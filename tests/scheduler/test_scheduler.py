@@ -151,6 +151,51 @@ class SchedulerTests(unittest.TestCase):
         self._schedulers.append(scheduler)
         return scheduler
 
+    def test_start_runs_recovery_hook_before_dispatch_with_ownership_held(self):
+        store = InMemoryTaskStore()
+        queued, _ = store.create(TaskRecord(task_type="scan"))
+        worker = _CompletingWorker()
+        owner_lock = _OwnerLock()
+        scheduler = self._scheduler(
+            store, {"scan": worker}, owner_lock=owner_lock
+        )
+        hook_entered = threading.Event()
+        release_hook = threading.Event()
+        hook_state = {}
+        start_errors = []
+
+        def before_dispatch():
+            hook_state["owner_held"] = owner_lock.held
+            hook_state["pump_thread"] = scheduler._pump_thread
+            hook_state["started"] = scheduler._started
+            hook_entered.set()
+            if not release_hook.wait(2):
+                raise TimeoutError("pre-dispatch hook was not released")
+
+        def start_scheduler():
+            try:
+                scheduler.start(before_dispatch=before_dispatch)
+            except BaseException as exc:
+                start_errors.append(exc)
+
+        starter = threading.Thread(target=start_scheduler, daemon=True)
+        starter.start()
+        self.assertTrue(hook_entered.wait(1), "startup hook did not run")
+        self.assertTrue(hook_state["owner_held"])
+        self.assertIsNone(hook_state["pump_thread"])
+        self.assertFalse(hook_state["started"])
+        self.assertEqual(worker.calls, 0, "queued work ran before startup recovery")
+
+        release_hook.set()
+        starter.join(2)
+        self.assertFalse(starter.is_alive(), "scheduler startup did not finish")
+        self.assertEqual([], start_errors)
+        completed = scheduler.wait_for_status(
+            queued.task_id, {TaskStatus.COMPLETED}, timeout=2
+        )
+        self.assertEqual(completed.status, TaskStatus.COMPLETED)
+        self.assertEqual(worker.calls, 1)
+
     def test_task_record_persists_completion_and_checkpoint(self):
         worker = _CompletingWorker()
         scheduler = self._scheduler(workers={"scan": worker})
