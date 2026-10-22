@@ -235,7 +235,16 @@ class SQLiteTaskStore:
                     "任务写入建立事务时数据库被判定为只读（并发关闭删除了 WAL 共享内存），"
                     "重开连接重试一次：%s", exc)
                 conn = self._connect_ready()
-                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                except BaseException:
+                    # The second attempt can fail too. Release its lifecycle lease
+                    # explicitly before preserving the original exception.
+                    try:
+                        conn.close()
+                    except Exception:
+                        logger.exception("关闭重试失败的调度器 SQLite 连接时出错")
+                    raise
         return conn
 
     def _connect(self) -> sqlite3.Connection:

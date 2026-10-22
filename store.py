@@ -232,7 +232,16 @@ def _transaction():
                     "写事务建立时数据库被判定为只读（并发关闭删除了 WAL 共享内存），"
                     "重开连接重试一次：%s", exc)
                 conn = _connect()
-                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                except BaseException:
+                    # Keep connection/lease cleanup explicit even when the bounded
+                    # retry also fails; do not rely on object finalization.
+                    try:
+                        conn.close()
+                    except Exception:
+                        log.exception("关闭重试失败的 SQLite 写连接时出错")
+                    raise
         # From here on the transaction holds a WAL read/write lock, so a sibling
         # close cannot delete the sidecars this connection depends on.
         try:
