@@ -1,0 +1,92 @@
+name: Backfill empty release notes
+
+# Fill release notes only when the release body is blank. Never rebuild or replace assets.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag whose empty notes should be filled
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  backfill:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main' }}
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Check out the version notes source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # A manual backfill uses the current canonical ledger; automatic release events
+          # use the immutable tag snapshot that was published.
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fill release notes only when blank
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ($tag -notmatch '^v[0-9]+[.][0-9]+([.][0-9]+)?$' -and
+              $tag -notmatch '^v[0-9]+[.][0-9]+-beta[.][0-9]+$') {
+            throw "Unsupported release tag: $tag"
+          }
+
+          $release = gh release view $tag --json tagName,name,body,isDraft,isPrerelease | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Could not read GitHub Release metadata for $tag." }
+          if ($release.tagName -ne $tag) { throw "Release tag mismatch." }
+          if ($release.isDraft) { throw "Refusing to modify a draft Release." }
+          if (-not [string]::IsNullOrWhiteSpace($release.body)) {
+            Write-Host "Existing release notes are preserved; nothing to change."
+            exit 0
+          }
+
+          $lines = @(Get-Content -Encoding UTF8 README.md)
+          $start = -1
+          $end = $lines.Count
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            $match = [regex]::Match($lines[$i], '^### \[([^\]]+)\]')
+            if (-not $match.Success) { continue }
+            if ($start -lt 0 -and $match.Groups[1].Value -eq $tag) {
+              $start = $i + 1
+              continue
+            }
+            if ($start -ge 0) { $end = $i; break }
+          }
+          if ($start -lt 0) { throw "README has no changelog section for $tag." }
+          if ($end -le $start) { throw "README changelog section is empty." }
+
+          $section = ($lines[$start..($end - 1)] -join "`n").Trim("`r`n ")
+          $summary = [regex]::Match($section, '^\*\*(.+?)\*\*', 'Singleline')
+          if (-not $summary.Success) { throw "README changelog section has no bold summary line." }
+
+          $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+          [System.IO.File]::WriteAllText(
+            $notesPath,
+            $section + "`n",
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          if ([string]::IsNullOrWhiteSpace($release.name) -or $release.name -eq $tag) {
+            $title = "$tag $($summary.Groups[1].Value.TrimEnd([char[]]@('。', '.')))"
+            gh release edit $tag --title $title --notes-file $notesPath
+          } else {
+            gh release edit $tag --notes-file $notesPath
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Could not update empty release notes for $tag." }
+
+          $verified = gh release view $tag --json body | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($verified.body)) {
+            throw "Release notes remained empty after the update."
+          }
+          Write-Host "Release notes populated for $tag. No release assets were changed."
