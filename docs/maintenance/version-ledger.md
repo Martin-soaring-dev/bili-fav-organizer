@@ -27,7 +27,7 @@
   - `BiliFavOrganizer-Windows-x64-v0.210.5.zip` 与 `.sha256`
   - `BiliFavOrganizer-Setup-v0.210.5.exe` 与 `.sha256`
   - `BiliFavOrganizer-neo-Setup-0.210.5.exe` 与 `.sha256`
-- **待修复：Release 正文为空。** README 已有本版变更说明，但发布页面没有显示这些说明；需要安全地补齐正文，同时保留已发布资产与历史记录。
+- **待执行：Release 正文为空。** 已新增 [Backfill empty release notes 工作流](../../.github/workflows/backfill-release-notes.yml)，只在正文为空时读取 README 版本段并补齐标题/正文，不重建或覆盖任何发行资产。该工作流尚未对 v0.210.5 手动运行，因此发布页正文仍为空。
 - 本次构建在标签对应的源码上执行了 Windows 全量回归测试，测试步骤通过；不把这项 CI 结果等同于用户真实 Windows 环境的安装/升级实机验收。
 
 ## 3. 已识别的版本信息不一致
@@ -57,7 +57,7 @@
 ## 5. 建议执行顺序
 
 1. 完成本台账与 README/在线指南版本信息同步（本轮已开始）。
-2. 补齐 v0.210.5 Release 正文；修复发布自动化，使后续版本只在正文为空时补充说明。
+2. 手动运行 Backfill empty release notes 工作流，为 v0.210.5 补齐正文；自动触发已配置为后续新 Release 在正文为空时补充说明。
 3. 查清 v0.210.1–v0.210.4 Release 对象缺失的原因，再决定是否恢复历史页面。
 4. 重新生成并验收 `output/pdf/快速上手.pdf`。
 5. 审核 `docs/release-audit.md` 等历史审计文件，明确“历史快照 / 当前有效结论”，不把过期描述当作现状。
