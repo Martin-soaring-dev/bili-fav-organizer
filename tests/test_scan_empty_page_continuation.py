@@ -10,7 +10,7 @@ class EmptyPageContinuationTests(unittest.TestCase):
         session = BiliSession.__new__(BiliSession)
         session._wapi = 'https://api.bilibili.com'
         session._throttle_read = Mock()
-        session._wbi_sign = lambda params: params
+        session._wbi_sign = lambda params, **_kwargs: params
         responses = [
             {"medias": [{"id": 10, "bvid": "BV1a", "upper": {}}], "has_more": True},
             {"medias": [], "has_more": True},
@@ -32,7 +32,7 @@ class EmptyPageContinuationTests(unittest.TestCase):
         session = BiliSession.__new__(BiliSession)
         session._wapi = "https://api.bilibili.com"
         session._throttle_read = Mock()
-        session._wbi_sign = lambda params: params
+        session._wbi_sign = lambda params, **_kwargs: params
         calls = []
         def response(_method, _url, params, **_kwargs):
             calls.append(params["pn"])
@@ -46,7 +46,7 @@ class EmptyPageContinuationTests(unittest.TestCase):
         session = BiliSession.__new__(BiliSession)
         session._wapi = 'https://api.bilibili.com'
         session._throttle_read = Mock()
-        session._wbi_sign = lambda params: params
+        session._wbi_sign = lambda params, **_kwargs: params
         session._request = lambda *args, **kwargs: {"medias": [], "has_more": False}
         self.assertEqual([], list(session.iter_folder_videos("1000", 0)))
 
