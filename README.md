@@ -21,7 +21,7 @@
 
 **核心原则**：归类方案必须人工复核后才执行；执行时先加入目标夹、成功后再从原夹删除；默认收藏夹是「未分拣收件箱」，只出不进。
 
-**第一次使用？** 阅读[图文版快速上手指南](docs/快速上手.md)，或下载 [PDF 版](output/pdf/快速上手.pdf)。指南包含旧版界面截图，可用于学习主要工作流；v0.209 的设置中心、保险库与 Electron Neo 界面以实际程序为准。
+**当前稳定版：v0.210.5。** 前往[最新正式版 Release](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest)下载。本版重点修复任务锁定、外部链接、任务恢复与 SQLite 写入可靠性。第一次使用？阅读[图文版快速上手指南](docs/快速上手.md)，或下载 [PDF 版](output/pdf/快速上手.pdf)。指南中的部分截图来自旧版界面，安装与操作方式请以当前版本实际界面为准。
 
 **品牌与视觉设计**：查看[完整设计规范](docs/brand/README.md)、[SVG 设计语言](docs/brand/svg-language.md)和[矢量资产](static/brand/)。
 
@@ -248,13 +248,7 @@ bili-fav-organizer/
 
 ## 更新日志
 
-### 开发中：收藏夹批量读取与任务参数优化
-
-- 每夹一次读取完整 ID 清单，本地已有明细复用，缺少的明细合并为一次批量请求（最多 1000 条）。
-- 明细少返回时保留已确认的收藏 ID 并标注明细待补，不再把整夹退回 20 条分页；再次扫描只补查缺少明细。
-- 高级设置按任务标注每批条数、同时请求数和间隔；改用整数输入框，前后端校验范围，新增画像批次与并发设置。详见 [任务参数说明](docs/user/task-settings.md)。
-- 恢复 [收藏夹 API 原始规范与来源](docs/README.md)，补充 [历史实测与回归记录](docs/testing/favorite-api-history.md)。
-
+> 版本记录说明：`v0.210.1`–`v0.210.4` 的 Git 标签仍存在，但当前 GitHub Releases 列表未返回对应 Release 记录；这些历史条目链接到标签对应的提交以便追溯。本次整理不重写历史标签或替换历史产物。
 
 ### [v0.210.5](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.210.5)（2026-10-23）
 
@@ -264,10 +258,34 @@ bili-fav-organizer/
 - 修复“获取更新”无法打开发布页面的问题，补全 Electron 外链处理。
 - 调度器分发新任务前先恢复未完成的远端操作，降低重启或中断后任务状态不一致的风险。
 - 修复 SQLite WAL sidecar 生命周期处理导致写入连接意外进入只读状态的问题，并补充数据库事务清理与生命周期测试。
-- 当前主分支全量 CI 已通过；发布工作流仍会针对发布标签重新运行 Windows 回归测试，并构建便携包、传统安装包、Electron Neo 安装包及各自的 SHA-256 校验文件。
+- 发布验证：Stable Windows tag release 工作流已成功运行（[构建记录](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39841350498)）；Windows 全量回归通过，便携 ZIP、传统安装包、Electron Neo 安装包及各自的 SHA-256 校验文件均已生成，共 6 个附件。
 
 
-### [v0.210.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/tag/v0.210.1)（2026-10-21）
+### [v0.210.4](https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/d2eb46facd75ec865460e171bf7d8dfdedf398d2)（2026-10-22）
+
+**修复收藏夹扫描中的缺失详情提示与安全恢复流程。**
+
+- 文件夹扫描发现 B 站返回收藏 ID、但部分内容详情暂时不可用时，在扫描结束后提示用户处理。
+- 支持重试读取缺失明细或前往 B 站核对；保留已确认的收藏关系，不会仅因详情缺失就认定内容失效。
+- 缺失明细期间阻止后续整理，后端拒绝基于该情况执行自动清理。
+- Windows 发布验证通过：352 项测试通过，0 失败、0 错误、0 跳过（含 Chromium UI 回归）。
+
+### [v0.210.3](https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/44fc5c5135d60c8215e216e40fb69cad115c62b9)（2026-10-22）
+
+**修复设置保存后的 UI 回归测试夹具，并重新验证发布包。**
+
+- 修复隔离 UI 回归测试中的配置加载夹具，确保设置保存后重新加载时读取已保存值，并正确验证界面回填。
+- 本版本主要修复测试夹具；应用功能代码与 v0.210.2 相同。
+
+### [v0.210.2](https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/70a3064a61bb24c8f0ba8817058a3456bda83403)（2026-10-22）
+
+**修复收藏夹批量读取与高级任务参数配置。**
+
+- 恢复基于 B 站批量资源 API 的收藏夹读取，并补充大收藏夹和缺失详情处理验证。
+- 优化任务数值设置的整数校验、配置载入与并发保存行为。
+- 发布流程补充基于标签/Release 事件触发构建的能力，并上传发行包及对应 SHA-256 校验文件。
+
+### [v0.210.1](https://github.com/Martin-soaring-dev/bili-fav-organizer/commit/83e48d193ccb19ce6dcb0d765c5b8d85266b0e65)（2026-10-22）
 
 **Windows 实机测试版：扫描异常只读诊断、设置恢复与 B 站外链修复。**
 
