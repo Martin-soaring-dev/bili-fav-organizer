@@ -2245,19 +2245,29 @@ def _ensure_task_scheduler() -> TaskScheduler:
                 owner="task-scheduler",
                 owner_lock_path=store.DATA_DIR / ".scheduler-owner.lock",
             )
-            _TASK_SCHEDULER = TaskScheduler(
+            scheduler = TaskScheduler(
                 task_store,
                 workers={task_type: _LegacyAppTaskWorker for task_type in _APP_TASK_TYPES},
                 max_workers=1,
                 owner_id=f"bfo:{uuid.uuid4().hex}",
             )
-            _TASK_SCHEDULER.start()
+
+            def recover_remote_operations_before_dispatch() -> None:
+                # recover_stranded_dispatches requires single-process scheduler
+                # ownership. TaskScheduler.start holds that ownership but does
+                # not start its pump until this callback returns, preventing
+                # queued work from racing startup reconciliation.
+                connection = store._connect(owner="startup:remote-operation-recovery")
+                try:
+                    SqliteRemoteOperationRepository(connection).recover_stranded_dispatches()
+                finally:
+                    connection.close()
+
+            scheduler.start(before_dispatch=recover_remote_operations_before_dispatch)
+            # Publish the global scheduler only after startup recovery succeeds.
+            # A failed recovery must not leave an unstarted singleton behind.
+            _TASK_SCHEDULER = scheduler
             _TASK_SCHEDULER_KEY = key
-            connection = store._connect(owner="startup:remote-operation-recovery")
-            try:
-                SqliteRemoteOperationRepository(connection).recover_stranded_dispatches()
-            finally:
-                connection.close()
         return _TASK_SCHEDULER
 
 
