@@ -27,6 +27,56 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(0, result.returncode, result.stdout)
 
+    def test_remote_operation_recovery_runs_before_scheduler_dispatch(self):
+        with tempfile.TemporaryDirectory(prefix="bfo-scheduler-startup-order-") as temp_dir:
+            root = Path(temp_dir)
+            env = os.environ.copy()
+            env["LOCALAPPDATA"] = str(root / "profile")
+            env["HOME"] = str(root / "home")
+            env["BILI_FAV_ORGANIZER_DATA_DIR"] = str(root / "profile" / "data")
+            env["BILI_FAV_ORGANIZER_ALLOW_INSECURE_LOCAL"] = "1"
+            script = textwrap.dedent(r"""
+                import store
+                store.initialize_new_database()
+                import server
+                server.VAULT.initialize(bound_mid="12345", password="safe-password")
+                server.VAULT.complete_onboarding()
+
+                events = []
+                original_recover = (
+                    server.SqliteRemoteOperationRepository.recover_stranded_dispatches
+                )
+                def observed_recover(repository):
+                    events.append("remote-recovery")
+                    return original_recover(repository)
+                server.SqliteRemoteOperationRepository.recover_stranded_dispatches = (
+                    observed_recover
+                )
+
+                original_start = server.TaskScheduler.start
+                def observed_start(scheduler, *, before_dispatch=None):
+                    assert before_dispatch is not None, (
+                        "server startup did not register the pre-dispatch recovery hook"
+                    )
+                    def observed_hook():
+                        events.append("pre-dispatch-enter")
+                        before_dispatch()
+                        events.append("pre-dispatch-exit")
+                    original_start(scheduler, before_dispatch=observed_hook)
+                    events.append("start-return")
+                server.TaskScheduler.start = observed_start
+
+                scheduler = server._ensure_task_scheduler()
+                assert scheduler._started
+                assert events == [
+                    "pre-dispatch-enter",
+                    "remote-recovery",
+                    "pre-dispatch-exit",
+                    "start-return",
+                ], events
+            """)
+            self._run_subprocess(env, script)
+
     def test_vault_lock_waits_for_checkpoint_then_resumes_same_process_runner(self):
         with tempfile.TemporaryDirectory(prefix="bfo-scheduler-vault-") as temp_dir:
             root = Path(temp_dir)
@@ -184,6 +234,9 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
                 json.dumps(server.scan_status())
                 assert task.status is server.TaskStatus.COMPLETED, task
                 assert store.load_folder_scan_states()["10"]["status"] == "complete"
+                assert server._TASK_SCHEDULER.wait_for_idle(timeout=5), (
+                    "terminal task status was visible before the worker exited"
+                )
                 assert not store.database_connections()
             """
             self._run_subprocess(env, script)

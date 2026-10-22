@@ -282,8 +282,14 @@ class TaskScheduler:
 
         return unsubscribe
 
-    def start(self) -> None:
-        """Claim process ownership, mark stale work interrupted, then dispatch."""
+    def start(self, *, before_dispatch: Callable[[], None] | None = None) -> None:
+        """Claim ownership and recover persisted state before starting dispatch.
+
+        before_dispatch runs while single-process ownership is held, after
+        scheduler-task recovery and before the pump thread can dispatch work.
+        Startup integrations use this barrier for recovery that must complete
+        before any persisted task is allowed to execute.
+        """
         with self._lock:
             if self._started:
                 return
@@ -297,6 +303,8 @@ class TaskScheduler:
             with self._lock:
                 self._owner_epoch = epoch
             self._recover_incomplete_tasks()
+            if before_dispatch is not None:
+                before_dispatch()
             with self._lock:
                 self._closing = False
                 self._started = True
