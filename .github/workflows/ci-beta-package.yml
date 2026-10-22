@@ -56,6 +56,8 @@ jobs:
           cache: npm
       - name: Install Node dependencies
         run: npm ci
+      - name: Run Electron external-link unit tests
+        run: node --test tests/electron_external_links.test.js
       - name: Build Electron neo NSIS installer (not published)
         shell: pwsh
         run: |
