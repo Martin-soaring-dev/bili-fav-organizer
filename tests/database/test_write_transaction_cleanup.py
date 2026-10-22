@@ -45,6 +45,7 @@ class _FakeLifecycle:
 
 def _connect_failing_begin(opened):
     connection = sqlite3.connect(":memory:", factory=_FailingBeginConnection)
+    # Keep a strong reference so garbage collection cannot hide a missing close.
     opened.append(connection)
     return connection
 
