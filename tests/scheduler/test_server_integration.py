@@ -119,6 +119,11 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
 
                 _record, scheduler = server._submit_app_task(
                     "scan", state, runner, parameters={"fixture": "412-backoff"})
+                # Capture the durable PAUSED transition before the vault seals the
+                # database. Reading scheduler rows after a successful lock is
+                # intentionally forbidden by the lifecycle layer.
+                observed_records = []
+                unsubscribe = scheduler.subscribe(observed_records.append)
                 assert request_started.wait(5), "worker never entered the simulated 412 backoff"
                 started = time.monotonic()
                 locked = server.vault_lock()
@@ -126,9 +131,18 @@ class ServerSchedulerIntegrationTests(unittest.TestCase):
                 assert isinstance(locked, dict), getattr(locked, "body", locked)
                 assert locked["ok"] is True, locked
                 assert elapsed < 5, f"lock waited for the full retry backoff: {elapsed:.2f}s"
-                record = scheduler.get_task(state["id"])
-                assert record.status is server.TaskStatus.PAUSED, record
+                paused_records = [
+                    record for record in observed_records
+                    if record.task_id == state["id"]
+                    and record.status is server.TaskStatus.PAUSED
+                ]
+                assert paused_records, [
+                    (record.status, record.pause_reason)
+                    for record in observed_records if record.task_id == state["id"]
+                ]
+                record = paused_records[-1]
                 assert record.pause_reason is server.PauseReason.VAULT_LOCK, record
+                unsubscribe()
                 assert store.database_state() == store.DatabaseState.LOCKED.value
             """)
             self._run_subprocess(env, script)
