@@ -1,20 +1,20 @@
-> **历史执行档案（最新状态段落日期：2026-10-21）**：本文保留任务执行和验收的历史证据，不是实时分支清单。远端分支、PR 和发布状态可能已变化；当前规则以 [维护治理规范](../maintenance/governance.md) 为准，当前版本事实以 [版本台账](../maintenance/version-ledger.md) 为准。下方历史记录不得覆盖更新的 SHA 绑定验收报告。
+> **历史执行档案（最新状态段落日期：2026-10-21）**：本文保留任务执行和验收的历史证据，不是实时分支清单。本文顶部的 2026-10-21 状态段落只在当时有效，现已过期；最新分支与治理执行状态请查阅[分支治理记录](../maintenance/branch-cleanup-20261023.md)，当前规则以[维护治理规范](../maintenance/governance.md)为准，当前版本事实以[版本台账](../maintenance/version-ledger.md)为准。下方历史记录不得覆盖更新的 SHA 绑定验收报告。
 
 # 可靠性维护任务清单（供 Mimo Desktop 执行）
 
-## 合并后收尾状态（2026-10-21）
+## 历史阶段性收尾状态（2026-10-21）
 
-- **当前主线：**PR [#22](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22) 已合并到 `main`。候选 `1981a94ed750d7be4e3404d6622ad776708f2091` 的 tree `e943cc30ebf0b6dffcf69866c01761fba9928b32` 已纳入 merge commit `903666a11f3914291f3352bd92e041eaa40f7ce5`。
-- **当前验收：**T8 Windows 全量回归 330/330 PASS；T10 实机 UAT 14/14 PASS、39 张截图；T11a PR checks PASS；T11b 隔离安装、schema 7→8 升级与重启验收 PASS。T11b 使用同 SHA 本地构建安装包；Beta CI 成功构建并通过 smoke，但未上传安装包 artifact。详见[验收报告](https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md)。
+- **当时主线：**PR [#22](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/22) 已合并到 `main`。候选 `1981a94ed750d7be4e3404d6622ad776708f2091` 的 tree `e943cc30ebf0b6dffcf69866c01761fba9928b32` 已纳入 merge commit `903666a11f3914291f3352bd92e041eaa40f7ce5`。
+- **截至当时的验收：**T8 Windows 全量回归 330/330 PASS；T10 实机 UAT 14/14 PASS、39 张截图；T11a PR checks PASS；T11b 隔离安装、schema 7→8 升级与重启验收 PASS。T11b 使用同 SHA 本地构建安装包；Beta CI 成功构建并通过 smoke，但未上传安装包 artifact。详见[验收报告](https://github.com/Martin-soaring-dev/bili-fav-organizer/blob/main/docs/testing/evidence/20261021-windows-t11b-install-1981a94/acceptance-report.md)。
 - **T3：PARTIAL。**schema 5–8 契约及现有拒绝路径有证据；仍缺按版本抽样的类型/NOT NULL 变异、动态枚举 CHECK 的证伪测试，以及 schema<5 普通连接拒绝与人工恢复/导出路径自动化验证。
 - **T9：**维护者已将其从当前发布门禁中退休。旧只读审查仅作历史记录，不参与当前判定。
 - **T12：NOT_RUN。**本轮未创建发布 tag、Release 或发布；发布仍须维护者明确 GO。
-- **PR / Issue 清理：**PR #22 已合并，旧 CI-only PR #21 已关闭，目前没有打开的 PR。Issue [#6](https://github.com/Martin-soaring-dev/bili-fav-organizer/issues/6) 已于 2026-10-20 21:47 UTC 关闭；修复由 PR [#7](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/7) 合并，维护者最后反馈“测试未见异常”。此 issue 独立于 PR #22。
+- **PR / Issue 清理：**PR #22 已合并，旧 CI-only PR #21 已关闭，当时没有打开的 PR。Issue [#6](https://github.com/Martin-soaring-dev/bili-fav-organizer/issues/6) 已于 2026-10-20 21:47 UTC 关闭；修复由 PR [#7](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/7) 合并，维护者最后反馈“测试未见异常”。此 issue 独立于 PR #22。
 - **当前看板：**[BiliFavOrganizer Delivery Console](https://martin-soaring-dev.github.io/bili-fav-organizer/)。
 
-本节为当前权威状态。下方较早的执行记录保留用于追溯，不能覆盖本节结论。
+本节只代表截至 2026-10-21 的阶段性权威记录，不再代表当前仓库状态。下方更早的执行记录用于追溯；当前分支、PR 和发布状态请查阅[分支治理记录](../maintenance/branch-cleanup-20261023.md)及[版本台账](../maintenance/version-ledger.md)。
 
-**分支收敛状态（完成，远端复核：2026-10-21）：**目标仅保留 `main`，已完成。GitHub 远端活动分支 refs 目前只有 `main`。Pages source 已切换为 `main` 的 `/docs`；Pages 构建运行 [#19](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39503909627) 在清理时的 `main` HEAD `49e8ada` 上成功，刷新公开看板可正常加载。PR #22 已合并、PR #21 已关闭，目前没有打开的 PR；Issue #6 已关闭，PR #7 已合并。T8/T10/T11a/T11b 均 PASS，T3 为 PARTIAL，T12 为 NOT_RUN，未发布版本。
+**分支收敛状态（历史记录，核查日期：2026-10-21）：**当时目标仅保留 `main`，并在当日完成。当时 GitHub 远端活动分支 refs 只有 `main`；该结论不代表 2026-10-23 的状态。最新核查请看[分支治理记录](../maintenance/branch-cleanup-20261023.md)。Pages source 已切换为 `main` 的 `/docs`；Pages 构建运行 [#19](https://github.com/Martin-soaring-dev/bili-fav-organizer/actions/runs/39503909627) 在清理时的 `main` HEAD `49e8ada` 上成功，刷新公开看板可正常加载。PR #22 已合并、PR #21 已关闭；当时没有打开的 PR；Issue #6 已关闭，PR #7 已合并。T8/T10/T11a/T11b 均 PASS，T3 为 PARTIAL，T12 为 NOT_RUN，未发布版本。
 
 **已删除的 10 个非 main 分支：** `ci/ea-playwright-full-regression-20261019`、`docs/reliability-scheduler-refactor-plan`、`evidence/windows-owner-lock-20261020`、`evidence/windows-t10-uat-20261020`、`feat/reliability-scheduler-implementation`、`fix/vault-active-work-barrier`、`gh-pages`、`maintenance/release-pipeline-post-v0209`、`master`、`new_arch`。候选与两条 evidence 分支的验收报告/日志/截图，以及 dashboard，已确认在 `main` 对应路径可读；旧 `gh-pages/index.html` 与 `main/docs/index.html` 内容相同。
 
