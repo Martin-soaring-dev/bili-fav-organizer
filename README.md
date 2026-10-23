@@ -232,6 +232,19 @@ bili-fav-organizer/
 
 ---
 
+## 文档导航
+
+项目文档按用途和权威性分类。**当前治理规则以 [文档目录](docs/INDEX.md) 与 [维护治理规范](docs/maintenance/governance.md) 为准；版本事实以 [版本台账](docs/maintenance/version-ledger.md) 为准。** 历史审计和验收报告用于追溯，不自动代表当前状态。
+
+- [完整文档目录](docs/INDEX.md)：用户指南、设计文档、维护规则、测试与验收证据。
+- [分支与文档治理规范](docs/maintenance/governance.md)：长期有效的分支、PR、证据归档、文档状态和发布规则。
+- [版本台账](docs/maintenance/version-ledger.md)：Git tag、Release、构建运行和发行物校验。
+- [发布操作流程](docs/release-process.md)：稳定版 / Beta 自动发布与人工补发说明。
+- [项目交付看板](docs/index.html)：GitHub Pages 上的交付状态面板。
+- [快速上手](docs/快速上手.md)：用户安装与使用说明。
+
+---
+
 ## 设计文档
 
 | 文档 | 内容 |

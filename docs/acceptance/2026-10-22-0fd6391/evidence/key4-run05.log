@@ -1,0 +1,15 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-c59b4q_w\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-c59b4q_w\profile
+python.exe : test_vault_lock_waits_for_checkpoint_then_resumes_same_process_runner (scheduler.test_server_integration.S
+erverSchedulerIntegrationTests.test_vault_lock_waits_for_checkpoint_then_resumes_same_process_runner) ... ok
+所在位置 <ACCEPTANCE_ROOT>\acceptance-evidence\phase3-loop.ps1:14 字符: 9
++         & $Py tools\run_isolated_tests.py --test $case.test 2>&1 |
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_vault_lock..._runner) ... ok:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+----------------------------------------------------------------------
+Ran 1 test in 6.608s
+
+OK

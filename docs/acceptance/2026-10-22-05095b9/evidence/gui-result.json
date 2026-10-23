@@ -1,0 +1,99 @@
+{
+  "renderer_url": "http://127.0.0.1:55959/",
+  "diagnostics_initial": {
+    "app": {
+      "display": "flex",
+      "visibility": "visible",
+      "hiddenAttr": false,
+      "w": 1200,
+      "h": 752
+    },
+    "settingsBtn": {
+      "display": "inline-flex",
+      "visibility": "visible",
+      "hiddenAttr": false,
+      "w": 0,
+      "h": 0
+    },
+    "lockScreen": {
+      "display": "flex",
+      "visibility": "visible",
+      "hiddenAttr": false,
+      "w": 1200,
+      "h": 752
+    },
+    "onboarding": {
+      "display": "none",
+      "visibility": "visible",
+      "hiddenAttr": false,
+      "w": 0,
+      "h": 0
+    },
+    "bodyChildren": 23,
+    "title": "B站收藏夹整理"
+  },
+  "app_started_locked": true,
+  "db_after_start": true,
+  "diagnostics_after_start": {
+    "app": {
+      "display": "flex",
+      "visibility": "visible",
+      "hiddenAttr": false,
+      "w": 1200,
+      "h": 752
+    },
+    "settingsBtn": {
+      "display": "inline-flex",
+      "visibility": "visible",
+      "hiddenAttr": false,
+      "w": 0,
+      "h": 0
+    },
+    "lockScreen": {
+      "display": "none",
+      "visibility": "visible",
+      "hiddenAttr": true,
+      "w": 0,
+      "h": 0
+    },
+    "onboarding": {
+      "display": "none",
+      "visibility": "visible",
+      "hiddenAttr": false,
+      "w": 0,
+      "h": 0
+    },
+    "bodyChildren": 23,
+    "title": "B站收藏夹整理"
+  },
+  "settings_opened_via": "#rail-settings",
+  "about_version": "版本 dev",
+  "update_status_after_click": "当前是开发构建（dev），不做版本比较",
+  "about_latest_after": "开发构建不做比较",
+  "release_link_present": false,
+  "release_url_process_samples": [
+    "﻿20:20:25.117 pid=12544 name=msedge.exe cmd=\"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe\" --single-argument https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest"
+  ],
+  "blocked_url_process_samples": [],
+  "shell_log_reject_unknown": true,
+  "shell_log_open_failures": 0,
+  "db_before_lock": true,
+  "lock_clicked_via": "#rail-lock",
+  "lock_clicked": true,
+  "lock_screen_visible": true,
+  "db_after_lock": false,
+  "data_dir_after_lock": [
+    ".bfo-profile.lock",
+    ".scheduler-owner.lock",
+    "database-manifest.json",
+    "library.sqlite3.enc",
+    "vault-archives"
+  ],
+  "shell_log_lock_lines": [
+    "[shell] 锁定时回收终端 0 个",
+    "[shell] 锁定时回收终端 0 个",
+    "[shell] 锁定时回收终端 0 个"
+  ],
+  "db_after_unlock": true,
+  "lock_screen_after_unlock": false
+}

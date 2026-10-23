@@ -1,0 +1,400 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\profile
+python.exe : 2026-10-22 22:27:50,766 [server] 渚涘簲鍟?妯″瀷鍒濆鍖栧け璐ワ細鏁版嵁搴撳綋鍓嶄笉鍏佽鏅€氳闂紙鐘舵€侊細RECOVERY_REQUIRED锛?
+所在位置 行:512 字符: 3
++   & $Py tools\run_isolated_tests.py --test "test_scan_troubleshooting ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-10-22 22:2...VERY_REQUIRED锛?:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_1000_item_scan_uses_ids_once_and_infos_once (test_scan_troubleshooting.ScanTroubleshootingTests.test_1000_item_sca
+n_uses_ids_once_and_infos_once) ... ok
+test_business_apis_are_blocked_including_delete_only_execution (test_scan_troubleshooting.ScanTroubleshootingTests.test
+_business_apis_are_blocked_including_delete_only_execution) ... 2026-10-22 22:27:52,820 [core.scheduler.scheduler] Task
+ 1d31f6dcba81480fa293ca7377838b41 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 22:27:53,000 [httpx2] HTTP Request: POST http://testserver/api/analyze/start "HTTP/1.1 409 Conflict"
+2026-10-22 22:27:53,078 [httpx2] HTTP Request: POST http://testserver/api/apply/start "HTTP/1.1 409 Conflict"
+2026-10-22 22:27:53,160 [httpx2] HTTP Request: POST http://testserver/api/folder-organize/start "HTTP/1.1 409 Conflict"
+2026-10-22 22:27:53,274 [httpx2] HTTP Request: POST http://testserver/api/folder-organize/suggest "HTTP/1.1 409 Conflic
+t"
+2026-10-22 22:27:53,355 [httpx2] HTTP Request: POST http://testserver/api/folder-profiles/generate "HTTP/1.1 409 Confli
+ct"
+2026-10-22 22:27:53,433 [httpx2] HTTP Request: POST http://testserver/api/plan/apply "HTTP/1.1 409 Conflict"
+2026-10-22 22:27:53,518 [httpx2] HTTP Request: GET http://testserver/api/scan/tree "HTTP/1.1 200 OK"
+ok
+test_cached_folder_rebuild_reads_only_id_catalog (test_scan_troubleshooting.ScanTroubleshootingTests.test_cached_folder
+_rebuild_reads_only_id_catalog) ... 2026-10-22 22:27:55,386 [core.scheduler.scheduler] Task f07bfa82a0eb4472aab7138cd32
+f779c failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: attempt to write a readonly database
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 4475, in run
+    store.update_folder_scan_progress(mid, len(staged))
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\store.py",
+ line 1480, in update_folder_scan_progress
+    with _transaction() as conn:
+         ^^^^^^^^^^^^^^
+  File "<PYTHON>\cpython-3.12.15-windows-x86_64-none\Lib\contextlib.py", line 137, in 
+__enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\store.py",
+ line 210, in _transaction
+    conn.execute("BEGIN IMMEDIATE")
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\datab
+ase\lifecycle.py", line 163, in execute
+    cursor = super().execute(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: attempt to write a readonly database
+
+ok
+test_clean_requires_explicit_confirmation (test_scan_troubleshooting.ScanTroubleshootingTests.test_clean_requires_expli
+cit_confirmation) ... 2026-10-22 22:27:56,382 [core.scheduler.scheduler] Task d6d5ac7205b14872a82153494f2e3c67 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 22:27:56,547 [httpx2] HTTP Request: POST http://testserver/api/scan/issues/10/recover "HTTP/1.1 400 Bad Requ
+est"
+ok
+test_clean_success_without_count_recovery_is_not_resolved (test_scan_troubleshooting.ScanTroubleshootingTests.test_clea
+n_success_without_count_recovery_is_not_resolved) ... 2026-10-22 22:27:57,205 [core.scheduler.scheduler] Task 3fd95c6ea
+a7742fcab5f1f5d53805da9 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 22:27:57,988 [core.scheduler.scheduler] Task 67000c8578114d1d956c9c8146315517 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_confirmed_clean_refreshes_and_validates (test_scan_troubleshooting.ScanTroubleshootingTests.test_confirmed_clean_r
+efreshes_and_validates) ... 2026-10-22 22:27:58,817 [core.scheduler.scheduler] Task 26d73e76dc614514afb9d1cddbc311b6 fa
+iled
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 22:27:59,300 [core.scheduler.scheduler] Task c8c10d84d81444b5a9d27c8a978c3abc failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: attempt to write a readonly database
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 4339, in run
+    store.update_scan_issue(mid, cleanup_unknown=True, event="姝ｅ湪璋冪敤 B 绔欏け鏁堝唴瀹规竻鐞?)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\store.py",
+ line 1538, in update_scan_issue
+    with _transaction() as conn:
+         ^^^^^^^^^^^^^^
+  File "<PYTHON>\cpython-3.12.15-windows-x86_64-none\Lib\contextlib.py", line 137, in 
+__enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\store.py",
+ line 210, in _transaction
+    conn.execute("BEGIN IMMEDIATE")
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\datab
+ase\lifecycle.py", line 163, in execute
+    cursor = super().execute(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: attempt to write a readonly database
+
+FAIL
+test_duplicate_resources_are_reported_separately (test_scan_troubleshooting.ScanTroubleshootingTests.test_duplicate_res
+ources_are_reported_separately) ... 2026-10-22 22:28:00,114 [core.scheduler.scheduler] Task ad0c44d022314609a179a8102e4
+76257 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_gap_persists_and_does_not_clean_or_replace_old_snapshot (test_scan_troubleshooting.ScanTroubleshootingTests.test_g
+ap_persists_and_does_not_clean_or_replace_old_snapshot) ... 2026-10-22 22:28:01,156 [core.scheduler.scheduler] Task 46b
+ed388bcca419098867693a9c02903 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_index_fallback_discards_partial_index_results (test_scan_troubleshooting.ScanTroubleshootingTests.test_index_fallb
+ack_discards_partial_index_results) ... 2026-10-22 22:28:02,016 [core.scheduler.scheduler] Task 3d988a737d324ae9b467df7
+3e6ec2e32 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_interrupted_paged_folder_restarts_from_the_first_page (test_scan_troubleshooting.ScanTroubleshootingTests.test_int
+errupted_paged_folder_restarts_from_the_first_page)
+鎭㈠鍚庣殑閲嶈浠庤鏀惰棌澶圭 1 椤靛紑濮嬶紝涓嶆壙璇洪〉绾х画鎵€?... ok
+test_legacy_inconsistent_state_is_available_in_popup (test_scan_troubleshooting.ScanTroubleshootingTests.test_legacy_in
+consistent_state_is_available_in_popup) ... ok
+test_manual_retry_resolves_after_remote_cleanup (test_scan_troubleshooting.ScanTroubleshootingTests.test_manual_retry_r
+esolves_after_remote_cleanup) ... 2026-10-22 22:28:05,577 [core.scheduler.scheduler] Task c5324b01c9f94b0bab0fca677a7ef
+986 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_manual_stop_rate_limit_is_reported_as_cancellation (test_scan_troubleshooting.ScanTroubleshootingTests.test_manual
+_stop_rate_limit_is_reported_as_cancellation) ... ok
+test_missing_info_is_retained_without_paging_and_only_it_is_refetched (test_scan_troubleshooting.ScanTroubleshootingTes
+ts.test_missing_info_is_retained_without_paging_and_only_it_is_refetched) ... 2026-10-22 22:28:08,107 [httpx2] HTTP Req
+uest: POST http://testserver/api/scan/issues/10/recover "HTTP/1.1 400 Bad Request"
+2026-10-22 22:28:08,188 [httpx2] HTTP Request: POST http://testserver/api/analyze/start "HTTP/1.1 409 Conflict"
+ok
+test_network_error_does_not_become_hidden_invalid_diagnosis (test_scan_troubleshooting.ScanTroubleshootingTests.test_ne
+twork_error_does_not_become_hidden_invalid_diagnosis) ... 2026-10-22 22:28:09,967 [core.scheduler.scheduler] Task 742ff
+886394e47a38e177c697f7b02f3 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 缃戠粶寮傚父
+ok
+test_normal_scan_does_not_create_issue (test_scan_troubleshooting.ScanTroubleshootingTests.test_normal_scan_does_not_cr
+eate_issue) ... 2026-10-22 22:28:10,886 [core.scheduler.scheduler] Task d006635daf1a431bb69fe78bfdfbd830 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: attempt to write a readonly database
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 4509, in run
+    store.save_scan_stage(run_id, mid, batch)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\store.py",
+ line 1454, in save_scan_stage
+    with _transaction() as conn:
+         ^^^^^^^^^^^^^^
+  File "<PYTHON>\cpython-3.12.15-windows-x86_64-none\Lib\contextlib.py", line 137, in 
+__enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\store.py",
+ line 210, in _transaction
+    conn.execute("BEGIN IMMEDIATE")
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\datab
+ase\lifecycle.py", line 163, in execute
+    cursor = super().execute(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: attempt to write a readonly database
+
+FAIL
+test_other_running_job_prevents_recovery (test_scan_troubleshooting.ScanTroubleshootingTests.test_other_running_job_pre
+vents_recovery) ... 2026-10-22 22:28:12,050 [core.scheduler.scheduler] Task 0a27d75b2b1f4f96abf098bcceca8699 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_paused_scan_cancelled_from_scan_page_keeps_both_states_cancelled (test_scan_troubleshooting.ScanTroubleshootingTes
+ts.test_paused_scan_cancelled_from_scan_page_keeps_both_states_cancelled) ... ok
+test_paused_scan_cancelled_from_task_center_keeps_both_states_cancelled (test_scan_troubleshooting.ScanTroubleshootingT
+ests.test_paused_scan_cancelled_from_task_center_keeps_both_states_cancelled) ... ok
+test_rate_limit_keeps_issue_and_records_failure (test_scan_troubleshooting.ScanTroubleshootingTests.test_rate_limit_kee
+ps_issue_and_records_failure) ... 2026-10-22 22:28:15,209 [core.scheduler.scheduler] Task 1367d4bbd69a474586b7baa9ece36
+819 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 22:28:15,839 [core.scheduler.scheduler] Task deca97a235984600afa9e909b82618fc failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 椋庢帶锛氶鎺э紝璇风◢鍚庨噸璇?
+ok
+test_refresh_resolves_sync_delay_without_cleaning (test_scan_troubleshooting.ScanTroubleshootingTests.test_refresh_reso
+lves_sync_delay_without_cleaning) ... 2026-10-22 22:28:17,069 [core.scheduler.scheduler] Task 55360dab334844c0b2e5cc831
+ff65f26 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_resolving_one_folder_does_not_unblock_other_issue (test_scan_troubleshooting.ScanTroubleshootingTests.test_resolvi
+ng_one_folder_does_not_unblock_other_issue) ... 2026-10-22 22:28:19,205 [core.scheduler.scheduler] Task ef2bde5d6c2a49a
+98119f02feef8ddd0 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: attempt to write a readonly database
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 4545, in run
+    store.update_scan_issue(mid, title=folder["title"], status="pending", scan_run_id=run_id,
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\store.py",
+ line 1538, in update_scan_issue
+    with _transaction() as conn:
+         ^^^^^^^^^^^^^^
+  File "<PYTHON>\cpython-3.12.15-windows-x86_64-none\Lib\contextlib.py", line 137, in 
+__enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\store.py",
+ line 210, in _transaction
+    conn.execute("BEGIN IMMEDIATE")
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\datab
+ase\lifecycle.py", line 163, in execute
+    cursor = super().execute(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: attempt to write a readonly database
+
+ok
+test_retry_with_gap_stays_blocked (test_scan_troubleshooting.ScanTroubleshootingTests.test_retry_with_gap_stays_blocked
+) ... 2026-10-22 22:28:21,480 [core.scheduler.scheduler] Task 56a4e7c935ae408c8f823f38e9637407 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 22:28:22,403 [core.scheduler.scheduler] Task 03cff776872c4afe956b0c7fe57a59ce failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_save_config_can_persist_qr_login_before_database_initialization (test_scan_troubleshooting.ScanTroubleshootingTest
+s.test_save_config_can_persist_qr_login_before_database_initialization) ... ok
+test_save_config_does_not_swallow_database_recovery_required (test_scan_troubleshooting.ScanTroubleshootingTests.test_s
+ave_config_does_not_swallow_database_recovery_required) ... ok
+test_scan_reserves_running_state_before_starting_worker (test_scan_troubleshooting.ScanTroubleshootingTests.test_scan_r
+eserves_running_state_before_starting_worker) ... ok
+test_scan_resume_skips_complete_folders_and_never_replays_writes (test_scan_troubleshooting.ScanTroubleshootingTests.te
+st_scan_resume_skips_complete_folders_and_never_replays_writes) ... ok
+test_scan_tree_and_organize_suggest_accept_legacy_media_count (test_scan_troubleshooting.ScanTroubleshootingTests.test_
+scan_tree_and_organize_suggest_accept_legacy_media_count) ... ok
+test_scheduler_pause_emits_paused_scan_end_and_clears_running_state (test_scan_troubleshooting.ScanTroubleshootingTests
+.test_scheduler_pause_emits_paused_scan_end_and_clears_running_state) ... ok
+test_task_progress_separates_folder_and_item_counters (test_scan_troubleshooting.ScanTroubleshootingTests.test_task_pro
+gress_separates_folder_and_item_counters) ... ok
+test_uncertain_cleanup_is_never_replayed (test_scan_troubleshooting.ScanTroubleshootingTests.test_uncertain_cleanup_is_
+never_replayed) ... 2026-10-22 22:28:27,454 [core.scheduler.scheduler] Task 13e6ee89b8454e25b6321ed1e73080cd failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+
+======================================================================
+FAIL: test_confirmed_clean_refreshes_and_validates (test_scan_troubleshooting.ScanTroubleshootingTests.test_confirmed_c
+lean_refreshes_and_validates)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\tests\test
+_scan_troubleshooting.py", line 570, in test_confirmed_clean_refreshes_and_validates
+    self.assertFalse(server.scan_issues_get()["blocked"])
+AssertionError: True is not false
+
+======================================================================
+FAIL: test_normal_scan_does_not_create_issue (test_scan_troubleshooting.ScanTroubleshootingTests.test_normal_scan_does_
+not_create_issue)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-hlr9a5k4\checkout\tests\test
+_scan_troubleshooting.py", line 336, in test_normal_scan_does_not_create_issue
+    self.assertEqual("complete", store.load_folder_scan_states()["10"]["status"])
+AssertionError: 'complete' != 'partial'
+- complete
++ partial
+
+
+----------------------------------------------------------------------
+Ran 31 tests in 38.485s
+
+FAILED (failures=2)
+[store] 鏁版嵁搴撳惎鍔ㄦ牎楠?杩佺Щ鏈畬鎴愶紝鏅€氳闂凡鍏抽棴锛氬€欓€夋暟鎹簱缂哄皯蹇呰涓氬姟琛紝鎷掔粷鑷姩琛ュ缓锛歛nalyses, app_state, folder_items, folder_profiles, folder_scan_state, folders, models, plans, providers, scan_stage, videos

@@ -1,0 +1,38 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-k5_k3o50\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-k5_k3o50\profile
+python.exe : test_MIG_030_probe_snapshot_does_not_create_profile_sidecars (migration.test_vault_migration.VaultMigratio
+nTests.test_MIG_030_probe_snapshot_does_not_create_profile_sidecars)
+所在位置 行:518 字符: 5
++     & $Py tools\run_isolated_tests.py --test $c.test 2>&1 | Out-File  ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_MIG_030_pr...ofile_sidecars):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+A diagnostic snapshot must not create WAL/SHM beside the tested profile DB. ... FAIL
+
+======================================================================
+FAIL: test_MIG_030_probe_snapshot_does_not_create_profile_sidecars (migration.test_vault_migration.VaultMigrationTests.
+test_MIG_030_probe_snapshot_does_not_create_profile_sidecars)
+A diagnostic snapshot must not create WAL/SHM beside the tested profile DB.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-k5_k3o50\checkout\tests\migr
+ation\test_vault_migration.py", line 337, in test_MIG_030_probe_snapshot_does_not_create_profile_sidecars
+    self.assertEqual([], unlocked["database_sidecars_at_probe_end"])
+AssertionError: Lists differ: [] != ['C:\\Users\\<user>\\AppData\\Local\\Temp\[325 chars]shm']
+
+Second list contains 2 additional elements.
+First extra element 0:
+'C:\\Users\\<user>\\AppData\\Local\\Temp\\bfo-retest-20261022-0fd6391\\.bfo-isolated-tests-k5_k3o50\\temp\\bfo-mig-vaul
+t-aur8ko0d\\profile\\BiliFavOrganizer\\data\\library.sqlite3-wal'
+
+- []
++ ['C:\\Users\\<user>\\AppData\\Local\\Temp\\bfo-retest-20261022-0fd6391\\.bfo-isolated-tests-k5_k3o50\\temp\\bfo-mig-v
+ault-aur8ko0d\\profile\\BiliFavOrganizer\\data\\library.sqlite3-wal',
++  'C:\\Users\\<user>\\AppData\\Local\\Temp\\bfo-retest-20261022-0fd6391\\.bfo-isolated-tests-k5_k3o50\\temp\\bfo-mig-v
+ault-aur8ko0d\\profile\\BiliFavOrganizer\\data\\library.sqlite3-shm']
+
+----------------------------------------------------------------------
+Ran 1 test in 13.421s
+
+FAILED (failures=1)

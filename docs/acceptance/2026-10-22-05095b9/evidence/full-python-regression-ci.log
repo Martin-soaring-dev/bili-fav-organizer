@@ -1,0 +1,1474 @@
+﻿Isolated checkout: <USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout
+Isolated LOCALAPPDATA: <USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\profile
+python.exe : 2026-10-22 19:38:53,872 [server] 渚涘簲鍟?妯″瀷鍒濆鍖栧け璐ワ細鏁版嵁搴撳皻鏈垵濮嬪寲锛欳:\Users\Martin\AppData\Local\Temp\bfo-acce
+ptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\profile\BiliFavOrganizer\data\library.sqlite3锛涢渶瑕佹樉寮忔墽琛岄娆″垵濮嬪寲
+所在位置 行:533 字符: 1
++ & $Py tools\run_isolated_tests.py 2>&1 | Out-File -FilePath $log -Enc ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-10-22 19:3...瑕佹樉寮忔墽琛岄娆″垵濮嬪寲:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_application_validator_checks_candidate_staged_backup_and_installed_files (database.test_lifecycle.CandidateDatabas
+eTests.test_application_validator_checks_candidate_staged_backup_and_installed_files) ... ok
+test_begin_drain_closes_gate_and_waits_for_existing_connections (database.test_lifecycle.CandidateDatabaseTests.test_be
+gin_drain_closes_gate_and_waits_for_existing_connections) ... ok
+test_begin_drain_timeout_restores_ready_without_discarding_connection (database.test_lifecycle.CandidateDatabaseTests.t
+est_begin_drain_timeout_restores_ready_without_discarding_connection) ... ok
+test_candidate_install_removes_staged_sqlite_sidecars (database.test_lifecycle.CandidateDatabaseTests.test_candidate_in
+stall_removes_staged_sqlite_sidecars) ... ok
+test_candidate_is_validated_then_atomically_installed_with_old_copy (database.test_lifecycle.CandidateDatabaseTests.tes
+t_candidate_is_validated_then_atomically_installed_with_old_copy) ... ok
+test_corrupt_candidate_is_rejected_without_touching_active_database (database.test_lifecycle.CandidateDatabaseTests.tes
+t_corrupt_candidate_is_rejected_without_touching_active_database) ... ok
+[store] 鏁版嵁搴撳惎鍔ㄦ牎楠?杩佺Щ鏈畬鎴愶紝鏅€氳闂凡鍏抽棴锛氬€欓€夋暟鎹簱缂哄皯蹇呰涓氬姟琛紝鎷掔粷鑷姩琛ュ缓锛歛nalyses, app_state, folder_items, folder_profiles, folder_scan_state, folders, models, plans, providers, scan_stage, videos
+test_exclusive_maintenance_rejects_a_new_subprocess_connection (database.test_lifecycle.CandidateDatabaseTests.test_exc
+lusive_maintenance_rejects_a_new_subprocess_connection) ... ok
+test_failed_post_replace_validation_restores_the_previous_database (database.test_lifecycle.CandidateDatabaseTests.test
+_failed_post_replace_validation_restores_the_previous_database) ... ok
+test_failed_wal_candidate_rollback_removes_candidate_sidecars (database.test_lifecycle.CandidateDatabaseTests.test_fail
+ed_wal_candidate_rollback_removes_candidate_sidecars) ... ok
+test_live_store_connection_blocks_candidate_switch (database.test_lifecycle.CandidateDatabaseTests.test_live_store_conn
+ection_blocks_candidate_switch) ... ok
+test_nested_borrowed_shared_connection_does_not_release_outer_maintenance (database.test_lifecycle.CandidateDatabaseTes
+ts.test_nested_borrowed_shared_connection_does_not_release_outer_maintenance) ... ok
+test_process_exit_releases_kernel_maintenance_lock (database.test_lifecycle.CandidateDatabaseTests.test_process_exit_re
+leases_kernel_maintenance_lock) ... ok
+[store] 鏁版嵁搴撳惎鍔ㄦ牎楠?杩佺Щ鏈畬鎴愶紝鏅€氳闂凡鍏抽棴锛氬€欓€夋暟鎹簱缂哄皯蹇呰涓氬姟琛紝鎷掔粷鑷姩琛ュ缓锛歛nalyses, app_state, folder_items, folder_profiles, folder_scan_state, folders, models, plans, providers, scan_stage, videos
+test_subprocess_shared_connection_blocks_candidate_install_without_touching_source (database.test_lifecycle.CandidateDa
+tabaseTests.test_subprocess_shared_connection_blocks_candidate_install_without_touching_source) ... ok
+test_empty_sqlite_file_is_not_silently_upgraded_into_a_fresh_database (database.test_lifecycle.StoreLifecycleTests.test
+_empty_sqlite_file_is_not_silently_upgraded_into_a_fresh_database) ... ok
+[store] 鏁版嵁搴撳惎鍔ㄦ牎楠?杩佺Щ鏈畬鎴愶紝鏅€氳闂凡鍏抽棴锛氬€欓€夋暟鎹簱缂哄皯蹇呰涓氬姟琛紝鎷掔粷鑷姩琛ュ缓锛歛nalyses, app_state, folder_items, folder_profiles, folder_scan_state, folders, models, plans, providers, scan_stage, videos
+test_existing_database_validation_waits_for_cross_process_shared_lease (database.test_lifecycle.StoreLifecycleTests.tes
+t_existing_database_validation_waits_for_cross_process_shared_lease) ... ok
+test_existing_vault_evidence_blocks_new_empty_database (database.test_lifecycle.StoreLifecycleTests.test_existing_vault
+_evidence_blocks_new_empty_database) ... ok
+test_explicit_initialization_creates_valid_schema_and_is_non_destructive (database.test_lifecycle.StoreLifecycleTests.t
+est_explicit_initialization_creates_valid_schema_and_is_non_destructive) ... ok
+test_importing_store_does_not_initialize_a_blank_profile (database.test_lifecycle.StoreLifecycleTests.test_importing_st
+ore_does_not_initialize_a_blank_profile) ... ok
+test_missing_initialized_database_is_a_recovery_error (database.test_lifecycle.StoreLifecycleTests.test_missing_initial
+ized_database_is_a_recovery_error) ... ok
+test_normal_connection_never_creates_a_missing_database (database.test_lifecycle.StoreLifecycleTests.test_normal_connec
+tion_never_creates_a_missing_database) ... ok
+test_store_mutex_uses_profile_lock_before_local_mutex (database.test_lifecycle.StoreLifecycleTests.test_store_mutex_use
+s_profile_lock_before_local_mutex)
+A writer cannot strand a store-lock owner behind the profile gate. ... ok
+test_transient_candidate_file_does_not_orphan_a_ready_gate (database.test_lifecycle.StoreLifecycleTests.test_transient_
+candidate_file_does_not_orphan_a_ready_gate)
+鍒濆鍖栫獥鍙ｅ唴鐨勫苟鍙戠姸鎬佽鍙栦笉鑳借闂ㄩ棭鎹㈡垚鍗″湪 OPENING 鐨勬柊瀹炰緥銆?... ok
+test_windows_acquire_failure_preserves_error_and_closes_handle (database.test_profile_lock_windows.WindowsProfileLockTe
+sts.test_windows_acquire_failure_preserves_error_and_closes_handle) ... ok
+test_windows_backend_creates_missing_profile_parents_before_createfile (database.test_profile_lock_windows.WindowsProfi
+leLockTests.test_windows_backend_creates_missing_profile_parents_before_createfile) ... ok
+test_windows_open_preserves_native_error_code (database.test_profile_lock_windows.WindowsProfileLockTests.test_windows_
+open_preserves_native_error_code) ... ok
+test_windows_open_rejects_a_file_in_place_of_profile_directory (database.test_profile_lock_windows.WindowsProfileLockTe
+sts.test_windows_open_rejects_a_file_in_place_of_profile_directory) ... ok
+test_windows_unlock_failure_preserves_error_and_closes_handle (database.test_profile_lock_windows.WindowsProfileLockTes
+ts.test_windows_unlock_failure_preserves_error_and_closes_handle) ... ok
+test_committed_uncheckpointed_wal_rows_survive_migration_and_repeat_init_is_idempotent (database.test_schema_migration.
+SchemaMigrationTests.test_committed_uncheckpointed_wal_rows_survive_migration_and_repeat_init_is_idempotent) ... ok
+test_fractional_ledger_version_is_rejected (database.test_schema_migration.SchemaMigrationTests.test_fractional_ledger_
+version_is_rejected) ... ok
+test_historical_v0200_schema5_database_migrates_without_logical_data_loss (database.test_schema_migration.SchemaMigrati
+onTests.test_historical_v0200_schema5_database_migrates_without_logical_data_loss) ... ok
+test_historical_v0203_schema6_database_migrates_without_logical_data_loss (database.test_schema_migration.SchemaMigrati
+onTests.test_historical_v0203_schema6_database_migrates_without_logical_data_loss) ... ok
+test_historical_v0209_schema7_database_migrates_without_logical_data_loss (database.test_schema_migration.SchemaMigrati
+onTests.test_historical_v0209_schema7_database_migrates_without_logical_data_loss) ... ok
+test_legacy_location_migration_cleans_candidate_sidecars_after_success (database.test_schema_migration.SchemaMigrationT
+ests.test_legacy_location_migration_cleans_candidate_sidecars_after_success) ... ok
+test_legacy_location_migration_cleans_candidate_sidecars_after_validation_failure (database.test_schema_migration.Schem
+aMigrationTests.test_legacy_location_migration_cleans_candidate_sidecars_after_validation_failure) ... ok
+test_partial_schema_failure_leaves_original_database_file_unchanged (database.test_schema_migration.SchemaMigrationTest
+s.test_partial_schema_failure_leaves_original_database_file_unchanged) ... ok
+test_schema7_database_migrates_on_copy_and_installs_atomically (database.test_schema_migration.SchemaMigrationTests.tes
+t_schema7_database_migrates_on_copy_and_installs_atomically) ... ok
+test_schema7_ledger_gap_is_rejected_without_source_change (database.test_schema_migration.SchemaMigrationTests.test_sch
+ema7_ledger_gap_is_rejected_without_source_change) ... ok
+test_schema8_column_type_and_not_null_contract_are_enforced (database.test_schema_migration.SchemaMigrationTests.test_s
+chema8_column_type_and_not_null_contract_are_enforced) ... ok
+test_schema8_each_declared_check_constraint_is_required (database.test_schema_migration.SchemaMigrationTests.test_schem
+a8_each_declared_check_constraint_is_required) ... ok
+test_schema8_fractional_extension_version_marker_is_rejected (database.test_schema_migration.SchemaMigrationTests.test_
+schema8_fractional_extension_version_marker_is_rejected) ... ok
+test_schema8_ledger_gap_is_rejected_without_source_change (database.test_schema_migration.SchemaMigrationTests.test_sch
+ema8_ledger_gap_is_rejected_without_source_change) ... ok
+test_schema8_missing_declared_foreign_key_is_rejected (database.test_schema_migration.SchemaMigrationTests.test_schema8
+_missing_declared_foreign_key_is_rejected) ... ok
+test_schema8_missing_runtime_column_is_rejected_without_source_change (database.test_schema_migration.SchemaMigrationTe
+sts.test_schema8_missing_runtime_column_is_rejected_without_source_change) ... ok
+test_schema8_missing_scheduler_idempotency_unique_key_is_rejected (database.test_schema_migration.SchemaMigrationTests.
+test_schema8_missing_scheduler_idempotency_unique_key_is_rejected) ... ok
+test_schema8_remote_operation_version_marker_mismatch_is_rejected (database.test_schema_migration.SchemaMigrationTests.
+test_schema8_remote_operation_version_marker_mismatch_is_rejected) ... ok
+test_schema_below_confirmed_supported_range_is_rejected_without_source_change (database.test_schema_migration.SchemaMig
+rationTests.test_schema_below_confirmed_supported_range_is_rejected_without_source_change) ... ok
+test_unsupported_schema_is_rejected_without_modifying_source (database.test_schema_migration.SchemaMigrationTests.test_
+unsupported_schema_is_rejected_without_modifying_source) ... ok
+test_MIG_014_corrupt_legacy_database_fails_without_replacing_source (migration.test_failure_recovery.FailureRecoveryTes
+ts.test_MIG_014_corrupt_legacy_database_fails_without_replacing_source)
+Pre: isolated legacy DB copy. Steps: damage only its header and launch. Expect: diagnostic failure, no target or temp o
+verwrite. ... ok
+test_MIG_014_database_copy_interruption_preserves_source_and_retry (migration.test_failure_recovery.FailureRecoveryTest
+s.test_MIG_014_database_copy_interruption_preserves_source_and_retry)
+Pre: source DB exists in isolated tree. Steps: inject backup OSError, then retry. Expect: source intact and retry succe
+eds. ... ok
+test_MIG_014_existing_encrypted_snapshot_does_not_reinitialize_or_overwrite (migration.test_failure_recovery.FailureRec
+overyTests.test_MIG_014_existing_encrypted_snapshot_does_not_reinitialize_or_overwrite)
+Pre: initialized vault and encrypted DB. Steps: invoke onboarding twice. Expect: existing DEK/data never silently repla
+ced. ... ok
+test_MIG_014_interrupted_encrypted_write_never_commits_partial_candidate (migration.test_failure_recovery.FailureRecove
+ryTests.test_MIG_014_interrupted_encrypted_write_never_commits_partial_candidate)
+Pre: synthetic plain DB and unlocked vault. Steps: interrupt candidate write, retry. Expect: source survives, partial c
+iphertext stays uncommitted, retry succeeds. ... ok
+test_onboarding_archive_error_is_reported_without_secondary_manifest_error (migration.test_failure_recovery.FailureReco
+veryTests.test_onboarding_archive_error_is_reported_without_secondary_manifest_error) ... ok
+test_MIG_001_empty_legacy_database_migrates (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_001_empty_le
+gacy_database_migrates)
+Pre: v0.208 initializes an empty DB. Steps: import current store. Expect: valid empty DB. ... ok
+test_MIG_002_normal_legacy_dataset_migrates (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_002_normal_l
+egacy_dataset_migrates)
+Pre: synthetic v0.208 has 10 folders/500 videos. Steps: current import. Expect: counts preserved. ... ok
+test_MIG_003_edge_state_and_wal_migrate (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_003_edge_state_a
+nd_wal_migrate)
+Pre: v0.208 DB has interrupted scan, alias and captured WAL. Steps: migrate. Expect: committed state retained. ... ok
+test_MIG_004_integrity_and_foreign_keys (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_004_integrity_an
+d_foreign_keys)
+Pre: migrated normal and edge DBs. Steps: run SQLite checks. Expect: integrity ok, no FK violations. ... ok
+test_MIG_005_folder_video_and_relationships_preserved (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_00
+5_folder_video_and_relationships_preserved)
+Pre: normal synthetic dataset has two folders per video. Steps: inspect logical tables. Expect: stable IDs and links. .
+.. ok
+test_MIG_006_profiles_plans_scans_and_history_preserved (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_
+006_profiles_plans_scans_and_history_preserved)
+Pre: normal fixture has profiles, analysis, plans and scan state. Steps: compare rows. Expect: all preserved. ... ok
+test_MIG_007_provider_configuration_and_synthetic_credentials_preserved (migration.test_legacy_migration.LegacyMigratio
+nTests.test_MIG_007_provider_configuration_and_synthetic_credentials_preserved)
+Pre: fixtures contain invalid placeholder keys/cookie. Steps: current settings migration. Expect: readable values retai
+ned. ... ok
+test_MIG_008_repeated_migration_is_idempotent (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_008_repeat
+ed_migration_is_idempotent)
+Pre: legacy DB exists. Steps: launch current import twice. Expect: same canonical business SHA and counts. ... ok
+test_MIG_015_legacy_and_neo_default_data_path_contract (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_0
+15_legacy_and_neo_default_data_path_contract)
+Pre: both launchers are source-visible. Steps: compare path construction. Expect: same per-user data root. ... ok
+test_MIG_016_v0208_rollback_reads_and_plain_backup_restores_data (migration.test_legacy_migration.LegacyMigrationTests.
+test_MIG_016_v0208_rollback_reads_and_plain_backup_restores_data)
+Pre: current onboarding created a plain safety backup. Steps: restore copy and run v0.208 reader. Expect: equivalent ro
+ws. ... ok
+test_MIG_017_fresh_install_starts_independently (migration.test_legacy_migration.LegacyMigrationTests.test_MIG_017_fres
+h_install_starts_independently)
+A fresh import waits; explicit onboarding creates and seals the empty DB. ... ok
+test_MIG_018_second_instance_with_active_writer_fails_safely_and_recovers (migration.test_legacy_migration.LegacyMigrat
+ionTests.test_MIG_018_second_instance_with_active_writer_fails_safely_and_recovers)
+Pre: isolated current DB. Steps: hold one writer while a second instance starts, release and retry. Expect: no loss/cor
+ruption. ... FAIL
+test_data_dir_override_is_scoped_to_sqlite_only (migration.test_legacy_migration.LegacyMigrationTests.test_data_dir_ove
+rride_is_scoped_to_sqlite_only)
+Pre: isolated profile and legacy DB. Steps: set BFO data override. Expect: SQLite moves, config/vault stay under profil
+e root. ... ok
+test_MIG_009_encryption_onboarding_preserves_logical_data (migration.test_vault_migration.VaultMigrationTests.test_MIG_
+009_encryption_onboarding_preserves_logical_data)
+Pre: normal legacy DB migrated into isolated profile. Steps: initialize+complete vault. Expect: encrypted equivalent DB
+, no plaintext working copy. ... ok
+test_MIG_010_close_and_reunlock_restores_encrypted_data (migration.test_vault_migration.VaultMigrationTests.test_MIG_01
+0_close_and_reunlock_restores_encrypted_data)
+Pre: vault completed and locked. Steps: remove only isolated plaintext working DB, restart+unlock. Expect: all data res
+tored. ... ok
+test_MIG_011_wrong_password_is_rejected (migration.test_vault_migration.VaultMigrationTests.test_MIG_011_wrong_password
+_is_rejected)
+Pre: initialized vault. Steps: restart with wrong password. Expect: HTTP 403 and still locked. ... ok
+test_MIG_012_recovery_code_unlocks_vault (migration.test_vault_migration.VaultMigrationTests.test_MIG_012_recovery_code
+_unlocks_vault)
+Pre: initialized vault recovery code captured in memory. Steps: unlock by code. Expect: logical DB restored. ... ok
+test_MIG_013_corrupted_encrypted_file_fails_safely (migration.test_vault_migration.VaultMigrationTests.test_MIG_013_cor
+rupted_encrypted_file_fails_safely)
+Pre: valid encrypted snapshot. Steps: flip final ciphertext bit and unlock with no plaintext source. Expect: reject and
+ preserve no blank replacement. ... ok
+test_MIG_023_interrupted_candidate_residue_blocks_lock_without_cleanup (migration.test_vault_migration.VaultMigrationTe
+sts.test_MIG_023_interrupted_candidate_residue_blocks_lock_without_cleanup)
+Pre: isolated READY DB. Steps: leave a restore candidate and request lock. Expect: fail closed, preserve sources and re
+sidue. ... ok
+test_MIG_024_failed_candidate_encryption_preserves_old_ciphertext_and_retries (migration.test_vault_migration.VaultMigr
+ationTests.test_MIG_024_failed_candidate_encryption_preserves_old_ciphertext_and_retries)
+Pre: valid encrypted snapshot. Steps: inject partial candidate write, then retry. Expect: old bytes survive and retry v
+erifies. ... ok
+test_MIG_025_missing_committed_manifest_fails_closed (migration.test_vault_migration.VaultMigrationTests.test_MIG_025_m
+issing_committed_manifest_fails_closed)
+Pre: successfully locked v1 vault. Steps: remove manifest and unlock. Expect: no DB, recovery required, ciphertexts unc
+hanged. ... FAIL
+test_MIG_026_tampered_committed_manifest_fails_closed (migration.test_vault_migration.VaultMigrationTests.test_MIG_026_
+tampered_committed_manifest_fails_closed)
+Pre: successfully locked v1 vault. Steps: alter manifest ciphertext and unlock. Expect: reject without modifying any en
+crypted evidence. ... ok
+test_MIG_027_lock_seals_legacy_json_and_managed_backups (migration.test_vault_migration.VaultMigrationTests.test_MIG_02
+7_lock_seals_legacy_json_and_managed_backups)
+Pre: isolated legacy sources and managed backups. Steps: complete vault lock. Expect: verified encrypted manifest cover
+s every plaintext source. ... ok
+test_MIG_028_repeated_lock_unlock_cycles_keep_manifest_file_set_stable (migration.test_vault_migration.VaultMigrationTe
+sts.test_MIG_028_repeated_lock_unlock_cycles_keep_manifest_file_set_stable)
+Pre: locked vault. Steps: unlock/lock twice. Expect: same archive inventory and verified hashes each cycle. ... FAIL
+test_MIG_029_second_process_cannot_open_profile_during_vault_sealing (migration.test_vault_migration.VaultMigrationTest
+s.test_MIG_029_second_process_cannot_open_profile_during_vault_sealing)
+The exclusive profile lease must cover archive creation through plaintext removal. ... FAIL
+test_MIG_030_probe_snapshot_does_not_create_profile_sidecars (migration.test_vault_migration.VaultMigrationTests.test_M
+IG_030_probe_snapshot_does_not_create_profile_sidecars)
+A diagnostic snapshot must not create WAL/SHM beside the tested profile DB. ... FAIL
+test_real_process_contention_and_reacquisition_for_empty_and_existing_files (scheduler.test_owner_lock.FileOwnerLockTes
+ts.test_real_process_contention_and_reacquisition_for_empty_and_existing_files) ... ok
+test_windows_acquire_never_reads_or_writes_lock_bytes (scheduler.test_owner_lock.FileOwnerLockTests.test_windows_acquir
+e_never_reads_or_writes_lock_bytes) ... ok
+test_windows_contender_reports_ownership_and_closes_handle_without_io (scheduler.test_owner_lock.FileOwnerLockTests.tes
+t_windows_contender_reports_ownership_and_closes_handle_without_io) ... ok
+test_connection_setup_failure_releases_lifecycle_lease (scheduler.test_scheduler.SQLiteTaskStoreTests.test_connection_s
+etup_failure_releases_lifecycle_lease) ... ok
+test_create_schema_uses_the_callers_migration_connection (scheduler.test_scheduler.SQLiteTaskStoreTests.test_create_sch
+ema_uses_the_callers_migration_connection) ... ok
+test_ensure_schema_only_verifies_migration_installed_tables (scheduler.test_scheduler.SQLiteTaskStoreTests.test_ensure_
+schema_only_verifies_migration_installed_tables) ... ok
+test_missing_database_is_not_created (scheduler.test_scheduler.SQLiteTaskStoreTests.test_missing_database_is_not_create
+d) ... ok
+test_uses_injected_factory_and_closes_each_short_connection (scheduler.test_scheduler.SQLiteTaskStoreTests.test_uses_in
+jected_factory_and_closes_each_short_connection) ... ok
+test_cancel_is_distinct_from_pause_and_does_not_resume (scheduler.test_scheduler.SchedulerTests.test_cancel_is_distinct
+_from_pause_and_does_not_resume) ... ok
+test_cancelling_a_paused_task_emits_one_cancel_event_and_clears_the_reason (scheduler.test_scheduler.SchedulerTests.tes
+t_cancelling_a_paused_task_emits_one_cancel_event_and_clears_the_reason) ... ok
+test_crashed_cancel_request_stays_cancelled_and_uncertain_write_needs_reconciliation (scheduler.test_scheduler.Schedule
+rTests.test_crashed_cancel_request_stays_cancelled_and_uncertain_write_needs_reconciliation) ... ok
+test_invalid_checkpoint_becomes_failed_without_discarding_checkpoint (scheduler.test_scheduler.SchedulerTests.test_inva
+lid_checkpoint_becomes_failed_without_discarding_checkpoint) ... ok
+test_pause_is_not_reported_complete_until_worker_exits_and_checkpoint_is_saved (scheduler.test_scheduler.SchedulerTests
+.test_pause_is_not_reported_complete_until_worker_exits_and_checkpoint_is_saved) ... ok
+test_reconciliation_hook_must_confirm_before_resume (scheduler.test_scheduler.SchedulerTests.test_reconciliation_hook_m
+ust_confirm_before_resume) ... ok
+test_repeated_idempotency_key_returns_original_task (scheduler.test_scheduler.SchedulerTests.test_repeated_idempotency_
+key_returns_original_task) ... ok
+test_resource_keys_serialize_conflicting_tasks (scheduler.test_scheduler.SchedulerTests.test_resource_keys_serialize_co
+nflicting_tasks) ... ok
+test_restart_marks_old_owner_paused_tasks_interrupted_and_preserves_checkpoints (scheduler.test_scheduler.SchedulerTest
+s.test_restart_marks_old_owner_paused_tasks_interrupted_and_preserves_checkpoints) ... ok
+test_resume_drops_the_stale_pause_reason (scheduler.test_scheduler.SchedulerTests.test_resume_drops_the_stale_pause_rea
+son) ... ok
+test_second_scheduler_owner_is_rejected (scheduler.test_scheduler.SchedulerTests.test_second_scheduler_owner_is_rejecte
+d) ... ok
+test_startup_marks_running_as_interrupted_and_validates_checkpoint_before_resume (scheduler.test_scheduler.SchedulerTes
+ts.test_startup_marks_running_as_interrupted_and_validates_checkpoint_before_resume) ... ok
+test_task_record_persists_completion_and_checkpoint (scheduler.test_scheduler.SchedulerTests.test_task_record_persists_
+completion_and_checkpoint) ... ok
+test_vault_barrier_rejects_task_resume_while_admission_is_closed (scheduler.test_scheduler.SchedulerTests.test_vault_ba
+rrier_rejects_task_resume_while_admission_is_closed) ... ok
+test_vault_pause_barrier_and_auto_resume_excludes_user_pause (scheduler.test_scheduler.SchedulerTests.test_vault_pause_
+barrier_and_auto_resume_excludes_user_pause) ... ok
+test_scan_route_persists_and_runs_through_the_scheduler (scheduler.test_server_integration.ServerSchedulerIntegrationTe
+sts.test_scan_route_persists_and_runs_through_the_scheduler) ... ok
+test_unlock_starts_scheduler_and_recovers_stale_task_rows (scheduler.test_server_integration.ServerSchedulerIntegration
+Tests.test_unlock_starts_scheduler_and_recovers_stale_task_rows) ... ok
+test_vault_lock_interrupts_bilibili_rate_limit_backoff_and_pauses_task (scheduler.test_server_integration.ServerSchedul
+erIntegrationTests.test_vault_lock_interrupts_bilibili_rate_limit_backoff_and_pauses_task) ... FAIL
+test_vault_lock_waits_for_checkpoint_then_resumes_same_process_runner (scheduler.test_server_integration.ServerSchedule
+rIntegrationTests.test_vault_lock_waits_for_checkpoint_then_resumes_same_process_runner) ... ok
+test_vault_seals_business_files_without_reading_or_replacing_runtime_locks (scheduler.test_server_integration.ServerSch
+edulerIntegrationTests.test_vault_seals_business_files_without_reading_or_replacing_runtime_locks) ... ok
+test_auto_unlock_blob_roundtrip (test_app_lock.AppLockTests.test_auto_unlock_blob_roundtrip) ... 2026-10-22 19:44:05,87
+5 [httpx2] HTTP Request: POST http://testserver/api/app-lock/set-password "HTTP/1.1 200 OK"
+ok
+test_lock_open_paths_still_reachable (test_app_lock.AppLockTests.test_lock_open_paths_still_reachable) ... 2026-10-22 1
+9:44:06,018 [httpx2] HTTP Request: POST http://testserver/api/app-lock/set-password "HTTP/1.1 200 OK"
+2026-10-22 19:44:06,028 [httpx2] HTTP Request: POST http://testserver/api/app-lock/lock "HTTP/1.1 200 OK"
+2026-10-22 19:44:06,040 [httpx2] HTTP Request: GET http://testserver/api/app-lock/status "HTTP/1.1 200 OK"
+2026-10-22 19:44:06,051 [httpx2] HTTP Request: GET http://testserver/api/version "HTTP/1.1 200 OK"
+ok
+test_remove_password (test_app_lock.AppLockTests.test_remove_password) ... 2026-10-22 19:44:06,217 [httpx2] HTTP Reques
+t: POST http://testserver/api/app-lock/set-password "HTTP/1.1 200 OK"
+2026-10-22 19:44:06,344 [httpx2] HTTP Request: POST http://testserver/api/app-lock/remove "HTTP/1.1 403 Forbidden"
+2026-10-22 19:44:06,465 [httpx2] HTTP Request: POST http://testserver/api/app-lock/remove "HTTP/1.1 200 OK"
+ok
+test_set_password_locks_and_unlocks (test_app_lock.AppLockTests.test_set_password_locks_and_unlocks) ... 2026-10-22 19:
+44:06,589 [httpx2] HTTP Request: POST http://testserver/api/app-lock/set-password "HTTP/1.1 200 OK"
+2026-10-22 19:44:06,600 [httpx2] HTTP Request: POST http://testserver/api/app-lock/lock "HTTP/1.1 200 OK"
+2026-10-22 19:44:06,608 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 403 Forbidden"
+2026-10-22 19:44:06,751 [httpx2] HTTP Request: POST http://testserver/api/app-lock/unlock "HTTP/1.1 403 Forbidden"
+2026-10-22 19:44:06,880 [httpx2] HTTP Request: POST http://testserver/api/app-lock/unlock "HTTP/1.1 200 OK"
+ok
+test_set_password_requires_current_when_already_set (test_app_lock.AppLockTests.test_set_password_requires_current_when
+_already_set) ... 2026-10-22 19:44:07,007 [httpx2] HTTP Request: POST http://testserver/api/app-lock/set-password "HTTP
+/1.1 200 OK"
+2026-10-22 19:44:07,128 [httpx2] HTTP Request: POST http://testserver/api/app-lock/set-password "HTTP/1.1 403 Forbidden
+"
+2026-10-22 19:44:07,355 [httpx2] HTTP Request: POST http://testserver/api/app-lock/set-password "HTTP/1.1 200 OK"
+ok
+test_short_password_rejected (test_app_lock.AppLockTests.test_short_password_rejected) ... 2026-10-22 19:44:07,593 [htt
+px2] HTTP Request: POST http://testserver/api/app-lock/set-password "HTTP/1.1 400 Bad Request"
+ok
+test_status_unlocked_without_password (test_app_lock.AppLockTests.test_status_unlocked_without_password) ... 2026-10-22
+ 19:44:07,609 [httpx2] HTTP Request: GET http://testserver/api/app-lock/status "HTTP/1.1 200 OK"
+ok
+test_business_failure_continues_next_group (test_apply_safety_contracts.ApplySafetyContractTests.test_business_failure_
+continues_next_group) ... ok
+test_business_failure_marks_batch_failed_and_continues (test_apply_safety_contracts.ApplySafetyContractTests.test_busin
+ess_failure_marks_batch_failed_and_continues) ... FAIL
+test_local_persist_failure_requires_reconciliation_after_remote_success (test_apply_safety_contracts.ApplySafetyContrac
+tTests.test_local_persist_failure_requires_reconciliation_after_remote_success) ... FAIL
+test_move_updates_membership_before_reporting_done (test_apply_safety_contracts.ApplySafetyContractTests.test_move_upda
+tes_membership_before_reporting_done) ... FAIL
+test_rate_limit_stops_run_and_keeps_batch_pending (test_apply_safety_contracts.ApplySafetyContractTests.test_rate_limit
+_stops_run_and_keeps_batch_pending) ... FAIL
+test_refuses_default_folder_as_create_target (test_apply_safety_contracts.ApplySafetyContractTests.test_refuses_default
+_folder_as_create_target) ... ok
+test_refuses_default_folder_as_move_target (test_apply_safety_contracts.ApplySafetyContractTests.test_refuses_default_f
+older_as_move_target) ... ok
+test_refuses_start_when_analysis_is_stale (test_apply_safety_contracts.ApplySafetyContractTests.test_refuses_start_when
+_analysis_is_stale) ... ok
+test_refuses_start_when_profiles_not_ready (test_apply_safety_contracts.ApplySafetyContractTests.test_refuses_start_whe
+n_profiles_not_ready) ... ok
+test_unexpected_exception_does_not_write_next_group (test_apply_safety_contracts.ApplySafetyContractTests.test_unexpect
+ed_exception_does_not_write_next_group) ... FAIL
+test_unexpected_exception_stops_instead_of_continuing_writes (test_apply_safety_contracts.ApplySafetyContractTests.test
+_unexpected_exception_stops_instead_of_continuing_writes) ... 2026-10-22 19:44:10,618 [core.scheduler.scheduler] Task a
+73b8b006f8f415389596e6af9fb926a failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鎵ц澶辫触锛氭湭棰勬湡鏁呴殰
+ok
+test_unknown_items_are_not_auto_retried (test_apply_safety_contracts.ApplySafetyContractTests.test_unknown_items_are_no
+t_auto_retried) ... ok
+test_build_markers_stay_replaceable_by_the_release_workflow (test_attribution.ApiVersionTests.test_build_markers_stay_r
+eplaceable_by_the_release_workflow) ... ok
+test_version_endpoint_exposes_author_source_and_license (test_attribution.ApiVersionTests.test_version_endpoint_exposes
+_author_source_and_license) ... 2026-10-22 19:44:11,314 [httpx2] HTTP Request: GET http://testserver/api/version "HTTP/
+1.1 200 OK"
+ok
+test_manual_states_author_source_and_license (test_attribution.DocumentedNoticeTests.test_manual_states_author_source_a
+nd_license) ... ok
+test_readme_states_author_and_keeps_the_license_notice (test_attribution.DocumentedNoticeTests.test_readme_states_autho
+r_and_keeps_the_license_notice) ... ok
+test_release_publisher_uses_verified_candidate_assets (test_attribution.ExecutableAttributionTests.test_release_publish
+er_uses_verified_candidate_assets) ... ok
+test_release_workflows_embed_build_info_ship_license_and_publish_on_tags (test_attribution.ExecutableAttributionTests.t
+est_release_workflows_embed_build_info_ship_license_and_publish_on_tags) ... ok
+test_spec_writes_company_name_and_copyright_into_the_exe (test_attribution.ExecutableAttributionTests.test_spec_writes_
+company_name_and_copyright_into_the_exe) ... ok
+test_license_is_polyform_noncommercial_not_creative_commons (test_attribution.LicenseFileTests.test_license_is_polyform
+_noncommercial_not_creative_commons) ... ok
+test_notice_carries_the_required_notice_line_and_brand_statement (test_attribution.LicenseFileTests.test_notice_carries
+_the_required_notice_line_and_brand_statement) ... ok
+test_credit_and_version_share_the_same_css_slot (test_attribution.TopbarCreditTests.test_credit_and_version_share_the_s
+ame_css_slot) ... ok
+test_topbar_links_the_author_to_the_repository (test_attribution.TopbarCreditTests.test_topbar_links_the_author_to_the_
+repository) ... ok
+test_version_label_appends_the_build_commit (test_attribution.TopbarCreditTests.test_version_label_appends_the_build_co
+mmit) ... ok
+test_batch_delete_payload (test_batch_api.BatchApiTests.test_batch_delete_payload) ... ok
+test_business_error_is_definite_failure (test_batch_api.BatchApiTests.test_business_error_is_definite_failure) ... ok
+test_move_batch_payload (test_batch_api.BatchApiTests.test_move_batch_payload) ... ok
+test_rate_limit_is_not_unknown (test_batch_api.BatchApiTests.test_rate_limit_is_not_unknown) ... ok
+test_rename_and_delete_folder_payloads (test_batch_api.BatchApiTests.test_rename_and_delete_folder_payloads) ... ok
+test_resource_limit_and_deduplication (test_batch_api.BatchApiTests.test_resource_limit_and_deduplication) ... ok
+test_timeout_is_unknown (test_batch_api.BatchApiTests.test_timeout_is_unknown) ... ok
+test_groups_and_executes_in_batches (test_batch_executor.BatchExecutorTests.test_groups_and_executes_in_batches) ... ok
+test_uncertain_batch_stops_and_requires_review (test_batch_executor.BatchExecutorTests.test_uncertain_batch_stops_and_r
+equires_review) ... FAIL
+test_ico_container_header_is_well_formed (test_brand_integration.ExecutableIconTests.test_ico_container_header_is_well_
+formed) ... ok
+test_ico_frames_are_not_blank (test_brand_integration.ExecutableIconTests.test_ico_frames_are_not_blank)
+Each frame must paint the mark: a scaled-down empty plate passes a size check only. ... ok
+test_ico_is_committed_with_every_required_frame (test_brand_integration.ExecutableIconTests.test_ico_is_committed_with_
+every_required_frame) ... ok
+test_spec_points_pyinstaller_at_the_ico (test_brand_integration.ExecutableIconTests.test_spec_points_pyinstaller_at_the
+_ico) ... ok
+test_favicon_asset_exists_and_is_vector_only (test_brand_integration.FaviconTests.test_favicon_asset_exists_and_is_vect
+or_only) ... ok
+test_index_declares_svg_favicon_from_static_brand (test_brand_integration.FaviconTests.test_index_declares_svg_favicon_
+from_static_brand) ... ok
+test_flat_mark_carries_its_own_colors_for_both_themes (test_brand_integration.TopbarBrandTests.test_flat_mark_carries_i
+ts_own_colors_for_both_themes) ... ok
+test_mark_is_decorative_and_sized_by_css (test_brand_integration.TopbarBrandTests.test_mark_is_decorative_and_sized_by_
+css) ... ok
+test_topbar_replaces_the_play_glyph_with_the_mark (test_brand_integration.TopbarBrandTests.test_topbar_replaces_the_pla
+y_glyph_with_the_mark) ... ok
+test_allows_normal_targets (test_default_folder_inbox.DefaultFolderDestinationGuardTests.test_allows_normal_targets) ..
+. ok
+test_no_default_folder_means_no_block (test_default_folder_inbox.DefaultFolderDestinationGuardTests.test_no_default_fol
+der_means_no_block) ... ok
+test_rejects_moving_into_default_folder (test_default_folder_inbox.DefaultFolderDestinationGuardTests.test_rejects_movi
+ng_into_default_folder) ... ok
+test_rejects_renaming_to_default_folder (test_default_folder_inbox.DefaultFolderDestinationGuardTests.test_rejects_rena
+ming_to_default_folder) ... ok
+test_attr_without_match_does_not_flag_every_folder (test_default_folder_inbox.DefaultFolderDetectionTests.test_attr_wit
+hout_match_does_not_flag_every_folder) ... ok
+test_detected_by_attr_bit_when_renamed (test_default_folder_inbox.DefaultFolderDetectionTests.test_detected_by_attr_bit
+_when_renamed) ... ok
+test_detected_by_title (test_default_folder_inbox.DefaultFolderDetectionTests.test_detected_by_title) ... ok
+test_unknown_returns_none_instead_of_guessing (test_default_folder_inbox.DefaultFolderDetectionTests.test_unknown_retur
+ns_none_instead_of_guessing) ... ok
+test_delete_requires_existing_profile (test_default_folder_inbox.DeleteProfileTests.test_delete_requires_existing_profi
+le) ... ok
+test_delete_unknown_folder_is_404 (test_default_folder_inbox.DeleteProfileTests.test_delete_unknown_folder_is_404) ... 
+ok
+test_leftover_default_folder_profile_can_be_deleted (test_default_folder_inbox.DeleteProfileTests.test_leftover_default
+_folder_profile_can_be_deleted) ... ok
+test_default_folder_is_not_required_to_have_a_profile (test_default_folder_inbox.ReadinessInboxTests.test_default_folde
+r_is_not_required_to_have_a_profile) ... ok
+test_inbox_only_content_is_still_ready (test_default_folder_inbox.ReadinessInboxTests.test_inbox_only_content_is_still_
+ready) ... ok
+test_decrypt_head_returns_prefix_without_whole_file (test_dek_selftest.DekSelftestTests.test_decrypt_head_returns_prefi
+x_without_whole_file) ... ok
+test_selftest_fails_when_encrypted_with_another_dek (test_dek_selftest.DekSelftestTests.test_selftest_fails_when_encryp
+ted_with_another_dek) ... 2026-10-22 19:44:17,993 [server] 鍔犲瘑蹇収璁よ瘉澶辫触锛氳В瀵嗗け璐ワ細鏁版嵁鎹熷潖鎴?DEK 涓嶆纭?
+ok
+test_selftest_ok_when_encrypted_with_current_dek (test_dek_selftest.DekSelftestTests.test_selftest_ok_when_encrypted_wi
+th_current_dek) ... ok
+test_selftest_skips_without_snapshot (test_dek_selftest.DekSelftestTests.test_selftest_skips_without_snapshot) ... ok
+test_project_release_urls_are_the_only_github_external_pages_allowed (test_electron_external_links.ElectronExternalLink
+Tests.test_project_release_urls_are_the_only_github_external_pages_allowed) ... ok
+test_folder_merge_llm_uses_structured_result (test_folder_organize_plan.FolderOrganizePlanTests.test_folder_merge_llm_u
+ses_structured_result) ... ok
+test_preserves_completed_identical_group (test_folder_organize_plan.FolderOrganizePlanTests.test_preserves_completed_id
+entical_group) ... ok
+test_rejects_target_as_source (test_folder_organize_plan.FolderOrganizePlanTests.test_rejects_target_as_source) ... ok
+test_user_recovery_and_diagnostic_directories_are_not_copied (test_isolated_test_runner.IsolatedTestRunnerCopyFilterTes
+ts.test_user_recovery_and_diagnostic_directories_are_not_copied) ... ok
+test_all_current_provider_presets_are_identified (test_llm_request_adapters.ChatPayloadAdapterTests.test_all_current_pr
+ovider_presets_are_identified) ... ok
+test_amd_model_catalog_controls_json_and_reasoning (test_llm_request_adapters.ChatPayloadAdapterTests.test_amd_model_ca
+talog_controls_json_and_reasoning) ... ok
+test_custom_catalog_metadata_overrides_baseline (test_llm_request_adapters.ChatPayloadAdapterTests.test_custom_catalog_
+metadata_overrides_baseline) ... ok
+test_custom_openai_compatible_endpoint_uses_conservative_baseline (test_llm_request_adapters.ChatPayloadAdapterTests.te
+st_custom_openai_compatible_endpoint_uses_conservative_baseline) ... ok
+test_dashscope_qwen3_uses_non_thinking_json_mode (test_llm_request_adapters.ChatPayloadAdapterTests.test_dashscope_qwen
+3_uses_non_thinking_json_mode) ... ok
+test_dashscope_thinking_only_qwen_omits_incompatible_json_controls (test_llm_request_adapters.ChatPayloadAdapterTests.t
+est_dashscope_thinking_only_qwen_omits_incompatible_json_controls) ... ok
+test_deepseek_flash_uses_direct_deepseek_dialect (test_llm_request_adapters.ChatPayloadAdapterTests.test_deepseek_flash
+_uses_direct_deepseek_dialect) ... ok
+test_digitalocean_uses_exact_catalog_fields_and_falls_back_without_metadata (test_llm_request_adapters.ChatPayloadAdapt
+erTests.test_digitalocean_uses_exact_catalog_fields_and_falls_back_without_metadata) ... ok
+test_explicit_json_capability_overrides_incomplete_parameter_list (test_llm_request_adapters.ChatPayloadAdapterTests.te
+st_explicit_json_capability_overrides_incomplete_parameter_list) ... ok
+test_gemini_uses_openai_compatible_json_and_reasoning_fields (test_llm_request_adapters.ChatPayloadAdapterTests.test_ge
+mini_uses_openai_compatible_json_and_reasoning_fields) ... ok
+test_mimo_uses_json_mode_completion_tokens_and_thinking_object (test_llm_request_adapters.ChatPayloadAdapterTests.test_
+mimo_uses_json_mode_completion_tokens_and_thinking_object) ... ok
+test_model_catalog_can_disable_json_even_for_known_provider (test_llm_request_adapters.ChatPayloadAdapterTests.test_mod
+el_catalog_can_disable_json_even_for_known_provider) ... ok
+test_moonshot_kimi_uses_json_and_model_specific_thinking_fields (test_llm_request_adapters.ChatPayloadAdapterTests.test
+_moonshot_kimi_uses_json_and_model_specific_thinking_fields) ... ok
+test_non_chat_model_families_do_not_receive_json_mode (test_llm_request_adapters.ChatPayloadAdapterTests.test_non_chat_
+model_families_do_not_receive_json_mode) ... ok
+test_openai_reasoning_model_uses_completion_tokens_and_json (test_llm_request_adapters.ChatPayloadAdapterTests.test_ope
+nai_reasoning_model_uses_completion_tokens_and_json) ... ok
+test_response_content_normalizes_text_blocks_before_json_parsing (test_llm_request_adapters.ChatPayloadAdapterTests.tes
+t_response_content_normalizes_text_blocks_before_json_parsing) ... ok
+test_siliconflow_deepseek_v4_uses_provider_toggle (test_llm_request_adapters.ChatPayloadAdapterTests.test_siliconflow_d
+eepseek_v4_uses_provider_toggle) ... ok
+test_siliconflow_glm_effort_is_limited_to_documented_model (test_llm_request_adapters.ChatPayloadAdapterTests.test_sili
+conflow_glm_effort_is_limited_to_documented_model) ... ok
+test_persist_and_load_token_blob (test_local_api_guard.DpapiTokenBlobTests.test_persist_and_load_token_blob) ... ok
+test_plain_prefix_fallback (test_local_api_guard.DpapiTokenBlobTests.test_plain_prefix_fallback) ... ok
+test_protect_unprotect_roundtrip (test_local_api_guard.DpapiTokenBlobTests.test_protect_unprotect_roundtrip) ... ok
+test_analyze_start_conflicts_with_running_apply (test_local_api_guard.JobMutexTests.test_analyze_start_conflicts_with_r
+unning_apply) ... ok
+test_begin_job_rejects_double_start_same_key (test_local_api_guard.JobMutexTests.test_begin_job_rejects_double_start_sa
+me_key) ... ok
+test_begin_job_rejects_when_other_long_job_running (test_local_api_guard.JobMutexTests.test_begin_job_rejects_when_othe
+r_long_job_running) ... ok
+test_begin_job_reserves_slot (test_local_api_guard.JobMutexTests.test_begin_job_reserves_slot) ... ok
+test_scan_start_conflicts_with_running_analyze (test_local_api_guard.JobMutexTests.test_scan_start_conflicts_with_runni
+ng_analyze) ... ok
+test_allows_same_origin_write_with_token (test_local_api_guard.LocalApiGuardTests.test_allows_same_origin_write_with_to
+ken) ... 2026-10-22 19:44:19,744 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 200 OK"
+ok
+test_index_injects_token_for_ui (test_local_api_guard.LocalApiGuardTests.test_index_injects_token_for_ui) ... 2026-10-2
+2 19:44:20,215 [httpx2] HTTP Request: GET http://testserver/ "HTTP/1.1 200 OK"
+ok
+test_insecure_env_skips_token_but_keeps_host (test_local_api_guard.LocalApiGuardTests.test_insecure_env_skips_token_but
+_keeps_host) ... 2026-10-22 19:44:20,783 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 200 
+OK"
+2026-10-22 19:44:20,791 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 403 Forbidden"
+ok
+test_rejects_cross_origin_write (test_local_api_guard.LocalApiGuardTests.test_rejects_cross_origin_write) ... 2026-10-2
+2 19:44:21,279 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 403 Forbidden"
+ok
+test_rejects_cross_site_fetch_metadata (test_local_api_guard.LocalApiGuardTests.test_rejects_cross_site_fetch_metadata)
+ ... 2026-10-22 19:44:21,777 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 403 Forbidden"
+ok
+test_rejects_missing_token_on_write (test_local_api_guard.LocalApiGuardTests.test_rejects_missing_token_on_write) ... 2
+026-10-22 19:44:22,232 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 403 Forbidden"
+ok
+test_rejects_non_local_host (test_local_api_guard.LocalApiGuardTests.test_rejects_non_local_host) ... 2026-10-22 19:44:
+22,614 [httpx2] HTTP Request: GET http://testserver/api/status "HTTP/1.1 403 Forbidden"
+ok
+test_rejects_testclient_host_in_production (test_local_api_guard.LocalApiGuardTests.test_rejects_testclient_host_in_pro
+duction) ... 2026-10-22 19:44:23,083 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 403 Forb
+idden"
+ok
+test_beta_and_stable_asset_names_are_bound_to_tags (test_release_candidate.ReleaseCandidateTests.test_beta_and_stable_a
+sset_names_are_bound_to_tags) ... ok
+test_invalid_tag_channel_and_source_ref_are_rejected (test_release_candidate.ReleaseCandidateTests.test_invalid_tag_cha
+nnel_and_source_ref_are_rejected) ... ok
+test_manifest_rejects_source_run_tag_or_sidecar_mismatch (test_release_candidate.ReleaseCandidateTests.test_manifest_re
+jects_source_run_tag_or_sidecar_mismatch) ... ok
+test_manifest_verifies_trusted_identity_and_all_six_hashes (test_release_candidate.ReleaseCandidateTests.test_manifest_
+verifies_trusted_identity_and_all_six_hashes) ... ok
+test_tampered_asset_is_rejected (test_release_candidate.ReleaseCandidateTests.test_tampered_asset_is_rejected) ... ok
+test_all_python_test_workflows_require_the_pinned_playwright_browser (test_release_workflow_contract.ReleaseWorkflowCon
+tractTests.test_all_python_test_workflows_require_the_pinned_playwright_browser) ... ok
+test_ci_beta_dispatch_is_restricted_to_main_and_tracks_release_contract_files (test_release_workflow_contract.ReleaseWo
+rkflowContractTests.test_ci_beta_dispatch_is_restricted_to_main_and_tracks_release_contract_files) ... ok
+test_publisher_binds_run_repository_workflow_event_branch_result_and_commit (test_release_workflow_contract.ReleaseWork
+flowContractTests.test_publisher_binds_run_repository_workflow_event_branch_result_and_commit) ... ok
+test_publisher_is_environment_gated_and_has_scoped_write_permission (test_release_workflow_contract.ReleaseWorkflowCont
+ractTests.test_publisher_is_environment_gated_and_has_scoped_write_permission) ... ok
+test_publisher_rechecks_tag_immediately_before_release_creation (test_release_workflow_contract.ReleaseWorkflowContract
+Tests.test_publisher_rechecks_tag_immediately_before_release_creation) ... ok
+test_publisher_write_token_is_scoped_to_trusted_shell_steps (test_release_workflow_contract.ReleaseWorkflowContractTest
+s.test_publisher_write_token_is_scoped_to_trusted_shell_steps) ... ok
+test_pull_request_workflows_use_read_only_tokens_and_pinned_actions (test_release_workflow_contract.ReleaseWorkflowCont
+ractTests.test_pull_request_workflows_use_read_only_tokens_and_pinned_actions) ... ok
+test_release_build_workflows_support_both_release_paths_after_tests (test_release_workflow_contract.ReleaseWorkflowCont
+ractTests.test_release_build_workflows_support_both_release_paths_after_tests) ... ok
+test_release_workflows_pin_actions_to_verified_commit_shas (test_release_workflow_contract.ReleaseWorkflowContractTests
+.test_release_workflows_pin_actions_to_verified_commit_shas) ... ok
+test_write_job_revalidates_manifest_and_all_candidate_asset_hashes (test_release_workflow_contract.ReleaseWorkflowContr
+actTests.test_write_job_revalidates_manifest_and_all_candidate_asset_hashes) ... ok
+test_1000_items_use_one_id_call_and_one_info_call (test_scan_bulk_api.BulkFavoriteApiTests.test_1000_items_use_one_id_c
+all_and_one_info_call) ... ok
+test_316_ids_and_315_infos_keep_the_missing_id_explicitly (test_scan_bulk_api.BulkFavoriteApiTests.test_316_ids_and_315
+_infos_keep_the_missing_id_explicitly) ... ok
+test_cancel_before_content_read_sends_no_request (test_scan_bulk_api.BulkFavoriteApiTests.test_cancel_before_content_re
+ad_sends_no_request) ... ok
+test_duplicate_or_short_id_catalog_is_not_a_complete_snapshot (test_scan_bulk_api.BulkFavoriteApiTests.test_duplicate_o
+r_short_id_catalog_is_not_a_complete_snapshot) ... ok
+test_empty_folder_needs_no_content_request (test_scan_bulk_api.BulkFavoriteApiTests.test_empty_folder_needs_no_content_
+request) ... ok
+test_types_and_ids_are_matched_instead_of_response_order (test_scan_bulk_api.BulkFavoriteApiTests.test_types_and_ids_ar
+e_matched_instead_of_response_order) ... ok
+test_complete_and_duplicate_detection (test_scan_diagnostics.DiagnosticTests.test_complete_and_duplicate_detection) ...
+ ok
+test_rejects_large_folder_without_request (test_scan_diagnostics.DiagnosticTests.test_rejects_large_folder_without_requ
+est) ... ok
+test_remote_has_one_more_item_than_pagination (test_scan_diagnostics.DiagnosticTests.test_remote_has_one_more_item_than
+_pagination) ... ok
+test_type_zero_remains_distinct_from_type_two (test_scan_diagnostics.DiagnosticTests.test_type_zero_remains_distinct_fr
+om_type_two) ... ok
+test_empty_last_page_stops (test_scan_empty_page_continuation.EmptyPageContinuationTests.test_empty_last_page_stops) ..
+. ok
+test_has_more_true_empty_page_continues (test_scan_empty_page_continuation.EmptyPageContinuationTests.test_has_more_tru
+e_empty_page_continues) ... ok
+test_three_consecutive_empty_pages_fail_closed (test_scan_empty_page_continuation.EmptyPageContinuationTests.test_three
+_consecutive_empty_pages_fail_closed) ... ok
+test_selection_round_trip_normalizes_ids (test_scan_selection.ScanSelectionTests.test_selection_round_trip_normalizes_i
+ds) ... ok
+test_1000_item_scan_uses_ids_once_and_infos_once (test_scan_troubleshooting.ScanTroubleshootingTests.test_1000_item_sca
+n_uses_ids_once_and_infos_once) ... ok
+test_business_apis_are_blocked_including_delete_only_execution (test_scan_troubleshooting.ScanTroubleshootingTests.test
+_business_apis_are_blocked_including_delete_only_execution) ... 2026-10-22 19:44:25,410 [core.scheduler.scheduler] Task
+ cc29ead344f040cfa185d74a7069e336 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 19:44:25,589 [httpx2] HTTP Request: POST http://testserver/api/analyze/start "HTTP/1.1 409 Conflict"
+2026-10-22 19:44:25,668 [httpx2] HTTP Request: POST http://testserver/api/apply/start "HTTP/1.1 409 Conflict"
+2026-10-22 19:44:25,751 [httpx2] HTTP Request: POST http://testserver/api/folder-organize/start "HTTP/1.1 409 Conflict"
+2026-10-22 19:44:25,845 [httpx2] HTTP Request: POST http://testserver/api/folder-organize/suggest "HTTP/1.1 409 Conflic
+t"
+2026-10-22 19:44:25,927 [httpx2] HTTP Request: POST http://testserver/api/folder-profiles/generate "HTTP/1.1 409 Confli
+ct"
+2026-10-22 19:44:26,020 [httpx2] HTTP Request: POST http://testserver/api/plan/apply "HTTP/1.1 409 Conflict"
+2026-10-22 19:44:26,117 [httpx2] HTTP Request: GET http://testserver/api/scan/tree "HTTP/1.1 200 OK"
+ok
+test_cached_folder_rebuild_reads_only_id_catalog (test_scan_troubleshooting.ScanTroubleshootingTests.test_cached_folder
+_rebuild_reads_only_id_catalog) ... ok
+test_clean_requires_explicit_confirmation (test_scan_troubleshooting.ScanTroubleshootingTests.test_clean_requires_expli
+cit_confirmation) ... FAIL
+test_clean_success_without_count_recovery_is_not_resolved (test_scan_troubleshooting.ScanTroubleshootingTests.test_clea
+n_success_without_count_recovery_is_not_resolved) ... 2026-10-22 19:44:28,823 [core.scheduler.scheduler] Task 6bc07b102
+6fa4d2ea39571ecef750bf9 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 19:44:29,692 [core.scheduler.scheduler] Task 66e8b26a98364f29a1d9763953c9fd9e failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_confirmed_clean_refreshes_and_validates (test_scan_troubleshooting.ScanTroubleshootingTests.test_confirmed_clean_r
+efreshes_and_validates) ... 2026-10-22 19:44:30,615 [core.scheduler.scheduler] Task df22c020be124e83a9cde5618d6cde6a fa
+iled
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_duplicate_resources_are_reported_separately (test_scan_troubleshooting.ScanTroubleshootingTests.test_duplicate_res
+ources_are_reported_separately) ... 2026-10-22 19:44:32,749 [core.scheduler.scheduler] Task 5868ac96c8c544dcb299d9a6e9b
+69a3d failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_gap_persists_and_does_not_clean_or_replace_old_snapshot (test_scan_troubleshooting.ScanTroubleshootingTests.test_g
+ap_persists_and_does_not_clean_or_replace_old_snapshot) ... FAIL
+test_index_fallback_discards_partial_index_results (test_scan_troubleshooting.ScanTroubleshootingTests.test_index_fallb
+ack_discards_partial_index_results) ... 2026-10-22 19:44:34,002 [core.scheduler.scheduler] Task 644bec9ae4a147fb804ad9e
+af1832ed6 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_interrupted_paged_folder_restarts_from_the_first_page (test_scan_troubleshooting.ScanTroubleshootingTests.test_int
+errupted_paged_folder_restarts_from_the_first_page)
+鎭㈠鍚庣殑閲嶈浠庤鏀惰棌澶圭 1 椤靛紑濮嬶紝涓嶆壙璇洪〉绾х画鎵€?... 2026-10-22 19:44:35,512 [core.scheduler.scheduler] Task 769e0499530b498e893
+fefef77778bc3 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: attempt to write a readonly database
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 4499, in run
+    store.save_scan_stage(run_id, mid, batch)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\store.p
+y", line 1454, in save_scan_stage
+    with _transaction() as conn:
+         ^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Roaming\uv\python\cpython-3.12.15-windows-x86_64-none\Lib\contextlib.py", line 137, in 
+__enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\store.p
+y", line 210, in _transaction
+    conn.execute("BEGIN IMMEDIATE")
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\da
+tabase\lifecycle.py", line 163, in execute
+    cursor = super().execute(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: attempt to write a readonly database
+
+FAIL
+test_legacy_inconsistent_state_is_available_in_popup (test_scan_troubleshooting.ScanTroubleshootingTests.test_legacy_in
+consistent_state_is_available_in_popup) ... FAIL
+test_manual_retry_resolves_after_remote_cleanup (test_scan_troubleshooting.ScanTroubleshootingTests.test_manual_retry_r
+esolves_after_remote_cleanup) ... 2026-10-22 19:44:47,179 [core.scheduler.scheduler] Task 60d25f9ec4674e6dbb6f58cec039e
+fba failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_manual_stop_rate_limit_is_reported_as_cancellation (test_scan_troubleshooting.ScanTroubleshootingTests.test_manual
+_stop_rate_limit_is_reported_as_cancellation) ... ok
+test_missing_info_is_retained_without_paging_and_only_it_is_refetched (test_scan_troubleshooting.ScanTroubleshootingTes
+ts.test_missing_info_is_retained_without_paging_and_only_it_is_refetched) ... 2026-10-22 19:44:50,241 [httpx2] HTTP Req
+uest: POST http://testserver/api/scan/issues/10/recover "HTTP/1.1 400 Bad Request"
+2026-10-22 19:44:50,332 [httpx2] HTTP Request: POST http://testserver/api/analyze/start "HTTP/1.1 409 Conflict"
+ok
+test_network_error_does_not_become_hidden_invalid_diagnosis (test_scan_troubleshooting.ScanTroubleshootingTests.test_ne
+twork_error_does_not_become_hidden_invalid_diagnosis) ... 2026-10-22 19:44:52,257 [core.scheduler.scheduler] Task 33b3b
+cc159124a87a9b1a8d194812fe1 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 缃戠粶寮傚父
+ok
+test_normal_scan_does_not_create_issue (test_scan_troubleshooting.ScanTroubleshootingTests.test_normal_scan_does_not_cr
+eate_issue) ... FAIL
+test_other_running_job_prevents_recovery (test_scan_troubleshooting.ScanTroubleshootingTests.test_other_running_job_pre
+vents_recovery) ... 2026-10-22 19:44:53,794 [core.scheduler.scheduler] Task cbcd1204709a4fc4bef91e1220d82d37 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_paused_scan_cancelled_from_scan_page_keeps_both_states_cancelled (test_scan_troubleshooting.ScanTroubleshootingTes
+ts.test_paused_scan_cancelled_from_scan_page_keeps_both_states_cancelled) ... ERROR
+test_paused_scan_cancelled_from_task_center_keeps_both_states_cancelled (test_scan_troubleshooting.ScanTroubleshootingT
+ests.test_paused_scan_cancelled_from_task_center_keeps_both_states_cancelled) ... ERROR
+test_rate_limit_keeps_issue_and_records_failure (test_scan_troubleshooting.ScanTroubleshootingTests.test_rate_limit_kee
+ps_issue_and_records_failure) ... FAIL
+test_refresh_resolves_sync_delay_without_cleaning (test_scan_troubleshooting.ScanTroubleshootingTests.test_refresh_reso
+lves_sync_delay_without_cleaning) ... 2026-10-22 19:44:55,458 [core.scheduler.scheduler] Task 19cf80661672478c9d6197288
+a82315c failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_resolving_one_folder_does_not_unblock_other_issue (test_scan_troubleshooting.ScanTroubleshootingTests.test_resolvi
+ng_one_folder_does_not_unblock_other_issue) ... 2026-10-22 19:44:57,177 [core.scheduler.scheduler] Task f569e8eaa6fc4f3
+8a31546c9242ef6da failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 19:44:57,708 [core.scheduler.scheduler] Task 6d66596d05904502b390d5b1400eef6b failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: attempt to write a readonly database
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 4348, in run
+    store.save_folders(folders)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\store.p
+y", line 1294, in save_folders
+    with _transaction() as conn:
+         ^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Roaming\uv\python\cpython-3.12.15-windows-x86_64-none\Lib\contextlib.py", line 137, in 
+__enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\store.p
+y", line 210, in _transaction
+    conn.execute("BEGIN IMMEDIATE")
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\da
+tabase\lifecycle.py", line 163, in execute
+    cursor = super().execute(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: attempt to write a readonly database
+
+FAIL
+test_retry_with_gap_stays_blocked (test_scan_troubleshooting.ScanTroubleshootingTests.test_retry_with_gap_stays_blocked
+) ... 2026-10-22 19:44:58,586 [core.scheduler.scheduler] Task bb59de94e70a4360ab9d24b98f816e39 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 19:44:59,375 [core.scheduler.scheduler] Task dbd3deaa556840269ad4ec4a024f1b57 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+test_save_config_can_persist_qr_login_before_database_initialization (test_scan_troubleshooting.ScanTroubleshootingTest
+s.test_save_config_can_persist_qr_login_before_database_initialization) ... ok
+test_save_config_does_not_swallow_database_recovery_required (test_scan_troubleshooting.ScanTroubleshootingTests.test_s
+ave_config_does_not_swallow_database_recovery_required) ... ok
+test_scan_reserves_running_state_before_starting_worker (test_scan_troubleshooting.ScanTroubleshootingTests.test_scan_r
+eserves_running_state_before_starting_worker) ... ok
+test_scan_resume_skips_complete_folders_and_never_replays_writes (test_scan_troubleshooting.ScanTroubleshootingTests.te
+st_scan_resume_skips_complete_folders_and_never_replays_writes) ... 2026-10-22 19:45:00,704 [core.scheduler.scheduler] 
+Task 81ca45fb242949a98fef5681d7292fc7 failed
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\sc
+heduler\scheduler.py", line 865, in _run_task
+    execute(context)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: attempt to write a readonly database
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 4385, in run
+    store.begin_folder_scan(run_id, mid, expected, strategy)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\store.p
+y", line 1466, in begin_folder_scan
+    with _transaction() as conn:
+         ^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Roaming\uv\python\cpython-3.12.15-windows-x86_64-none\Lib\contextlib.py", line 137, in 
+__enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\store.p
+y", line 210, in _transaction
+    conn.execute("BEGIN IMMEDIATE")
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\core\da
+tabase\lifecycle.py", line 163, in execute
+    cursor = super().execute(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+sqlite3.OperationalError: attempt to write a readonly database
+
+FAIL
+test_scan_tree_and_organize_suggest_accept_legacy_media_count (test_scan_troubleshooting.ScanTroubleshootingTests.test_
+scan_tree_and_organize_suggest_accept_legacy_media_count) ... ok
+test_scheduler_pause_emits_paused_scan_end_and_clears_running_state (test_scan_troubleshooting.ScanTroubleshootingTests
+.test_scheduler_pause_emits_paused_scan_end_and_clears_running_state) ... ok
+test_task_progress_separates_folder_and_item_counters (test_scan_troubleshooting.ScanTroubleshootingTests.test_task_pro
+gress_separates_folder_and_item_counters) ... ok
+test_uncertain_cleanup_is_never_replayed (test_scan_troubleshooting.ScanTroubleshootingTests.test_uncertain_cleanup_is_
+never_replayed) ... FAIL
+test_second_process_cannot_share_a_vault_profile (test_server_instance_lock.ServerInstanceLockTests.test_second_process
+_cannot_share_a_vault_profile) ... 2026-10-22 19:45:05,689 [server] 渚涘簲鍟?妯″瀷鍒濆鍖栧け璐ワ細鏁版嵁搴撳綋鍓嶄笉鍏佽鏅€氳闂紙鐘舵€侊細RECOVERY_
+REQUIRED锛?
+[store] 鏁版嵁搴撳惎鍔ㄦ牎楠?杩佺Щ鏈畬鎴愶紝鏅€氳闂凡鍏抽棴锛氬€欓€夋暟鎹簱缂哄皯蹇呰涓氬姟琛紝鎷掔粷鑷姩琛ュ缓锛歛nalyses, app_state, folder_items, folder_profiles, folder_scan_state, folders, models, plans, providers, scan_stage, videos
+ok
+test_server_entrypoint_holds_and_releases_profile_lease (test_server_instance_lock.ServerInstanceLockTests.test_server_
+entrypoint_holds_and_releases_profile_lease) ... ok
+test_mark_all_analyses_stale_preserves_dependents (test_store_and_llm_budget.AnalysisStaleLifecycleTests.test_mark_all_
+analyses_stale_preserves_dependents) ... ok
+test_save_analysis_defaults_to_current_with_dependents (test_store_and_llm_budget.AnalysisStaleLifecycleTests.test_save
+_analysis_defaults_to_current_with_dependents) ... ok
+test_set_analysis_statuses_overwrites_selected_rows (test_store_and_llm_budget.AnalysisStaleLifecycleTests.test_set_ana
+lysis_statuses_overwrites_selected_rows) ... ok
+test_upsert_replaces_record_and_status (test_store_and_llm_budget.AnalysisStaleLifecycleTests.test_upsert_replaces_reco
+rd_and_status) ... ok
+test_analyze_batch_splits_and_merges_when_needs_split (test_store_and_llm_budget.LLMContextBudgetSplitTests.test_analyz
+e_batch_splits_and_merges_when_needs_split) ... ok
+test_length_finish_reason_is_reported_as_truncated (test_store_and_llm_budget.LLMContextBudgetSplitTests.test_length_fi
+nish_reason_is_reported_as_truncated) ... 2026-10-22 19:45:18,475 [llm_analyzer] 鍝嶅簲鍥?max_tokens 鎴柇(batch=2, max_token
+s=16)锛屽皢鎷嗗垎
+ok
+test_prepare_call_refuses_single_item_that_cannot_fit (test_store_and_llm_budget.LLMContextBudgetSplitTests.test_prepar
+e_call_refuses_single_item_that_cannot_fit) ... ok
+test_prepare_call_requests_split_when_batch_exceeds_context (test_store_and_llm_budget.LLMContextBudgetSplitTests.test_
+prepare_call_requests_split_when_batch_exceeds_context) ... ok
+test_truncated_response_triggers_split_not_adoption (test_store_and_llm_budget.LLMContextBudgetSplitTests.test_truncate
+d_response_triggers_split_not_adoption) ... ok
+test_analyses_table_has_status_and_dependent_ids (test_store_and_llm_budget.StoreSchemaMigrationTests.test_analyses_tab
+le_has_status_and_dependent_ids) ... ok
+test_fresh_database_reaches_current_schema_version (test_store_and_llm_budget.StoreSchemaMigrationTests.test_fresh_data
+base_reaches_current_schema_version) ... ok
+test_legacy_empty_db_gets_default_schema_without_error (test_store_and_llm_budget.StoreSchemaMigrationTests.test_legacy
+_empty_db_gets_default_schema_without_error) ... ok
+test_reinitialize_is_idempotent (test_store_and_llm_budget.StoreSchemaMigrationTests.test_reinitialize_is_idempotent) .
+.. ok
+test_config_rejects_fraction_exponent_string_bool_and_out_of_range (test_task_numeric_settings.TaskNumericSettingsTests
+.test_config_rejects_fraction_exponent_string_bool_and_out_of_range) ... ok
+test_new_profile_limits_are_saved (test_task_numeric_settings.TaskNumericSettingsTests.test_new_profile_limits_are_save
+d) ... ok
+test_parallel_profile_pages_run_together_and_keep_input_order (test_task_numeric_settings.TaskNumericSettingsTests.test
+_parallel_profile_pages_run_together_and_keep_input_order) ... 2026-10-22 19:45:19,110 [llm_analyzer] Folder profile co
+mpression: 1/1 pages
+2026-10-22 19:45:19,111 [llm_analyzer] Folder profile compression: 1/1 pages
+ok
+test_profile_batch_cap_applies_even_when_everything_fits_context (test_task_numeric_settings.TaskNumericSettingsTests.t
+est_profile_batch_cap_applies_even_when_everything_fits_context) ... 2026-10-22 19:45:19,112 [llm_analyzer] Folder prof
+ile compression: 1/3 pages
+2026-10-22 19:45:19,112 [llm_analyzer] Folder profile compression: 3/3 pages
+ok
+test_closed_scan_issue_popup_is_not_reopened_by_scan_idle (test_ui_regressions.BetaUiRegressionTests.test_closed_scan_i
+ssue_popup_is_not_reopened_by_scan_idle) ... ok
+test_empty_model_config_does_not_storm_the_config_endpoint (test_ui_regressions.BetaUiRegressionTests.test_empty_model_
+config_does_not_storm_the_config_endpoint) ... ok
+test_fast_mode_still_continues_after_completed_scan (test_ui_regressions.BetaUiRegressionTests.test_fast_mode_still_con
+tinues_after_completed_scan) ... ok
+test_fast_mode_stops_after_cancelled_scan_instead_of_analyzing (test_ui_regressions.BetaUiRegressionTests.test_fast_mod
+e_stops_after_cancelled_scan_instead_of_analyzing) ... ok
+test_fast_mode_stops_after_paused_scan_instead_of_analyzing (test_ui_regressions.BetaUiRegressionTests.test_fast_mode_s
+tops_after_paused_scan_instead_of_analyzing) ... ok
+test_metadata_pending_scan_opens_actionable_popup (test_ui_regressions.BetaUiRegressionTests.test_metadata_pending_scan
+_opens_actionable_popup) ... ok
+test_numeric_task_settings_validate_save_and_reload (test_ui_regressions.BetaUiRegressionTests.test_numeric_task_settin
+gs_validate_save_and_reload) ... ok
+test_operations_tab_does_not_invent_a_reconciliation_record (test_ui_regressions.BetaUiRegressionTests.test_operations_
+tab_does_not_invent_a_reconciliation_record) ... ok
+test_task_center_separates_progress_units_and_shows_checkpoint (test_ui_regressions.BetaUiRegressionTests.test_task_cen
+ter_separates_progress_units_and_shows_checkpoint) ... ok
+test_restarts_when_server_ignores_range (test_update_flow.DownloadResumeTests.test_restarts_when_server_ignores_range) 
+... 2026-10-22 19:46:13,122 [server] 娴嬭瘯鍖?涓嬭浇涓柇锛堢 1/3 娆★級锛欼ncompleteRead
+2026-10-22 19:46:13,130 [server] 娴嬭瘯鍖?灏氭湭涓嬭浇瀹屾暣锛堢 1/3 娆★級锛岀户缁画浼?
+2026-10-22 19:46:13,130 [server] 娴嬭瘯鍖?涓嶆敮鎸佹柇鐐圭画浼狅紝浠庡ご涓嬭浇
+ok
+test_resumes_after_broken_connection (test_update_flow.DownloadResumeTests.test_resumes_after_broken_connection) ... 20
+26-10-22 19:46:13,157 [server] 娴嬭瘯鍖?涓嬭浇涓柇锛堢 1/3 娆★級锛欳onnection broken: IncompleteRead(307200 bytes read, 741376 more 
+expected)
+2026-10-22 19:46:13,168 [server] 娴嬭瘯鍖?灏氭湭涓嬭浇瀹屾暣锛堢 1/3 娆★級锛岀户缁画浼?
+ok
+test_event_stream_ends_once_shutdown_is_set (test_update_flow.EventStreamShutdownTests.test_event_stream_ends_once_shut
+down_is_set) ... 2026-10-22 19:46:13,196 [httpx2] HTTP Request: GET http://testserver/api/events/stream?since=0 "HTTP/1
+.1 200 OK"
+ok
+test_missing_registry_marker_means_portable (test_update_flow.InstallModeTests.test_missing_registry_marker_means_porta
+ble)
+娌℃湁瀹夎鍖呭啓鍏ョ殑娉ㄥ唽琛ㄦ爣璁版椂锛屽繀椤绘寜渚挎惡鐗堝鐞嗐€?... ok
+test_update_check_reports_install_mode (test_update_flow.InstallModeTests.test_update_check_reports_install_mode) ... 2
+026-10-22 19:46:13,718 [httpx2] HTTP Request: POST http://testserver/api/update/check "HTTP/1.1 200 OK"
+ok
+test_version_endpoint_reports_install_mode (test_update_flow.InstallModeTests.test_version_endpoint_reports_install_mod
+e) ... 2026-10-22 19:46:13,727 [httpx2] HTTP Request: GET http://testserver/api/version "HTTP/1.1 200 OK"
+2026-10-22 19:46:13,737 [httpx2] HTTP Request: GET http://testserver/api/version "HTTP/1.1 200 OK"
+ok
+test_installed_build_downloads_and_runs_the_installer (test_update_flow.InstalledModeUpdateTests.test_installed_build_d
+ownloads_and_runs_the_installer) ... 2026-10-22 19:46:13,750 [httpx2] HTTP Request: POST http://testserver/api/update/i
+nstall "HTTP/1.1 200 OK"
+ok
+test_installer_helper_gets_every_parameter_it_uses (test_update_flow.InstalledModeUpdateTests.test_installer_helper_get
+s_every_parameter_it_uses)
+璋冪敤鏂瑰繀椤绘妸 helper 鐢ㄥ埌鐨勫弬鏁伴兘浼犺繃鍘汇€?... ok
+test_portable_build_keeps_the_zip_worker (test_update_flow.InstalledModeUpdateTests.test_portable_build_keeps_the_zip_w
+orker) ... 2026-10-22 19:46:13,778 [httpx2] HTTP Request: POST http://testserver/api/update/install "HTTP/1.1 200 OK"
+ok
+test_cancel_after_replacement_started_is_refused (test_update_flow.UpdateCancelTests.test_cancel_after_replacement_star
+ted_is_refused) ... 2026-10-22 19:46:13,789 [httpx2] HTTP Request: POST http://testserver/api/update/cancel "HTTP/1.1 4
+09 Conflict"
+ok
+test_cancel_during_download_stops_the_worker (test_update_flow.UpdateCancelTests.test_cancel_during_download_stops_the_
+worker) ... 2026-10-22 19:46:13,797 [server] 宸茶姹傚彇娑堟洿鏂颁笅杞?
+2026-10-22 19:46:13,798 [httpx2] HTTP Request: POST http://testserver/api/update/cancel "HTTP/1.1 200 OK"
+ok
+test_cancel_without_a_download_is_rejected (test_update_flow.UpdateCancelTests.test_cancel_without_a_download_is_reject
+ed) ... 2026-10-22 19:46:13,810 [httpx2] HTTP Request: POST http://testserver/api/update/cancel "HTTP/1.1 409 Conflict"
+ok
+test_dev_build_never_reports_an_available_update (test_update_flow.UpdateCheckTests.test_dev_build_never_reports_an_ava
+ilable_update)
+寮€鍙戞瀯寤猴紙dev锛夎В鏋愪笉鍑虹増鏈彿锛氫笉姣旇緝銆佷笉鎻愮ず銆佹洿涓嶈兘寮€濮嬩笅杞姐€?... 2026-10-22 19:46:13,822 [httpx2] HTTP Request: POST http://testse
+rver/api/update/check "HTTP/1.1 200 OK"
+ok
+test_release_build_still_offers_the_newer_version (test_update_flow.UpdateCheckTests.test_release_build_still_offers_th
+e_newer_version) ... 2026-10-22 19:46:13,834 [httpx2] HTTP Request: POST http://testserver/api/update/check "HTTP/1.1 2
+00 OK"
+ok
+test_failure_is_exposed_from_fixed_file_and_cleared_by_next_check (test_update_flow.UpdateCleanupTests.test_failure_is_
+exposed_from_fixed_file_and_cleared_by_next_check) ... 2026-10-22 19:46:13,859 [httpx2] HTTP Request: GET http://testse
+rver/api/update/status "HTTP/1.1 200 OK"
+2026-10-22 19:46:13,871 [httpx2] HTTP Request: POST http://testserver/api/update/check "HTTP/1.1 200 OK"
+ok
+test_sweep_keeps_the_only_rollback_copy_when_install_dir_is_missing (test_update_flow.UpdateCleanupTests.test_sweep_kee
+ps_the_only_rollback_copy_when_install_dir_is_missing)
+瀹夎鐩綍涓嶅湪 = 涓婃鏇存柊宕╁湪銆屾棫鐩綍鏀瑰悕銆嶄笌銆屾柊鐩綍涓婁綅銆嶄箣闂淬€?... 2026-10-22 19:46:13,878 [server] 瀹夎鐩綍 <USER_HOME>\AppData\Lo
+cal\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\temp\tmpi_6n9ix1\checkout 涓嶅瓨鍦紙涓婃鏇存柊鍙兘涓柇锛夛紝淇濈暀
+ checkout.previous-* 浠ヤ究鍥炴粴
+ok
+test_sweep_removes_only_stale_leftovers (test_update_flow.UpdateCleanupTests.test_sweep_removes_only_stale_leftovers) .
+.. 2026-10-22 19:46:13,911 [server] 宸叉竻鐞?3 涓洿鏂版畫鐣欑洰褰曪紙瓒呰繃 2 灏忔椂鏈敹灏撅級
+ok
+test_dev_build_refuses_in_app_update (test_update_flow.UpdateInstallGuardTests.test_dev_build_refuses_in_app_update)
+鍗充娇鍓嶇琚粫杩囷紝鏈嶅姟绔篃涓嶇粰寮€鍙戞瀯寤哄仛瑕嗙洊鏇存柊銆?... 2026-10-22 19:46:13,926 [httpx2] HTTP Request: POST http://testserver/api/upda
+te/install "HTTP/1.1 400 Bad Request"
+ok
+test_newer_release_is_detected (test_update_flow.VersionComparisonTests.test_newer_release_is_detected) ... ok
+test_blob_roundtrip (test_vault.VaultCryptoTests.test_blob_roundtrip) ... ok
+test_file_roundtrip (test_vault.VaultCryptoTests.test_file_roundtrip) ... ok
+test_recovery_code_normalization (test_vault.VaultCryptoTests.test_recovery_code_normalization) ... ok
+test_wrap_unwrap_password_roundtrip (test_vault.VaultCryptoTests.test_wrap_unwrap_password_roundtrip) ... ok
+test_wrong_secret_fails (test_vault.VaultCryptoTests.test_wrong_secret_fails) ... ok
+test_initialize_sets_password_and_recovery (test_vault.VaultLifecycleTests.test_initialize_sets_password_and_recovery) 
+... ok
+test_lock_unlock_password (test_vault.VaultLifecycleTests.test_lock_unlock_password) ... ok
+test_meta_persists_without_dek (test_vault.VaultLifecycleTests.test_meta_persists_without_dek) ... ok
+test_onboarding_flag (test_vault.VaultLifecycleTests.test_onboarding_flag) ... ok
+test_recovery_unlocks_after_password_change (test_vault.VaultLifecycleTests.test_recovery_unlocks_after_password_change
+) ... ok
+test_set_password_requires_unlock_or_current (test_vault.VaultLifecycleTests.test_set_password_requires_unlock_or_curre
+nt) ... ok
+test_complete_onboarding_failure_does_not_promote_recovery_required_database (test_vault_api.VaultApiTests.test_complet
+e_onboarding_failure_does_not_promote_recovery_required_database) ... 2026-10-22 19:46:17,888 [httpx2] HTTP Request: PO
+ST http://testserver/api/vault/onboarding "HTTP/1.1 200 OK"
+2026-10-22 19:46:17,903 [server] 鍒濆鍖栧悗鍔犲瘑鏁版嵁搴撳け璐?
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 1756, in vault_complete_onboarding
+    scheduler = _vault_pause_tasks_for_lock()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 1316, in _vault_pause_tasks_for_lock
+    raise vault_mod.VaultError(
+vault.VaultError: 鏁版嵁搴撶姸鎬佷负 RECOVERY_REQUIRED锛屾棤娉曟墽琛岄攣瀹?
+2026-10-22 19:46:17,906 [httpx2] HTTP Request: POST http://testserver/api/vault/complete-onboarding "HTTP/1.1 500 Inter
+nal Server Error"
+2026-10-22 19:46:17,918 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 503 Service Unavailab
+le"
+ok
+test_complete_onboarding_requires_unlock (test_vault_api.VaultApiTests.test_complete_onboarding_requires_unlock) ... 20
+26-10-22 19:46:18,973 [httpx2] HTTP Request: POST http://testserver/api/vault/onboarding "HTTP/1.1 200 OK"
+2026-10-22 19:46:19,650 [httpx2] HTTP Request: POST http://testserver/api/vault/lock "HTTP/1.1 200 OK"
+2026-10-22 19:46:19,659 [httpx2] HTTP Request: POST http://testserver/api/vault/complete-onboarding "HTTP/1.1 403 Forbi
+dden"
+2026-10-22 19:46:20,339 [httpx2] HTTP Request: POST http://testserver/api/vault/unlock "HTTP/1.1 200 OK"
+2026-10-22 19:46:20,813 [httpx2] HTTP Request: POST http://testserver/api/vault/complete-onboarding "HTTP/1.1 200 OK"
+ok
+test_encrypt_file_roundtrip_via_vault (test_vault_api.VaultApiTests.test_encrypt_file_roundtrip_via_vault) ... 2026-10-
+22 19:46:21,445 [httpx2] HTTP Request: POST http://testserver/api/vault/onboarding "HTTP/1.1 200 OK"
+ok
+test_force_onboarding_blocks_business_api_in_production (test_vault_api.VaultApiTests.test_force_onboarding_blocks_busi
+ness_api_in_production) ... 2026-10-22 19:46:21,741 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HT
+TP/1.1 403 Forbidden"
+2026-10-22 19:46:21,752 [httpx2] HTTP Request: GET http://testserver/api/vault/status "HTTP/1.1 200 OK"
+ok
+test_lock_failure_does_not_promote_recovery_required_database (test_vault_api.VaultApiTests.test_lock_failure_does_not_
+promote_recovery_required_database) ... 2026-10-22 19:46:21,984 [server] 閿佸畾鍔犲瘑鏁版嵁搴撳け璐?
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 1729, in vault_lock
+    scheduler = _vault_pause_tasks_for_lock()
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\server.
+py", line 1316, in _vault_pause_tasks_for_lock
+    raise vault_mod.VaultError(
+vault.VaultError: 鏁版嵁搴撶姸鎬佷负 RECOVERY_REQUIRED锛屾棤娉曟墽琛岄攣瀹?
+2026-10-22 19:46:21,988 [server] 閿佸畾澶辫触鍚庣殑浠诲姟鍦?120 绉掑唴浠嶆湭绌洪棽锛涜烦杩囧悗鍙拌嚜鍔ㄦ仮澶?
+2026-10-22 19:46:21,991 [httpx2] HTTP Request: POST http://testserver/api/vault/lock "HTTP/1.1 500 Internal Server Erro
+r"
+2026-10-22 19:46:22,003 [httpx2] HTTP Request: PUT http://testserver/api/scan/selection "HTTP/1.1 503 Service Unavailab
+le"
+ok
+test_onboarding_requires_password_and_mid (test_vault_api.VaultApiTests.test_onboarding_requires_password_and_mid) ... 
+2026-10-22 19:46:22,242 [httpx2] HTTP Request: POST http://testserver/api/vault/onboarding "HTTP/1.1 400 Bad Request"
+2026-10-22 19:46:22,258 [httpx2] HTTP Request: POST http://testserver/api/vault/onboarding "HTTP/1.1 400 Bad Request"
+ok
+test_onboarding_returns_recovery_code_once (test_vault_api.VaultApiTests.test_onboarding_returns_recovery_code_once) ..
+. 2026-10-22 19:46:22,970 [httpx2] HTTP Request: POST http://testserver/api/vault/onboarding "HTTP/1.1 200 OK"
+2026-10-22 19:46:22,981 [httpx2] HTTP Request: GET http://testserver/api/vault/status "HTTP/1.1 200 OK"
+ok
+test_status_default_unconfigured (test_vault_api.VaultApiTests.test_status_default_unconfigured) ... 2026-10-22 19:46:2
+3,221 [httpx2] HTTP Request: GET http://testserver/api/vault/status "HTTP/1.1 200 OK"
+ok
+test_unlock_with_password_and_recovery (test_vault_api.VaultApiTests.test_unlock_with_password_and_recovery) ... 2026-1
+0-22 19:46:23,869 [httpx2] HTTP Request: POST http://testserver/api/vault/onboarding "HTTP/1.1 200 OK"
+2026-10-22 19:46:24,418 [httpx2] HTTP Request: POST http://testserver/api/vault/lock "HTTP/1.1 200 OK"
+2026-10-22 19:46:24,428 [httpx2] HTTP Request: GET http://testserver/api/vault/status "HTTP/1.1 200 OK"
+2026-10-22 19:46:24,551 [httpx2] HTTP Request: POST http://testserver/api/vault/unlock "HTTP/1.1 403 Forbidden"
+2026-10-22 19:46:25,315 [httpx2] HTTP Request: POST http://testserver/api/vault/unlock "HTTP/1.1 200 OK"
+2026-10-22 19:46:25,779 [httpx2] HTTP Request: POST http://testserver/api/vault/lock "HTTP/1.1 200 OK"
+2026-10-22 19:46:26,529 [httpx2] HTTP Request: POST http://testserver/api/vault/unlock "HTTP/1.1 200 OK"
+ok
+test_atomic_archive_temporary_fits_destination_path_budget (test_vault_atomic_io.VaultAtomicIOTests.test_atomic_archive
+_temporary_fits_destination_path_budget) ... ok
+test_atomic_write_creates_archive_parent (test_vault_atomic_io.VaultAtomicIOTests.test_atomic_write_creates_archive_par
+ent) ... ok
+test_replace_denial_preserves_old_ciphertext_and_cleans_temporary (test_vault_atomic_io.VaultAtomicIOTests.test_replace
+_denial_preserves_old_ciphertext_and_cleans_temporary) ... ok
+test_app_lock_auto_unlock_toggle_keeps_device_secret (test_vault_device_secret.VaultDeviceSecretTests.test_app_lock_aut
+o_unlock_toggle_keeps_device_secret) ... ok
+test_bind_cancelled_by_hello_writes_nothing (test_vault_device_secret.VaultDeviceSecretTests.test_bind_cancelled_by_hel
+lo_writes_nothing) ... ok
+test_bind_skip_hello_does_not_prompt (test_vault_device_secret.VaultDeviceSecretTests.test_bind_skip_hello_does_not_pro
+mpt) ... ok
+test_bind_verifies_hello_by_default (test_vault_device_secret.VaultDeviceSecretTests.test_bind_verifies_hello_by_defaul
+t)
+缁戝畾鍐欏叆鐨勬槸銆岃兘瑙ｅ紑 DEK 鐨勮澶囧瘑閽ャ€嶏紝榛樿蹇呴』鍏堣繃涓€娆?Windows Hello銆?... ok
+test_bind_writes_its_own_file_not_app_unlock (test_vault_device_secret.VaultDeviceSecretTests.test_bind_writes_its_own_
+file_not_app_unlock) ... ok
+test_device_unlock_failure_after_dek_unlock_clears_new_dek (test_vault_device_secret.VaultDeviceSecretTests.test_device
+_unlock_failure_after_dek_unlock_clears_new_dek) ... ok
+test_failed_bind_rolls_back_device_secret_and_wrap (test_vault_device_secret.VaultDeviceSecretTests.test_failed_bind_ro
+lls_back_device_secret_and_wrap) ... ok
+test_failed_rebind_restores_existing_device_secret_and_wrap (test_vault_device_secret.VaultDeviceSecretTests.test_faile
+d_rebind_restores_existing_device_secret_and_wrap) ... ok
+test_failed_unbind_restores_device_secret_and_wrap (test_vault_device_secret.VaultDeviceSecretTests.test_failed_unbind_
+restores_device_secret_and_wrap) ... ok
+test_migrates_device_secret_from_legacy_shared_blob (test_vault_device_secret.VaultDeviceSecretTests.test_migrates_devi
+ce_secret_from_legacy_shared_blob) ... ok
+test_missing_wrap_while_locked_explains_what_to_do (test_vault_device_secret.VaultDeviceSecretTests.test_missing_wrap_w
+hile_locked_explains_what_to_do) ... ok
+test_password_unlock_failure_after_dek_unlock_clears_new_dek (test_vault_device_secret.VaultDeviceSecretTests.test_pass
+word_unlock_failure_after_dek_unlock_clears_new_dek) ... ok
+test_production_paths_are_distinct (test_vault_device_secret.VaultDeviceSecretTests.test_production_paths_are_distinct)
+涓ゅ瀵嗛挜鏉愭枡蹇呴』钀藉湪涓や釜鏂囦欢閲岋紱鍏辩敤涓€涓枃浠舵椂浼氫簰鐩歌鐩栥€?... ok
+
+======================================================================
+ERROR: test_paused_scan_cancelled_from_scan_page_keeps_both_states_cancelled (test_scan_troubleshooting.ScanTroubleshoo
+tingTests.test_paused_scan_cancelled_from_scan_page_keeps_both_states_cancelled)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 192, in test_paused_scan_cancelled_from_scan_page_keeps_both_states_cancelled
+    result, paused = self.start_paused_scan()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 163, in start_paused_scan
+    self.assertTrue(result["started"], result)
+                    ~~~~~~^^^^^^^^^^^
+TypeError: 'JSONResponse' object is not subscriptable
+
+======================================================================
+ERROR: test_paused_scan_cancelled_from_task_center_keeps_both_states_cancelled (test_scan_troubleshooting.ScanTroublesh
+ootingTests.test_paused_scan_cancelled_from_task_center_keeps_both_states_cancelled)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 202, in test_paused_scan_cancelled_from_task_center_keeps_both_states_cancelled
+    result, paused = self.start_paused_scan()
+                     ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 163, in start_paused_scan
+    self.assertTrue(result["started"], result)
+                    ~~~~~~^^^^^^^^^^^
+TypeError: 'JSONResponse' object is not subscriptable
+
+======================================================================
+FAIL: test_MIG_018_second_instance_with_active_writer_fails_safely_and_recovers (migration.test_legacy_migration.Legacy
+MigrationTests.test_MIG_018_second_instance_with_active_writer_fails_safely_and_recovers)
+Pre: isolated current DB. Steps: hold one writer while a second instance starts, release and retry. Expect: no loss/cor
+ruption.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\m
+igration\test_legacy_migration.py", line 230, in test_MIG_018_second_instance_with_active_writer_fails_safely_and_recov
+ers
+    self.assertEqual(200, onboarded["completion"]["http_status"])
+AssertionError: 200 != 500
+
+======================================================================
+FAIL: test_MIG_025_missing_committed_manifest_fails_closed (migration.test_vault_migration.VaultMigrationTests.test_MIG
+_025_missing_committed_manifest_fails_closed)
+Pre: successfully locked v1 vault. Steps: remove manifest and unlock. Expect: no DB, recovery required, ciphertexts unc
+hanged.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\m
+igration\test_vault_migration.py", line 150, in test_MIG_025_missing_committed_manifest_fails_closed
+    self.assertEqual(200, onboard["completion"]["http_status"])
+AssertionError: 200 != 500
+
+======================================================================
+FAIL: test_MIG_028_repeated_lock_unlock_cycles_keep_manifest_file_set_stable (migration.test_vault_migration.VaultMigra
+tionTests.test_MIG_028_repeated_lock_unlock_cycles_keep_manifest_file_set_stable)
+Pre: locked vault. Steps: unlock/lock twice. Expect: same archive inventory and verified hashes each cycle.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\m
+igration\test_vault_migration.py", line 214, in test_MIG_028_repeated_lock_unlock_cycles_keep_manifest_file_set_stable
+    self.assertEqual(200, first["completion"]["http_status"])
+AssertionError: 200 != 500
+
+======================================================================
+FAIL: test_MIG_029_second_process_cannot_open_profile_during_vault_sealing (migration.test_vault_migration.VaultMigrati
+onTests.test_MIG_029_second_process_cannot_open_profile_during_vault_sealing)
+The exclusive profile lease must cover archive creation through plaintext removal.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\m
+igration\test_vault_migration.py", line 305, in test_MIG_029_second_process_cannot_open_profile_during_vault_sealing
+    self.assertTrue(marker.is_file(), {
+AssertionError: False is not true : {'error': 'vault sealing did not reach plaintext removal', 'completion': {'body': {
+'bound_mid': '9000001', 'configured': True, 'database_state': 'READY', 'error': '鍒濆鍖栧姞瀵嗘暟鎹簱澶辫触锛歛ttempt to write a rea
+donly database', 'has_account_wrap': False, 'has_device_wrap': False, 'has_recovery_wrap': True, 'lock_phase': {'error'
+: 'attempt to write a readonly database', 'phase': 'failed', 'updated_at': '2026-10-22T19:43:21+0800'}, 'ok': False, 'o
+nboarding_complete': False, 'unlocked': True}, 'http_status': 500}, 'probe_errors': []}
+
+======================================================================
+FAIL: test_MIG_030_probe_snapshot_does_not_create_profile_sidecars (migration.test_vault_migration.VaultMigrationTests.
+test_MIG_030_probe_snapshot_does_not_create_profile_sidecars)
+A diagnostic snapshot must not create WAL/SHM beside the tested profile DB.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\m
+igration\test_vault_migration.py", line 337, in test_MIG_030_probe_snapshot_does_not_create_profile_sidecars
+    self.assertEqual([], unlocked["database_sidecars_at_probe_end"])
+AssertionError: Lists differ: [] != ['<USER_HOME>\\AppData\\Local\\Temp\[331 chars]shm']
+
+Second list contains 2 additional elements.
+First extra element 0:
+'<USER_HOME>\\AppData\\Local\\Temp\\bfo-acceptance-20261022-190221\\.bfo-isolated-tests-hufdj6y1\\temp\\bfo-mig-v
+ault-1nc3e7a7\\profile\\BiliFavOrganizer\\data\\library.sqlite3-wal'
+
+- []
++ ['<USER_HOME>\\AppData\\Local\\Temp\\bfo-acceptance-20261022-190221\\.bfo-isolated-tests-hufdj6y1\\temp\\bfo-mi
+g-vault-1nc3e7a7\\profile\\BiliFavOrganizer\\data\\library.sqlite3-wal',
++  '<USER_HOME>\\AppData\\Local\\Temp\\bfo-acceptance-20261022-190221\\.bfo-isolated-tests-hufdj6y1\\temp\\bfo-mi
+g-vault-1nc3e7a7\\profile\\BiliFavOrganizer\\data\\library.sqlite3-shm']
+
+======================================================================
+FAIL: test_vault_lock_interrupts_bilibili_rate_limit_backoff_and_pauses_task (scheduler.test_server_integration.ServerS
+chedulerIntegrationTests.test_vault_lock_interrupts_bilibili_rate_limit_backoff_and_pauses_task)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\s
+cheduler\test_server_integration.py", line 148, in test_vault_lock_interrupts_bilibili_rate_limit_backoff_and_pauses_ta
+sk
+    self._run_subprocess(env, script)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\s
+cheduler\test_server_integration.py", line 28, in _run_subprocess
+    self.assertEqual(0, result.returncode, result.stdout)
+AssertionError: 0 != 1 : Traceback (most recent call last):
+  File "<string>", line 29, in <module>
+TypeError: cannot unpack non-iterable JSONResponse object
+
+
+======================================================================
+FAIL: test_business_failure_marks_batch_failed_and_continues (test_apply_safety_contracts.ApplySafetyContractTests.test
+_business_failure_marks_batch_failed_and_continues)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_apply_safety_contracts.py", line 207, in test_business_failure_marks_batch_failed_and_continues
+    self.assertTrue(_payload(result).get("started"))
+AssertionError: None is not true
+
+======================================================================
+FAIL: test_local_persist_failure_requires_reconciliation_after_remote_success (test_apply_safety_contracts.ApplySafetyC
+ontractTests.test_local_persist_failure_requires_reconciliation_after_remote_success)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_apply_safety_contracts.py", line 351, in test_local_persist_failure_requires_reconciliation_after_remote_success
+    self.assertIsInstance(result, dict, getattr(result, "body", None))
+AssertionError: <starlette.responses.JSONResponse object at 0x00000251C1B5D880> is not an instance of <class 'dict'> : 
+b'{"ok":false,"error":"\xe4\xbb\xbb\xe5\x8a\xa1\xe6\x97\xa0\xe6\xb3\x95\xe6\x8e\x92\xe9\x98\x9f\xef\xbc\x9aattempt to w
+rite a readonly database"}'
+
+======================================================================
+FAIL: test_move_updates_membership_before_reporting_done (test_apply_safety_contracts.ApplySafetyContractTests.test_mov
+e_updates_membership_before_reporting_done)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_apply_safety_contracts.py", line 368, in test_move_updates_membership_before_reporting_done
+    self.assertEqual(plan["m1"]["status"], "done")
+AssertionError: 'pending' != 'done'
+- pending
++ done
+
+
+======================================================================
+FAIL: test_rate_limit_stops_run_and_keeps_batch_pending (test_apply_safety_contracts.ApplySafetyContractTests.test_rate
+_limit_stops_run_and_keeps_batch_pending)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_apply_safety_contracts.py", line 228, in test_rate_limit_stops_run_and_keeps_batch_pending
+    self.assertTrue(_payload(result).get("started"))
+AssertionError: None is not true
+
+======================================================================
+FAIL: test_unexpected_exception_does_not_write_next_group (test_apply_safety_contracts.ApplySafetyContractTests.test_un
+expected_exception_does_not_write_next_group)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_apply_safety_contracts.py", line 307, in test_unexpected_exception_does_not_write_next_group
+    self.assertEqual(len(fake.calls), 1)
+AssertionError: 0 != 1
+
+======================================================================
+FAIL: test_uncertain_batch_stops_and_requires_review (test_batch_executor.BatchExecutorTests.test_uncertain_batch_stops
+_and_requires_review)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_batch_executor.py", line 159, in test_uncertain_batch_stops_and_requires_review
+    self._run(plan, videos, fake)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_batch_executor.py", line 84, in _run
+    self.assertIsInstance(result, dict, getattr(result, "body", None))
+AssertionError: <starlette.responses.JSONResponse object at 0x00000251C1D33D70> is not an instance of <class 'dict'> : 
+b'{"ok":false,"error":"\xe4\xbb\xbb\xe5\x8a\xa1\xe6\x97\xa0\xe6\xb3\x95\xe6\x8e\x92\xe9\x98\x9f\xef\xbc\x9aattempt to w
+rite a readonly database"}'
+
+======================================================================
+FAIL: test_clean_requires_explicit_confirmation (test_scan_troubleshooting.ScanTroubleshootingTests.test_clean_requires
+_explicit_confirmation)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 562, in test_clean_requires_explicit_confirmation
+    self.run_scan()
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 113, in run_scan
+    self.wait_scan(result)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 131, in wait_scan
+    self.assertIsInstance(result, dict, getattr(result, "body", None))
+AssertionError: <starlette.responses.JSONResponse object at 0x00000251C1BB42F0> is not an instance of <class 'dict'> : 
+b'{"ok":false,"error":"\xe4\xbb\xbb\xe5\x8a\xa1\xe6\x97\xa0\xe6\xb3\x95\xe6\x8e\x92\xe9\x98\x9f\xef\xbc\x9aattempt to w
+rite a readonly database"}'
+
+======================================================================
+FAIL: test_gap_persists_and_does_not_clean_or_replace_old_snapshot (test_scan_troubleshooting.ScanTroubleshootingTests.
+test_gap_persists_and_does_not_clean_or_replace_old_snapshot)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 423, in test_gap_persists_and_does_not_clean_or_replace_old_snapshot
+    self.run_scan()
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 113, in run_scan
+    self.wait_scan(result)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 131, in wait_scan
+    self.assertIsInstance(result, dict, getattr(result, "body", None))
+AssertionError: <starlette.responses.JSONResponse object at 0x00000251BE166690> is not an instance of <class 'dict'> : 
+b'{"ok":false,"error":"\xe4\xbb\xbb\xe5\x8a\xa1\xe6\x97\xa0\xe6\xb3\x95\xe6\x8e\x92\xe9\x98\x9f\xef\xbc\x9aattempt to w
+rite a readonly database"}'
+
+======================================================================
+FAIL: test_interrupted_paged_folder_restarts_from_the_first_page (test_scan_troubleshooting.ScanTroubleshootingTests.te
+st_interrupted_paged_folder_restarts_from_the_first_page)
+鎭㈠鍚庣殑閲嶈浠庤鏀惰棌澶圭 1 椤靛紑濮嬶紝涓嶆壙璇洪〉绾х画鎵€?
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 327, in test_interrupted_paged_folder_restarts_from_the_first_page
+    self.assertIs(completed.status, server.TaskStatus.COMPLETED)
+AssertionError: <TaskStatus.FAILED: 'FAILED'> is not <TaskStatus.COMPLETED: 'COMPLETED'>
+
+======================================================================
+FAIL: test_legacy_inconsistent_state_is_available_in_popup (test_scan_troubleshooting.ScanTroubleshootingTests.test_leg
+acy_inconsistent_state_is_available_in_popup)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 634, in test_legacy_inconsistent_state_is_available_in_popup
+    self.recover()
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 142, in recover
+    self.wait_scan(result)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 131, in wait_scan
+    self.assertIsInstance(result, dict, getattr(result, "body", None))
+AssertionError: <starlette.responses.JSONResponse object at 0x00000251C1A5A450> is not an instance of <class 'dict'> : 
+b'{"ok":false,"error":"\xe4\xbb\xbb\xe5\x8a\xa1\xe6\x97\xa0\xe6\xb3\x95\xe6\x8e\x92\xe9\x98\x9f\xef\xbc\x9aattempt to w
+rite a readonly database"}'
+
+======================================================================
+FAIL: test_normal_scan_does_not_create_issue (test_scan_troubleshooting.ScanTroubleshootingTests.test_normal_scan_does_
+not_create_issue)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 334, in test_normal_scan_does_not_create_issue
+    self.run_scan()
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 113, in run_scan
+    self.wait_scan(result)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 131, in wait_scan
+    self.assertIsInstance(result, dict, getattr(result, "body", None))
+AssertionError: <starlette.responses.JSONResponse object at 0x00000251C22B49B0> is not an instance of <class 'dict'> : 
+b'{"ok":false,"error":"\xe4\xbb\xbb\xe5\x8a\xa1\xe6\x97\xa0\xe6\xb3\x95\xe6\x8e\x92\xe9\x98\x9f\xef\xbc\x9aattempt to w
+rite a readonly database"}'
+
+======================================================================
+FAIL: test_rate_limit_keeps_issue_and_records_failure (test_scan_troubleshooting.ScanTroubleshootingTests.test_rate_lim
+it_keeps_issue_and_records_failure)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 594, in test_rate_limit_keeps_issue_and_records_failure
+    self.run_scan()
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 113, in run_scan
+    self.wait_scan(result)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 131, in wait_scan
+    self.assertIsInstance(result, dict, getattr(result, "body", None))
+AssertionError: <starlette.responses.JSONResponse object at 0x00000251C1F49E50> is not an instance of <class 'dict'> : 
+b'{"ok":false,"error":"\xe4\xbb\xbb\xe5\x8a\xa1\xe6\x97\xa0\xe6\xb3\x95\xe6\x8e\x92\xe9\x98\x9f\xef\xbc\x9aattempt to w
+rite a readonly database"}'
+
+======================================================================
+FAIL: test_resolving_one_folder_does_not_unblock_other_issue (test_scan_troubleshooting.ScanTroubleshootingTests.test_r
+esolving_one_folder_does_not_unblock_other_issue)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 671, in test_resolving_one_folder_does_not_unblock_other_issue
+    self.assertEqual(["20"], [row["media_id"] for row in pending])
+AssertionError: Lists differ: ['20'] != ['10', '20']
+
+First differing element 0:
+'20'
+'10'
+
+Second list contains 1 additional elements.
+First extra element 1:
+'20'
+
+- ['20']
++ ['10', '20']
+
+======================================================================
+FAIL: test_scan_resume_skips_complete_folders_and_never_replays_writes (test_scan_troubleshooting.ScanTroubleshootingTe
+sts.test_scan_resume_skips_complete_folders_and_never_replays_writes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 272, in test_scan_resume_skips_complete_folders_and_never_replays_writes
+    self.assertEqual(["20"], [media for kind, media in calls if kind == "ids"])
+AssertionError: Lists differ: ['20'] != []
+
+First list contains 1 additional elements.
+First extra element 0:
+'20'
+
+- ['20']
++ []
+
+======================================================================
+FAIL: test_uncertain_cleanup_is_never_replayed (test_scan_troubleshooting.ScanTroubleshootingTests.test_uncertain_clean
+up_is_never_replayed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 582, in test_uncertain_cleanup_is_never_replayed
+    self.run_scan()
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 113, in run_scan
+    self.wait_scan(result)
+  File "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\checkout\tests\t
+est_scan_troubleshooting.py", line 131, in wait_scan
+    self.assertIsInstance(result, dict, getattr(result, "body", None))
+AssertionError: <starlette.responses.JSONResponse object at 0x00000251C1CFC230> is not an instance of <class 'dict'> : 
+b'{"ok":false,"error":"\xe4\xbb\xbb\xe5\x8a\xa1\xe6\x97\xa0\xe6\xb3\x95\xe6\x8e\x92\xe9\x98\x9f\xef\xbc\x9aattempt to w
+rite a readonly database"}'
+
+----------------------------------------------------------------------
+Ran 354 tests in 461.161s
+
+FAILED (failures=21, errors=2)
+[store] 宸插皢 SQLite 鏁版嵁搴撳鍒跺埌鎸佷箙鐩綍锛欳:\Users\Martin\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-isolated-tests-hufdj6y1\temp\bfo-schema-migration-i9_z6my_\data\library.sqlite3锛堥」鐩唴鍘熷簱淇濈暀锛?

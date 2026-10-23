@@ -1,0 +1,6 @@
+﻿executable: <ACCEPTANCE_ROOT>\.venv\Scripts\python.exe
+sqlite: 3.53.1
+unlink_impl: pathlib unlink
+shim_on_path: []
+sitecustomize: not importable
+PYTHONPATH: None

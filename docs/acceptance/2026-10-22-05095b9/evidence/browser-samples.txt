@@ -1,0 +1,2 @@
+﻿20:21:03.861 pid=12544 name=msedge.exe cmd="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --single-argument https://github.com/Martin-soaring-dev/bili-fav-organizer/releases/latest
+SAMPLER_DONE 20:21:20
