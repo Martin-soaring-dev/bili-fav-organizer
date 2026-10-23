@@ -6,7 +6,7 @@
 
 | 主题 | 权威来源 | 说明 |
 | --- | --- | --- |
-| 用户安装与使用 | [快速上手](快速上手.md)、[根 README](../README.md) | 面向用户；发行包内还包含 `packaging/使用说明.txt` 和 PDF 指南 |
+| 用户安装与使用 | [快速上手](快速上手.md)、[根 README](../README.md) | 面向用户；发行包内还包含 `packaging/使用说明.txt` 和 PDF 指南；PDF 可通过 Actions 的 Rebuild Quickstart PDF 工作流重建 |
 | 当前版本事实 | [版本台账](maintenance/version-ledger.md) | Git tag、Release 对象、构建运行和发行物核验 |
 | 发布操作 | [发布操作流程](release-process.md) | 稳定版 / Beta 触发、手动重建、发行物和发布后核验 |
 | 分支与文档治理 | [维护治理规范](maintenance/governance.md) | 长期分支规则、PR 门禁、证据归档、文档生命周期与隐私 |
