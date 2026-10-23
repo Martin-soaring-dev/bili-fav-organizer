@@ -40,7 +40,7 @@
 | Electron package metadata | `package.json` 为 `0.209.0`，`package-lock.json` 为 `0.0.0` | 已对齐到 `0.210.5`；发行工作流仍以 tag 注入最终包版本 |
 | 快速上手 PDF | `output/pdf/快速上手.pdf` 是静态文件，可能落后于 Markdown | **待处理：** 重新生成 PDF，并在发布前核对 PDF 与在线指南一致 |
 | Release 正文 | 2026-10-23 复核时正文非空，951 字符；包含更新摘要、测试/交付、升级建议与构建记录 | 已补齐；未来仅对确实为空的 Release 使用受控 backfill 工作流，不覆盖已有人工说明 |
-| 历史 Release 对象 | v0.210.1–v0.210.4 标签存在，但当前列表未返回相应 Release | **待维护者确认：** 决定是否恢复这些历史 Release 页面；不改历史 tag、不替换资产 |
+| 历史 Release 对象 | 2026-10-23 分别查询四个 Release-by-tag endpoint 均返回 HTTP 404；四个 Git tag ref 均存在且指向已记录的 commit | **待维护者决定：** 是否创建新的历史 Release 页面；本轮不重建、不改 tag、不覆盖资产 |
 
 ## 4. 后续版本治理规则
 
