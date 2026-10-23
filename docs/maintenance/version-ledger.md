@@ -27,7 +27,7 @@
   - `BiliFavOrganizer-Windows-x64-v0.210.5.zip` 与 `.sha256`
   - `BiliFavOrganizer-Setup-v0.210.5.exe` 与 `.sha256`
   - `BiliFavOrganizer-neo-Setup-0.210.5.exe` 与 `.sha256`
-- **待执行：Release 正文为空。** 已新增 [Backfill empty release notes 工作流](../../.github/workflows/backfill-release-notes.yml)，只在正文为空时读取 README 版本段并补齐标题/正文，不重建或覆盖任何发行资产。该工作流尚未对 v0.210.5 手动运行，因此发布页正文仍为空。
+- **Release 正文已补齐（2026-10-23 复核）。** 当前 GitHub Release 正文非空（951 字符），包含主要更新、测试与交付、升级建议及构建记录。当前无需再次运行 backfill；[Backfill empty release notes 工作流](../../.github/workflows/backfill-release-notes.yml)仅用于未来确实为空的 Release，并必须遵守“只填空正文、不覆盖人工内容”的规则。
 - 本次构建在标签对应的源码上执行了 Windows 全量回归测试，测试步骤通过；不把这项 CI 结果等同于用户真实 Windows 环境的安装/升级实机验收。
 
 ## 3. 已识别的版本信息不一致
@@ -39,7 +39,7 @@
 | 在线快速上手 | 顶部仍称 v0.209 为当前正式版 | 已更新为 v0.210.5；旧截图明确标为历史参考 |
 | Electron package metadata | `package.json` 为 `0.209.0`，`package-lock.json` 为 `0.0.0` | 已对齐到 `0.210.5`；发行工作流仍以 tag 注入最终包版本 |
 | 快速上手 PDF | `output/pdf/快速上手.pdf` 是静态文件，可能落后于 Markdown | **待处理：** 重新生成 PDF，并在发布前核对 PDF 与在线指南一致 |
-| Release 正文 | v0.210.5 Release body 为空 | **待处理：** 通过受控流程只填充空正文，不覆盖已有人工说明 |
+| Release 正文 | 2026-10-23 复核时正文非空，951 字符；包含更新摘要、测试/交付、升级建议与构建记录 | 已补齐；未来仅对确实为空的 Release 使用受控 backfill 工作流，不覆盖已有人工说明 |
 | 历史 Release 对象 | v0.210.1–v0.210.4 标签存在，但当前列表未返回相应 Release | **待维护者确认：** 决定是否恢复这些历史 Release 页面；不改历史 tag、不替换资产 |
 
 ## 4. 后续版本治理规则
@@ -57,7 +57,7 @@
 ## 5. 建议执行顺序
 
 1. 完成本台账与 README/在线指南版本信息同步（本轮已开始）。
-2. 手动运行 Backfill empty release notes 工作流，为 v0.210.5 补齐正文；自动触发已配置为后续新 Release 在正文为空时补充说明。
+2. 已复核 v0.210.5 Release 正文非空，无需再次 backfill；未来只有当 Release 正文确实为空时，才使用受控工作流补齐说明。
 3. 查清 v0.210.1–v0.210.4 Release 对象缺失的原因，再决定是否恢复历史页面。
 4. 重新生成并验收 `output/pdf/快速上手.pdf`。
 5. 审核 `docs/release-audit.md` 等历史审计文件，明确“历史快照 / 当前有效结论”，不把过期描述当作现状。
