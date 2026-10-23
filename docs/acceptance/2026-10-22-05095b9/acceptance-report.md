@@ -20,7 +20,7 @@
 | 实际 HEAD | `05095b9779ec8eb208a26d3043f824ffa591a694`（与指定 SHA 完全一致） |
 | 分支状态 | detached HEAD；`origin/main` 也指向同一 SHA（提交为 main 顶端，且通过 `merge-base --is-ancestor` 校验） |
 | 工作区状态 | `git status --porcelain` 为空（干净） |
-| 提交作者 / 时间 | Martin <<GitHub noreply address redacted>> / Thu Oct 22 18:52:51 2026 +0800 |
+| 提交作者 / 时间 | Martin (GitHub noreply address redacted) / Thu Oct 22 18:52:51 2026 +0800 |
 | 提交说明 | `test: stabilize lock-pause regression suite`（正文：对齐取消相关测试替身与任务控制回调，封库前校验暂停态，Windows 打包校验中加入 Electron 外链单测） |
 
 ## 2. 环境信息
