@@ -68,4 +68,3 @@ jobs:
 
             Please review the rendered pages and confirm screenshots, hyperlinks, and Chinese font rendering before merging.
           add-paths: output/pdf/快速上手.pdf
-          labels: documentation
