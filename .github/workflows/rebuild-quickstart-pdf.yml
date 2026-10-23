@@ -29,7 +29,7 @@ jobs:
       - name: Install Pandoc and XeLaTeX
         run: |
           sudo apt-get update
-          sudo apt-get install --yes pandoc texlive-xetex texlive-lang-chinese fonts-noto-cjk fonts-noto-core poppler-utils fonts-noto-core poppler-utils
+          sudo apt-get install --yes pandoc texlive-xetex texlive-lang-chinese fonts-noto-cjk fonts-noto-core poppler-utils
 
       - name: Generate PDF from the current Markdown guide
         run: |
@@ -40,7 +40,6 @@ jobs:
             --resource-path=docs \
             --pdf-engine=xelatex \
             -V CJKmainfont="Noto Sans CJK SC" \
-            -V mainfont="Noto Sans" \
             -V geometry:margin=18mm \
             -V colorlinks=true \
             -V linkcolor=blue \
