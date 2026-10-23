@@ -23,7 +23,7 @@
 
 ## 验收证据风险
 
-- `05095b9` 的报告和若干日志包含 `C:\Users\Martin\AppData\Local\Temp\...`；截图 About 面板还显示 `C:\Users\Martin\AppData\Local\BiliFavOrganizer`。
+- `05095b9` 的报告和若干日志包含 `<USER_HOME>\AppData\Local\Temp\...`；截图 About 面板还显示 `<USER_HOME>\AppData\Local\BiliFavOrganizer`。
 - `0fd6391` 的报告称文本副本已脱敏，但截图 About 面板同样显示用户数据目录，不能把该目录整体视为已脱敏。
 - 归档策略：保留可公开的报告 / 日志脱敏副本；未完成视觉脱敏的 PNG 暂不复制到主干，单独列为待处理证据。原始来源分支在可用的分支管理权限完成清理前仍存在于远端。
 
