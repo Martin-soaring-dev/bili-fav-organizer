@@ -66,5 +66,5 @@
 - [x] 历史维护 / 分支文档标明历史状态
 - [ ] 重新生成并验收快速上手 PDF
 - [ ] 人工检查公开 Pages 页面内容与移动端布局
-- [ ] 重新核实 v0.210.1–v0.210.4 Release 对象
+- [x] 复核 v0.210.1–v0.210.4 tag refs 存在，四个 Release-by-tag endpoint 均返回 HTTP 404；是否恢复历史 Release 页面待维护者决定
 - [ ] 管理员核实 main protection 与自动删除设置
