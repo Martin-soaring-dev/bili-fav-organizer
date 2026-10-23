@@ -10,7 +10,7 @@
 | 当前版本事实 | [版本台账](maintenance/version-ledger.md) | Git tag、Release 对象、构建运行和发行物核验 |
 | 发布操作 | [发布操作流程](release-process.md) | 稳定版 / Beta 触发、手动重建、发行物和发布后核验 |
 | 分支与文档治理 | [维护治理规范](maintenance/governance.md) | 长期分支规则、PR 门禁、证据归档、文档生命周期与隐私 |
-| 当前交付状态 | [Delivery Console](index.html) | GitHub Pages 交付看板；动态显示内容应与对应源文件核对 |
+| 历史交付快照 | [Delivery Console 历史快照](index.html) | 数据截至 2026-10-21，含 v0.210.0 发布前状态；非实时看板，不用于当前版本 / 发布决策 |
 | 技术架构 | [项目全景历史快照](project-overview.md) | 原始整理日期 2026-10-09；仅作历史参考，不是当前代码事实 |
 | 发布审计 | [发布体系审计](release-audit.md) | 2026-10-11 历史审计；当前操作以发布流程为准 |
 
