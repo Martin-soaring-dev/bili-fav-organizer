@@ -1,0 +1,71 @@
+name: Rebuild Quickstart PDF
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: rebuild-quickstart-pdf
+  cancel-in-progress: false
+
+jobs:
+  build-pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main as source
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run this workflow from main so the PDF is generated from the current published guide."
+          exit 1
+
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+
+      - name: Install Pandoc and XeLaTeX
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes pandoc texlive-xetex texlive-lang-chinese fonts-noto-cjk
+
+      - name: Generate PDF from the current Markdown guide
+        run: |
+          mkdir -p output/pdf
+          pandoc docs/快速上手.md \
+            --from=markdown+raw_html \
+            --standalone \
+            --resource-path=docs \
+            --pdf-engine=xelatex \
+            -V CJKmainfont="Noto Sans CJK SC" \
+            -V mainfont="Noto Sans" \
+            -V geometry:margin=18mm \
+            -V colorlinks=true \
+            -V linkcolor=blue \
+            -o output/pdf/快速上手.pdf
+          test -s output/pdf/快速上手.pdf
+          file output/pdf/快速上手.pdf
+          pdfinfo output/pdf/快速上手.pdf | tee /tmp/quickstart-pdf-info.txt
+          grep -Eq '^Pages: +[1-9][0-9]*$' /tmp/quickstart-pdf-info.txt
+
+      - name: Create pull request with generated PDF
+        uses: peter-evans/create-pull-request@v7
+        with:
+          base: main
+          branch: docs/regenerate-quickstart-pdf
+          delete-branch: true
+          commit-message: "docs: regenerate quickstart PDF"
+          title: "docs: regenerate quickstart PDF"
+          body: |
+            Regenerates `output/pdf/快速上手.pdf` from the current `docs/快速上手.md` using Pandoc + XeLaTeX.
+
+            Validation checks:
+            - PDF file exists and is non-empty.
+            - `pdfinfo` reports a positive page count.
+            - Source is checked out from `main`.
+
+            Please review the rendered pages and confirm screenshots, hyperlinks, and Chinese font rendering before merging.
+          add-paths: output/pdf/快速上手.pdf
+          labels: documentation
