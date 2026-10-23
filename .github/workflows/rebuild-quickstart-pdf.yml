@@ -29,7 +29,7 @@ jobs:
       - name: Install Pandoc and XeLaTeX
         run: |
           sudo apt-get update
-          sudo apt-get install --yes pandoc texlive-xetex texlive-lang-chinese fonts-noto-cjk
+          sudo apt-get install --yes pandoc texlive-xetex texlive-lang-chinese fonts-noto-cjk fonts-noto-core poppler-utils
 
       - name: Generate PDF from the current Markdown guide
         run: |
