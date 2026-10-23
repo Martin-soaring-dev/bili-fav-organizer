@@ -30,8 +30,9 @@
 
 - 在线指南已标明 v0.210.5，且说明旧截图主要参考 v0.208。
 - `output/pdf/快速上手.pdf` 是静态文件，当前文档已明确提示它可能落后。
-- 待从最新 Markdown 重新生成 PDF，核对版本、安装步骤、界面截图、链接、许可 / 升级说明，并确认发布工作流打包的是新 PDF。
-- 在 PDF 重建和验收完成前，不宣称在线指南与发行包 PDF 一致。
+- 已新增手动工作流 [Rebuild Quickstart PDF](../../.github/workflows/rebuild-quickstart-pdf.yml)：从 `main` 的最新 Markdown 使用 Pandoc + XeLaTeX 生成 PDF，检查文件与页数，并创建独立 PR。
+- 本轮未能从当前 GitHub 连接触发 Actions，因此 PDF 文件本身仍未重新生成 / 验收。
+- 合并工作流后，需从 Actions 页面运行它，检查中文字体、截图、分页和链接；确认后再合并生成的 PDF PR。完成前不宣称在线指南与发行包 PDF 一致。
 
 ### P1 — Pages Delivery Console
 
@@ -65,7 +66,7 @@
 - [x] 19 张验收截图归档，manifest 记录 9 + 10 张
 - [x] README 发布触发说明与 workflow YAML 对齐
 - [x] 历史维护 / 分支文档标明历史状态
-- [ ] 重新生成并验收快速上手 PDF
+- [ ] 从 Actions 运行 Rebuild Quickstart PDF，检查渲染结果并合并 PDF 更新 PR
 - [ ] 人工检查公开 Pages 页面内容与移动端布局
 - [x] 复核 v0.210.1–v0.210.4 tag refs 存在，四个 Release-by-tag endpoint 均返回 HTTP 404；是否恢复历史 Release 页面待维护者决定
 - [x] 仓库保护规则按维护者决定排除在当前治理范围之外
