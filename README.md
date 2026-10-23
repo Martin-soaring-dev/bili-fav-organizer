@@ -427,7 +427,7 @@ pyinstaller --noconfirm --clean BiliFavOrganizer.spec
 稳定版（自 v0.209 起）发布 **3 种 Windows 产物、共 6 个附件**：
 `BiliFavOrganizer-Windows-x64-<tag>.zip`（便携版）、`BiliFavOrganizer-Setup-<tag>.exe`（Inno 安装版）、
 `BiliFavOrganizer-neo-Setup-<semver>.exe`（Electron Neo），各附同名 `.sha256` 校验文件。
-`.github/workflows/release-beta.yml` 和 `release-stable.yml` 现在只允许从 `main` 手动构建候选包，不创建 tag 或 Release；版本 tag 作为输入，源码提交绑定到该次 `main` dispatch 的 `GITHUB_SHA`。`.github/workflows/publish-release.yml` 用于显式发布已验证构建的同一批附件。推送 tag 不会自动发布；发布前仍须完成 Windows 安装、迁移、保险库和卸载验收，并由维护者批准。
+推送符合格式的稳定版 tag（`vX.Y` / `vX.Y.Z`）会触发 `.github/workflows/release-stable.yml`；推送 Beta tag（`vX.Y-beta.Z`）会触发 `.github/workflows/release-beta.yml`。这两条工作流会运行测试、构建三种 Windows 发行包并处理对应 Release 资产。手动运行工作流时，源码来自所选分支 / ref，而不是自动切换到输入的 tag；发布已验证候选的独立流程见 `.github/workflows/publish-release.yml`。发布前仍须核对准确源码 SHA、CI、Windows 安装/迁移/保险库/卸载验收与六个发行附件；请以[发布操作流程](docs/release-process.md)为准。
 
 ---
 
