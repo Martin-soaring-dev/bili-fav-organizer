@@ -42,7 +42,8 @@
 ### P2 — 历史 Release 页面
 
 - 版本台账记录 v0.210.1–v0.210.4 的 tag 存在，但先前 Releases 列表未返回相应 Release 对象。
-- 待重新读取 GitHub Releases / tag 事实，区分“没有 Release 页面”与“搜索结果未返回”；未经维护者确认，不创建、覆盖或重建历史 Release。
+- 已分别查询 v0.210.1–v0.210.4 的 Release-by-tag endpoint：均返回 HTTP 404；对应 tag refs 均存在，且解析为台账所列 commit SHA。因此确认这些 tag 存在，但相应 Release 对象当前不存在。
+- 未创建历史 Release。是否恢复历史发布页面涉及发行资产、正文与 prerelease 元数据的重建，不应仅凭 tag 存在就自动操作；待维护者决定。
 
 ### P2 — 仓库管理设置
 
