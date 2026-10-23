@@ -29,10 +29,11 @@
 ### P1 — 快速上手 PDF
 
 - 在线指南已标明 v0.210.5，且说明旧截图主要参考 v0.208。
-- `output/pdf/快速上手.pdf` 是静态文件，当前文档已明确提示它可能落后。
-- 已新增手动工作流 [Rebuild Quickstart PDF](../../.github/workflows/rebuild-quickstart-pdf.yml)：从 `main` 的最新 Markdown 使用 Pandoc + XeLaTeX 生成 PDF，检查文件与页数，并创建独立 PR。
-- 本轮未能从当前 GitHub 连接触发 Actions，因此 PDF 文件本身仍未重新生成 / 验收。
-- 合并工作流后，需从 Actions 页面运行它，检查中文字体、截图、分页和链接；确认后再合并生成的 PDF PR。完成前不宣称在线指南与发行包 PDF 一致。
+- 已从 `main` 的最新 Markdown 重新生成 `output/pdf/快速上手.pdf`；生成结果通过 `file` 与 `pdfinfo` 检查，共 13 页、约 1.44 MB。
+- 更新后的 PDF 已通过 [PR #43](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/43) 合并，合并提交为 `c9f2040844d475682c49b53194c614ca6ca3e96e`；PR CI 已通过。
+- 首次工作流的 PDF 生成步骤成功，但自动创建 PR 步骤因仓库设置未允许 GitHub Actions 创建 PR 而失败。维护者现已开启该设置。
+- 本轮清理工作流中重复的 apt 包依赖，并移除导致 `→` 字形警告的显式 Noto Sans 正文字体覆盖；中文仍使用 Noto Sans CJK SC，拉丁字符回退到 XeLaTeX 默认字体。
+- 待合并本次工作流修正后，再手动运行一次，确认自动 PR 创建端到端成功。PDF 视觉排版、截图与链接仍需人工抽查，不能仅凭文件存在和页数判定完整视觉验收通过。
 
 ### P1 — Pages Delivery Console
 
@@ -66,7 +67,8 @@
 - [x] 19 张验收截图归档，manifest 记录 9 + 10 张
 - [x] README 发布触发说明与 workflow YAML 对齐
 - [x] 历史维护 / 分支文档标明历史状态
-- [ ] 从 Actions 运行 Rebuild Quickstart PDF，检查渲染结果并合并 PDF 更新 PR
+- [x] 重新生成并合并快速上手 PDF（PR #43，13 页；待完成字体 / 页面视觉抽查）
+- [ ] 合并工作流清理后，再运行 Rebuild Quickstart PDF 验证自动创建 PR 的端到端流程
 - [ ] 人工检查公开 Pages 页面内容与移动端布局
 - [x] 复核 v0.210.1–v0.210.4 tag refs 存在，四个 Release-by-tag endpoint 均返回 HTTP 404；是否恢复历史 Release 页面待维护者决定
 - [x] 仓库保护规则按维护者决定排除在当前治理范围之外
