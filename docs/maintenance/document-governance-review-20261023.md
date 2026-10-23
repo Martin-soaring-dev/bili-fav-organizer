@@ -33,7 +33,8 @@
 - 更新后的 PDF 已通过 [PR #43](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/43) 合并，合并提交为 `c9f2040844d475682c49b53194c614ca6ca3e96e`；PR CI 已通过。
 - 首次工作流的 PDF 生成步骤成功，但自动创建 PR 步骤因仓库设置未允许 GitHub Actions 创建 PR 而失败。维护者现已开启该设置。
 - 本轮清理工作流中重复的 apt 包依赖，并移除导致 `→` 字形警告的显式 Noto Sans 正文字体覆盖；中文仍使用 Noto Sans CJK SC，拉丁字符回退到 XeLaTeX 默认字体。
-- 待合并本次工作流修正后，再手动运行一次，确认自动 PR 创建端到端成功。PDF 视觉排版、截图与链接仍需人工抽查，不能仅凭文件存在和页数判定完整视觉验收通过。
+- 工作流清理已通过 [PR #44](https://github.com/Martin-soaring-dev/bili-fav-organizer/pull/44) 合并，提交为 `1dd0e42023eedad0a07c8c7abb98d16de31036ba`；删除了重复 apt 依赖，并移除触发 `→` 字形警告的显式 Noto Sans 正文字体覆盖。
+- 维护者已开启 GitHub Actions 创建 PR 权限，但尚未在合并后的工作流版本上重新运行，因此自动 PR 创建端到端结果仍待验证。PDF 视觉排版、箭头、截图与链接仍需人工抽查，不能仅凭文件存在和页数判定完整视觉验收通过。
 
 ### P1 — Pages Delivery Console
 
@@ -63,12 +64,12 @@
 
 ## 5. 收尾验收清单
 
-- [x] 远端仅保留 main
+- [ ] 清理已合并的辅助治理分支；本次远端复核发现仍有 4 条 `docs/*` 辅助分支，当前并非仅保留 `main`
 - [x] 19 张验收截图归档，manifest 记录 9 + 10 张
 - [x] README 发布触发说明与 workflow YAML 对齐
 - [x] 历史维护 / 分支文档标明历史状态
 - [x] 重新生成并合并快速上手 PDF（PR #43，13 页；待完成字体 / 页面视觉抽查）
-- [ ] 合并工作流清理后，再运行 Rebuild Quickstart PDF 验证自动创建 PR 的端到端流程
+- [ ] 从 `main` 重新运行 Rebuild Quickstart PDF，验证自动创建 PR 的端到端流程
 - [ ] 人工检查公开 Pages 页面内容与移动端布局
 - [x] 复核 v0.210.1–v0.210.4 tag refs 存在，四个 Release-by-tag endpoint 均返回 HTTP 404；是否恢复历史 Release 页面待维护者决定
 - [x] 仓库保护规则按维护者决定排除在当前治理范围之外
