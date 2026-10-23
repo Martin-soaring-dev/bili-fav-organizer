@@ -1,0 +1,17 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-llo1et7r\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-llo1et7r\profile
+python.exe : test_start_runs_recovery_hook_before_dispatch_with_ownership_held 
+(scheduler.test_scheduler.SchedulerTests.test_start_runs_recovery_hook_before_d
+ispatch_with_ownership_held) ... ok
+所在位置 行:519 字符: 3
++   & $Py tools\run_isolated_tests.py --test $t.test 2>&1 | Out-File -F ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_start_runs...ip_held) ... ok 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+----------------------------------------------------------------------
+Ran 1 test in 0.004s
+
+OK

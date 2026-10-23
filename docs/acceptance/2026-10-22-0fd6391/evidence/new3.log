@@ -1,0 +1,17 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-nza6r9jx\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-nza6r9jx\profile
+python.exe : test_scan_route_persists_and_runs_through_the_scheduler (scheduler
+.test_server_integration.ServerSchedulerIntegrationTests.test_scan_route_persis
+ts_and_runs_through_the_scheduler) ... ok
+所在位置 行:519 字符: 3
++   & $Py tools\run_isolated_tests.py --test $t.test 2>&1 | Out-File -F ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_scan_route...heduler) ... ok 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+----------------------------------------------------------------------
+Ran 1 test in 4.721s
+
+OK

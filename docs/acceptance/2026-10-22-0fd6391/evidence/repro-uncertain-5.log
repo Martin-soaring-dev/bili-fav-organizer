@@ -1,0 +1,26 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-cr155krv\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-cr155krv\profile
+python.exe : 2026-10-22 22:27:18,106 [server] 渚涘簲鍟?妯″瀷鍒濆鍖栧け璐ワ細鏁版嵁搴撳綋鍓嶄笉鍏佽鏅€氳闂紙鐘舵€侊細RECOVERY_REQUIRED锛?
+所在位置 行:518 字符: 5
++     & $Py tools\run_isolated_tests.py --test $c.test 2>&1 | Out-File  ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-10-22 22:2...VERY_REQUIRED锛?:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_uncertain_cleanup_is_never_replayed (test_scan_troubleshooting.ScanTroubleshootingTests.test_uncertain_cleanup_is_
+never_replayed) ... 2026-10-22 22:27:19,000 [core.scheduler.scheduler] Task ec5256301fb8419a831db92bd65ce0c2 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-cr155krv\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-cr155krv\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.675s
+
+OK
+[store] 鏁版嵁搴撳惎鍔ㄦ牎楠?杩佺Щ鏈畬鎴愶紝鏅€氳闂凡鍏抽棴锛氬€欓€夋暟鎹簱缂哄皯蹇呰涓氬姟琛紝鎷掔粷鑷姩琛ュ缓锛歛nalyses, app_state, folder_items, folder_profiles, folder_scan_state, folders, models, plans, providers, scan_stage, videos

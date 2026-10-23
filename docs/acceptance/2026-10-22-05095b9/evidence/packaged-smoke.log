@@ -1,0 +1,9 @@
+﻿$ "<USER_HOME>\AppData\Local\Temp\bfo-acceptance-20261022-190221\.bfo-package-smoke-local\checkout\dist\electron\win-unpacked\BiliFav Organizer.exe" --remote-debugging-port=19222 --inspect=19229
+python.exe : PACKAGED_SMOKE_ERROR=RuntimeError: Electron exited before readiness (code 2147483651).
+所在位置 行:523 字符: 1
++ & $Py tools\run_isolated_packaged_smoke.py $Workspace --profile-name  ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (PACKAGED_SMOKE_...de 2147483651).:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+PACKAGED_SMOKE_EVIDENCE={"workspace": "<USER_HOME>\\AppData\\Local\\Temp\\bfo-acceptance-20261022-190221\\.bfo-package-smoke-local", "isolated_localappdata": "<USER_HOME>\\AppData\\Local\\Temp\\bfo-acceptance-20261022-190221\\.bfo-package-smoke-local\\launch-profile-local", "shell_log": "<USER_HOME>\\AppData\\Local\\Temp\\bfo-acceptance-20261022-190221\\.bfo-package-smoke-local\\launch-profile-local\\BiliFavOrganizer\\shell.log", "electron_exit_code": 2147483651, "electron_exit_confirmed": true, "shell_smoke_exit_code": null, "shell_quit_exit_code": null, "profile_file_count": 10, "sqlite_created": false, "config_created": false}

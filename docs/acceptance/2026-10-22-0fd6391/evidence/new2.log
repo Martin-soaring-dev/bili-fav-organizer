@@ -1,0 +1,17 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-ss0i6ii8\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-ss0i6ii8\profile
+python.exe : test_remote_operation_recovery_runs_before_scheduler_dispatch (sch
+eduler.test_server_integration.ServerSchedulerIntegrationTests.test_remote_oper
+ation_recovery_runs_before_scheduler_dispatch) ... ok
+所在位置 行:519 字符: 3
++   & $Py tools\run_isolated_tests.py --test $t.test 2>&1 | Out-File -F ...
++   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_remote_ope...ispatch) ... ok 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+----------------------------------------------------------------------
+Ran 1 test in 4.771s
+
+OK

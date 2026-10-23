@@ -1,0 +1,36 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-ic3e3y5a\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-ic3e3y5a\profile
+python.exe : 2026-10-22 22:25:47,890 [server] 渚涘簲鍟?妯″瀷鍒濆鍖栧け璐ワ細鏁版嵁搴撳綋鍓嶄笉鍏佽鏅€氳闂紙鐘舵€侊細RECOVERY_REQUIRED锛?
+所在位置 行:518 字符: 5
++     & $Py tools\run_isolated_tests.py --test $c.test 2>&1 | Out-File  ...
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-10-22 22:2...VERY_REQUIRED锛?:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+test_rate_limit_keeps_issue_and_records_failure (test_scan_troubleshooting.ScanTroubleshootingTests.test_rate_limit_kee
+ps_issue_and_records_failure) ... 2026-10-22 22:25:49,167 [core.scheduler.scheduler] Task b4797e4f496d4d90874b4008c2f30
+ce6 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-ic3e3y5a\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-ic3e3y5a\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 鏀惰棌澶规暟閲忎笉涓€鑷达紝璇峰厛澶勭悊鎵弿寮傚父鎻愮ず
+2026-10-22 22:25:49,875 [core.scheduler.scheduler] Task ea7a97ba73254fe3b08612fda5576dc0 failed
+Traceback (most recent call last):
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-ic3e3y5a\checkout\core\sched
+uler\scheduler.py", line 873, in _run_task
+    execute(context)
+  File "<ACCEPTANCE_ROOT>\.bfo-isolated-tests-ic3e3y5a\checkout\server.py"
+, line 2167, in execute
+    raise RuntimeError(str(error))
+RuntimeError: 椋庢帶锛氶鎺э紝璇风◢鍚庨噸璇?
+ok
+
+----------------------------------------------------------------------
+Ran 1 test in 2.023s
+
+OK
+[store] 鏁版嵁搴撳惎鍔ㄦ牎楠?杩佺Щ鏈畬鎴愶紝鏅€氳闂凡鍏抽棴锛氬€欓€夋暟鎹簱缂哄皯蹇呰涓氬姟琛紝鎷掔粷鑷姩琛ュ缓锛歛nalyses, app_state, folder_items, folder_profiles, folder_scan_state, folders, models, plans, providers, scan_stage, videos

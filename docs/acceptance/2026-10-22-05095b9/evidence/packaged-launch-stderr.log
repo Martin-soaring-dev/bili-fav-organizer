@@ -1,0 +1,17 @@
+[12676:1022/200712.909:ERROR:electron\shell\common\node_bindings.cc:492] Most NODE_OPTIONs are not supported in packaged apps. See documentation for more details.
+[12676:1022/200712.909:ERROR:electron\shell\common\node_bindings.cc:492] Most NODE_OPTIONs are not supported in packaged apps. See documentation for more details.
+Debugger listening on ws://127.0.0.1:19229/bb7ece16-9c6d-4b03-a399-9f0558830093
+For help, see: https://nodejs.org/learn/getting-started/debugging
+[12676:1022/200713.013:ERROR:net\base\network_change_notifier_win.cc:213] WSALookupServiceBegin failed with: 10108
+
+DevTools listening on ws://127.0.0.1:19222/devtools/browser/8b334ddb-ffd4-4fe5-aa25-763bd3ff3f16
+[12676:1022/200713.192:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.304:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.400:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.494:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.600:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.680:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.783:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.870:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.957:ERROR:content\browser\gpu\gpu_process_host.cc:1035] GPU process exited unexpectedly: exit_code=-1073741819
+[12676:1022/200713.957:FATAL:content\browser\gpu\gpu_data_manager_impl_private.cc:417] GPU process isn't usable. Goodbye.

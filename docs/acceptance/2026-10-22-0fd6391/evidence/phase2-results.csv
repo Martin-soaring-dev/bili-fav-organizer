@@ -1,0 +1,4 @@
+﻿"id","test","exit","seconds","log"
+"new1","scheduler.test_scheduler.SchedulerTests.test_start_runs_recovery_hook_before_dispatch_with_ownership_held","0","4.2","<ACCEPTANCE_ROOT>\acceptance-evidence\new1.log"
+"new2","scheduler.test_server_integration.ServerSchedulerIntegrationTests.test_remote_operation_recovery_runs_before_scheduler_dispatch","0","8.7","<ACCEPTANCE_ROOT>\acceptance-evidence\new2.log"
+"new3","scheduler.test_server_integration.ServerSchedulerIntegrationTests.test_scan_route_persists_and_runs_through_the_scheduler","0","8.6","<ACCEPTANCE_ROOT>\acceptance-evidence\new3.log"

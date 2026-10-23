@@ -1,0 +1,38 @@
+﻿key3: PASS=12/12  FAIL=0
+
+Test Iteration Result Seconds ReadonlyHit Summary
+---- --------- ------ ------- ----------- -------
+key3         1 PASS      10.3       False OK     
+key3         2 PASS      10.5       False OK     
+key3         3 PASS      10.2       False OK     
+key3         4 PASS      10.8       False OK     
+key3         5 PASS      10.6       False OK     
+key3         6 PASS      10.7       False OK     
+key3         7 PASS      10.8       False OK     
+key3         8 PASS      10.7       False OK     
+key3         9 PASS      10.8       False OK     
+key3        10 PASS        11       False OK     
+key3        11 PASS      10.7       False OK     
+key3        12 PASS      10.7       False OK     
+
+
+
+key4: PASS=12/12  FAIL=0
+
+Test Iteration Result Seconds ReadonlyHit Summary
+---- --------- ------ ------- ----------- -------
+key4         1 PASS      10.8       False OK     
+key4         2 PASS      11.1       False OK     
+key4         3 PASS      10.9       False OK     
+key4         4 PASS      11.4       False OK     
+key4         5 PASS      10.9       False OK     
+key4         6 PASS      11.1       False OK     
+key4         7 PASS      11.1       False OK     
+key4         8 PASS        11       False OK     
+key4         9 PASS      11.2       False OK     
+key4        10 PASS      11.3       False OK     
+key4        11 PASS      11.2       False OK     
+key4        12 PASS      11.2       False OK     
+
+
+

@@ -1,0 +1,15 @@
+﻿Isolated checkout: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-bna4ph70\checkout
+Isolated LOCALAPPDATA: <ACCEPTANCE_ROOT>\.bfo-isolated-tests-bna4ph70\profile
+python.exe : test_vault_lock_interrupts_bilibili_rate_limit_backoff_and_pauses_task (scheduler.test_server_integration.
+ServerSchedulerIntegrationTests.test_vault_lock_interrupts_bilibili_rate_limit_backoff_and_pauses_task) ... ok
+所在位置 <ACCEPTANCE_ROOT>\acceptance-evidence\phase3-loop.ps1:14 字符: 9
++         & $Py tools\run_isolated_tests.py --test $case.test 2>&1 |
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (test_vault_lock...es_task) ... ok:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+----------------------------------------------------------------------
+Ran 1 test in 6.378s
+
+OK

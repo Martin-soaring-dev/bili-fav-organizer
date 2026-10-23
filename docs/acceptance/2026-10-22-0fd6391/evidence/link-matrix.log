@@ -1,0 +1,8 @@
+PASS expect=true actual=true https://github.com/<user>-soaring-dev/bili-fav-organizer/releases/latest
+PASS expect=true actual=true https://github.com/<user>-soaring-dev/bili-fav-organizer/releases/tag/v0.210.4
+PASS expect=false actual=false http://github.com/<user>-soaring-dev/bili-fav-organizer/releases/latest
+PASS expect=false actual=false https://github.com/<user>-soaring-dev/another-repo/releases/latest
+PASS expect=false actual=false https://github.com.evil.example/<user>-soaring-dev/bili-fav-organizer/releases/latest
+PASS expect=false actual=false https://github.com/<user>-soaring-dev/bili-fav-organizer/issues/12
+PASS expect=false actual=false not a URL
+MATRIX_FAILURES=0
