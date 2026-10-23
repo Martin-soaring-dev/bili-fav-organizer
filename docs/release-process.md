@@ -20,7 +20,7 @@
 2. Inno Setup 安装程序与对应 SHA-256 文件；
 3. Electron Neo 安装程序与对应 SHA-256 文件。
 
-便携包还会包含 `packaging/使用说明.txt`、`output/pdf/快速上手.pdf`、许可和声明文件。发布前应确保在线快速上手指南与 PDF 内容一致。
+便携包还会包含 `packaging/使用说明.txt`、`output/pdf/快速上手.pdf`、许可和声明文件。发布前应确保在线快速上手指南与 PDF 内容一致。可在 GitHub Actions 手动运行 [Rebuild Quickstart PDF](../.github/workflows/rebuild-quickstart-pdf.yml)，从 `main` 的 Markdown 生成 PDF 并创建独立 PR；审阅渲染后的中文字体、截图、分页与链接后再合并。
 
 构建包会作为 GitHub Actions artifact 保留 14 天；Release 工作流还会上传发行附件。工作流的发布步骤允许同名附件被覆盖，因此对已发布版本重跑工作流前，必须明确确认重建的源码和覆盖行为。
 
