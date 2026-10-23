@@ -29,6 +29,7 @@
 - [可靠性维护任务清单（历史执行档案）](testing/reliability-maintenance-task-list.md)
 - [验收证据库](testing/evidence/)
 - [2026-10-22 验收分支归档说明](testing/evidence/20261022-acceptance-branch-archive.md)
+- [2026-10-23 分支治理复核补充](maintenance/branch-cleanup-recheck-20261023.md)：修复分支清理前的差异核对、验收截图公开风险与管理权限待办
 
 ### 如何判断文档是否有效
 
